@@ -19,32 +19,32 @@ const vuetify = createVuetify({
     themes: {
       light: {
         colors: {
-          primary: '#6750A4',
-          secondary: '#625B71',
-          accent: '#E8DEF8',
-          error: '#F2B8B5',
-          warning: '#FFD43B',
-          success: '#81C995',
-          info: '#4DABF7',
-          background: '#FEF7FF',
+          primary: '#8B7E74',      // 灰褐色主色
+          secondary: '#A8988E',    // 浅灰褐色
+          accent: '#C4B5A8',       // 更浅的灰褐色
+          error: '#E57373',
+          warning: '#FFB74D',
+          success: '#81C784',
+          info: '#64B5F6',
+          background: '#F5F0EB',   // 米白背景
           surface: '#FFFFFF',
-          'surface-variant': '#F7F2FA',
+          'surface-variant': '#F0EBE6',
           'on-surface': '#1C1B1F',
           'on-surface-variant': '#49454F',
         },
       },
       dark: {
         colors: {
-          primary: '#D0BCFF',
-          secondary: '#CCC2DC',
-          accent: '#4A4458',
-          error: '#F2B8B5',
-          warning: '#FDD663',
-          success: '#81C995',
-          info: '#4DABF7',
-          background: '#1C1B1F',
-          surface: '#2B2930',
-          'surface-variant': '#2B2930',
+          primary: '#A8988E',      // 深色模式下略亮
+          secondary: '#8B7E74',
+          accent: '#7A6E64',
+          error: '#EF5350',
+          warning: '#FFA726',
+          success: '#66BB6A',
+          info: '#42A5F5',
+          background: '#1E1E1E',
+          surface: '#2C2C2C',
+          'surface-variant': '#2C2C2C',
           'on-surface': '#E6E1E5',
           'on-surface-variant': '#CAC4D0',
         },

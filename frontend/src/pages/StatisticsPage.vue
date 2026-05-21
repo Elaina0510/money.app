@@ -282,14 +282,15 @@ function getDateRange() {
 async function loadData() {
   const range = getDateRange()
   try {
+    const groupBy = periodType.value === 'monthly' ? 'day' : 'month'
     const [s, c, t] = await Promise.all([
-      getSummary({ ...range, period: periodType.value }),
-      getByCategory(range),
-      getTrend({ ...range, period: periodType.value }),
+      getSummary({ ...range, period: periodType.value === 'monthly' ? 'month' : 'year' }),
+      getByCategory({ ...range, type: 'expense' }),
+      getTrend({ ...range, group_by: groupBy }),
     ])
     summary.value = s
-    categoryStats.value = (c || []).filter(item => item.type === 'expense')
-    trendData.value = t || []
+    categoryStats.value = (c?.items || []).filter(item => item.type === 'expense')
+    trendData.value = t?.items || []
   } catch (e) {
     console.error('Statistics load error:', e)
   }

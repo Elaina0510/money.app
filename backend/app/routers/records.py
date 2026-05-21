@@ -36,9 +36,9 @@ async def list_records(
     end_date: str | None = Query(None, description="结束日期 YYYY-MM-DD"),
     category_id: int | None = Query(None, description="分类 ID"),
     type: str | None = Query(None, description="类型: income/expense"),
-    tag: str | None = Query(None, description="标签关键词"),
-    keyword: str | None = Query(None, description="全文搜索"),
-    sort_by: str = Query("date", description="排序字段: date/amount/created_at"),
+    tag_id: int | None = Query(None, description="标签 ID"),
+    keyword: str | None = Query(None, description="全文搜索(备注)"),
+    sort_by: str = Query("consume_time", description="排序字段: consume_time/amount"),
     sort_order: str = Query("desc", description="排序方向: asc/desc"),
     db: AsyncSession = Depends(get_session),
 ):
@@ -51,7 +51,7 @@ async def list_records(
         end_date=end_date,
         category_id=category_id,
         type_filter=type,
-        tag=tag,
+        tag_id=tag_id,
         keyword=keyword,
         sort_by=sort_by,
         sort_order=sort_order,
@@ -87,10 +87,13 @@ async def update_record(
     db: AsyncSession = Depends(get_session),
 ):
     """Update a record."""
-    record = await record_service.update_record(db, record_id, data)
-    if not record:
-        return error_response(Code.NOT_FOUND, "记录不存在")
-    return success_response(data=record, message="记录更新成功")
+    try:
+        record = await record_service.update_record(db, record_id, data)
+        if not record:
+            return error_response(Code.NOT_FOUND, "记录不存在")
+        return success_response(data=record, message="记录更新成功")
+    except ValueError as e:
+        return error_response(Code.PARAM_ERROR, str(e))
 
 
 @router.delete("/{record_id}")

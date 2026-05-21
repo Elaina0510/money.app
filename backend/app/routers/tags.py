@@ -20,17 +20,32 @@ async def list_tags(db: AsyncSession = Depends(get_session)):
     )
 
 
+@router.get("/{tag_id}")
+async def get_tag(
+    tag_id: int,
+    db: AsyncSession = Depends(get_session),
+):
+    """Get a single tag with its associated category."""
+    tag = await tag_service.get_tag(db, tag_id)
+    if not tag:
+        return error_response(Code.NOT_FOUND, "标签不存在")
+    return success_response(data=tag)
+
+
 @router.post("")
 async def create_tag(
     data: TagCreate,
     db: AsyncSession = Depends(get_session),
 ):
     """Create a new tag."""
-    tag = await tag_service.create_tag(db, data)
-    return success_response(
-        data=TagResponse.model_validate(tag, from_attributes=True).model_dump(),
-        message="标签创建成功",
-    )
+    try:
+        tag = await tag_service.create_tag(db, data)
+        return success_response(
+            data=TagResponse.model_validate(tag, from_attributes=True).model_dump(),
+            message="标签创建成功",
+        )
+    except ValueError as e:
+        return error_response(Code.PARAM_ERROR, str(e))
 
 
 @router.put("/{tag_id}")
@@ -40,13 +55,16 @@ async def update_tag(
     db: AsyncSession = Depends(get_session),
 ):
     """Update a tag."""
-    tag = await tag_service.update_tag(db, tag_id, data)
-    if not tag:
-        return error_response(Code.NOT_FOUND, "标签不存在")
-    return success_response(
-        data=TagResponse.model_validate(tag, from_attributes=True).model_dump(),
-        message="标签更新成功",
-    )
+    try:
+        tag = await tag_service.update_tag(db, tag_id, data)
+        if not tag:
+            return error_response(Code.NOT_FOUND, "标签不存在")
+        return success_response(
+            data=TagResponse.model_validate(tag, from_attributes=True).model_dump(),
+            message="标签更新成功",
+        )
+    except ValueError as e:
+        return error_response(Code.PARAM_ERROR, str(e))
 
 
 @router.delete("/{tag_id}")

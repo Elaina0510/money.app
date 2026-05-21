@@ -75,8 +75,8 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Money App - 个人记账程序",
-    description="个人记账程序 API V1.0",
-    version="1.0.0",
+    description="个人记账程序 API V1.1",
+    version="1.1.0",
     lifespan=lifespan,
 )
 

@@ -6,7 +6,7 @@
       <p class="page-subtitle">共 {{ totalCount }} 条记录</p>
     </div>
 
-    <!-- Filter Bar - Collapsible -->
+    <!-- Filter Bar -->
     <v-card class="pa-3 mb-3 filter-card" rounded="xl">
       <div class="d-flex align-center ga-2">
         <v-text-field
@@ -93,23 +93,10 @@
     </div>
 
     <div v-else>
-      <!-- Date group headers would be nice, but for simplicity, flat list -->
       <div v-for="record in records" :key="record.id" class="mb-2">
-        <v-card
-          rounded="xl"
-          class="record-card"
-          :class="{ 'selected-mode': selected.includes(record.id) }"
-        >
-          <v-list-item @click="toggleSelect(record.id)">
+        <v-card rounded="xl" class="record-card">
+          <v-list-item @click="goToDetail(record.id)">
             <template v-slot:prepend>
-              <v-checkbox
-                v-model="selected"
-                :value="record.id"
-                hide-details
-                density="compact"
-                class="mr-2"
-                @click.stop
-              />
               <v-avatar
                 :color="record.type === 'expense' ? '#FFE8E8' : '#E8FFF3'"
                 size="40"
@@ -121,14 +108,13 @@
               </v-avatar>
             </template>
             <v-list-item-title class="text-body-2 font-weight-medium">
-              {{ record.category_name || '未分类' }}
+              <v-avatar size="24" color="rgba(139, 126, 116, 0.12)" class="mr-1">
+                <v-icon size="14" color="#8B7E74">{{ record.category_icon || 'mdi-circle' }}</v-icon>
+              </v-avatar>
+              {{ record.tag?.name || record.category_name || '未分类' }}
             </v-list-item-title>
             <v-list-item-subtitle class="d-flex align-center text-caption mt-1">
-              <span>{{ formatDate(record.date, 'MM/DD') }}</span>
-              <v-icon size="x-small" class="mx-1" style="opacity: 0.3">mdi-circle-small</v-icon>
-              <span v-if="record.tags?.length" class="text-truncate" style="max-width: 120px;">
-                {{ record.tags.join(', ') }}
-              </span>
+              <span>{{ record.consume_time?.substring(0, 16) || '' }}</span>
               <v-icon v-if="record.attachment_ids?.length" size="x-small" class="ml-1">
                 mdi-paperclip
               </v-icon>
@@ -136,11 +122,12 @@
             <template v-slot:append>
               <div class="d-flex align-center">
                 <div
-                  class="font-weight-bold text-body-1"
+                  class="font-weight-bold text-body-1 mr-2"
                   :style="{ color: record.type === 'expense' ? '#FF6B6B' : '#20C997' }"
                 >
-                  {{ record.type === 'expense' ? '-' : '+' }}{{ formatAmount(record.amount) }}
+                  {{ record.type === 'expense' ? '-' : '+' }}{{ record.amount }}
                 </div>
+                <v-icon size="small" color="grey-lighten-1">mdi-chevron-right</v-icon>
               </div>
             </template>
           </v-list-item>
@@ -173,7 +160,6 @@ import { useRouter } from 'vue-router'
 import { getRecords } from '@/api/records'
 import { getCategories } from '@/api/categories'
 import { useRecordsStore } from '@/stores/useRecordsStore'
-import { formatAmount, formatDate } from '@/utils/format'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const router = useRouter()
@@ -205,13 +191,8 @@ const categoryOptions = computed(() => {
   return list.concat(categories.value)
 })
 
-function toggleSelect(id) {
-  const idx = selected.value.indexOf(id)
-  if (idx >= 0) {
-    selected.value.splice(idx, 1)
-  } else {
-    selected.value.push(id)
-  }
+function goToDetail(id) {
+  router.push(`/detail/${id}`)
 }
 
 async function search() {
@@ -296,11 +277,8 @@ onMounted(async () => {
 
 .record-card:hover {
   border-color: rgba(var(--v-theme-primary), 0.2);
-}
-
-.selected-mode {
-  border: 1px solid rgb(var(--v-theme-primary)) !important;
-  background: rgba(var(--v-theme-primary), 0.03);
+  transform: translateX(2px);
+  cursor: pointer;
 }
 
 .batch-bar {

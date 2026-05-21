@@ -40,7 +40,8 @@
           </div>
           <div class="stat-item">
             <div class="stat-label">笔数</div>
-            <div class="stat-value">{{ summary?.month_count || 0 }}</div>
+
+            <div class="stat-value">{{ summary?.transaction_count || 0 }}</div>
           </div>
           <div class="stat-item">
             <div class="stat-label">日均</div>
@@ -50,23 +51,23 @@
       </div>
     </v-card>
 
-    <!-- Today's Summary Cards Row -->
+    <!-- Period Summary Cards Row -->
     <v-row class="mb-4" dense>
       <v-col cols="6">
-        <v-card class="pa-4 text-center today-card today-expense" rounded="xl">
+        <v-card class="pa-4 text-center today-card" rounded="xl">
           <v-icon color="#FF6B6B" size="28" class="mb-1">mdi-trending-down</v-icon>
-          <div class="text-caption text-grey">今日支出</div>
+          <div class="text-caption text-grey">期间支出</div>
           <div class="text-h6 font-weight-bold" style="color: #FF6B6B">
-            {{ formatAmount(summary?.today_expense || 0) }}
+            {{ formatAmount(summary?.total_expense || 0) }}
           </div>
         </v-card>
       </v-col>
       <v-col cols="6">
-        <v-card class="pa-4 text-center today-card today-income" rounded="xl">
+        <v-card class="pa-4 text-center today-card" rounded="xl">
           <v-icon color="#20C997" size="28" class="mb-1">mdi-trending-up</v-icon>
-          <div class="text-caption text-grey">今日收入</div>
+          <div class="text-caption text-grey">期间收入</div>
           <div class="text-h6 font-weight-bold" style="color: #20C997">
-            {{ formatAmount(summary?.today_income || 0) }}
+            {{ formatAmount(summary?.total_income || 0) }}
           </div>
         </v-card>
       </v-col>
@@ -169,6 +170,14 @@ import { getRecords } from '@/api/records'
 import { getSummary, getByCategory } from '@/api/statistics'
 import { formatAmount, formatDate, getCurrentMonthRange } from '@/utils/format'
 import dayjs from 'dayjs'
+function recordTypeColor(name) {
+  const colors = ['#FFE8E8', '#FFF3E0', '#FFF8E1', '#E8F5E9', '#E0F7FA', '#E3F2FD', '#EDE7F6', '#FCE4EC']
+  let hash = 0
+  for (let i = 0; i < (name || '').length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash)
+  }
+  return colors[Math.abs(hash) % colors.length]
+}
 
 const router = useRouter()
 const records = ref([])
@@ -184,17 +193,17 @@ const currentDateStr = computed(() => {
 })
 
 const totalMonthExpense = computed(() => {
-  const val = summary.value?.month_expense || 0
+  const val = summary.value?.total_expense || 0
   return val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 })
 
-const formatIncome = computed(() => {
-  const val = summary.value?.month_income || 0
+const formatIncomeStr = computed(() => {
+  const val = summary.value?.total_income || 0
   return val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 })
 
 const dailyAverage = computed(() => {
-  const exp = summary.value?.month_expense || 0
+  const exp = summary.value?.total_expense || 0
   const day = dayjs().date()
   if (day === 0) return '0.00'
   return (exp / day).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })

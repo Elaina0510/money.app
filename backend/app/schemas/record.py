@@ -9,9 +9,15 @@ class RecordCreate(BaseModel):
     amount: float = Field(..., gt=0, le=99999999.99)
     type: str = Field(..., pattern=r"^(income|expense)$")
     category_id: int = Field(..., gt=0)
-    tags: list[str] = Field(default_factory=list)
-    date: str = Field(..., pattern=r"^\d{4}-\d{2}-\d{2}$")
-    created_at: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+    # v1.1 变更：从 tags: list[str] 改为 tag_id: int | None
+    tag_id: int | None = Field(default=None, gt=0)
+    # v1.1 变更：从 date 改为 consume_time
+    consume_time: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$",
+    )
+    # v1.1 新增
+    note: str | None = Field(default=None, max_length=500)
 
 
 class RecordUpdate(BaseModel):
@@ -20,9 +26,12 @@ class RecordUpdate(BaseModel):
     amount: float | None = Field(default=None, gt=0, le=99999999.99)
     type: str | None = Field(default=None, pattern=r"^(income|expense)$")
     category_id: int | None = Field(default=None, gt=0)
-    tags: list[str] | None = Field(default=None)
-    date: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
-    created_at: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$")
+    tag_id: int | None = Field(default=None, gt=0)
+    consume_time: str | None = Field(
+        default=None,
+        pattern=r"^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$",
+    )
+    note: str | None = Field(default=None, max_length=500)
 
 
 class RecordResponse(BaseModel):
@@ -33,9 +42,11 @@ class RecordResponse(BaseModel):
     type: str
     category_id: int
     category_name: str = ""
-    tags: list[str] = []
+    category_icon: str = ""  # v1.1 新增
+    tag: dict | None = None  # v1.1 变更：替换 tags: list[str]
     attachment_ids: list[int] = []
-    date: str
+    consume_time: str  # v1.1 变更：替换 date
+    note: str | None = None  # v1.1 新增
     created_at: str
     updated_at: str
 

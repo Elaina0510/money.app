@@ -23,6 +23,7 @@ export const useRecordsStore = defineStore('records', () => {
     end_date: '',
     category_id: null,
     type: '',
+    tag_id: null,
     keyword: '',
   })
   const templates = ref([])

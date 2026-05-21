@@ -255,7 +255,8 @@ const deletingCategory = ref(null)
 // Tag CRUD
 const showTagDialog = ref(false)
 const savingTag = ref(false)
-const tagForm = reactive({ name: '' })
+
+const tagForm = reactive({ name: '', category_id: null })
 
 // Delete tag
 const showDeleteTagDialog = ref(false)

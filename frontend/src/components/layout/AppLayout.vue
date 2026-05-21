@@ -172,8 +172,8 @@ function goToAddRecord() {
 }
 
 onMounted(() => {
-  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-  appStore.setDarkMode(prefersDark)
+  // Default to light mode regardless of system preference
+  appStore.setDarkMode(false)
 })
 </script>
 

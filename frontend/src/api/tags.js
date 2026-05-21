@@ -4,6 +4,10 @@ export function getTags() {
   return request.get('/tags')
 }
 
+export function getTag(id) {
+  return request.get(`/tags/${id}`)
+}
+
 export function createTag(data) {
   return request.post('/tags', data)
 }

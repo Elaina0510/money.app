@@ -7,7 +7,6 @@ from sqlmodel import select, func, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.record import Record
-from app.models.record_tag import RecordTag
 from app.models.tag import Tag
 from app.models.category import Category
 
@@ -18,21 +17,26 @@ async def get_summary(
     start_date: str,
     end_date: str,
 ) -> dict[str, Any]:
-    """Get income/expense summary for a given period."""
+    """Get income/expense summary for a given period.
+    Uses consume_time for date filtering (v1.1).
+    """
+    # Adjust end_date to include full day
+    end_filter = end_date + " 23:59" if len(end_date) <= 10 else end_date
+
     query = select(
         func.coalesce(
-            func.sum(Record.amount).filter(Record.type == "income"), 0
-        ),
+            func.sum(Record.amount).filter(Record.type == "income"), 0.0
+        ).label("total_income"),
         func.coalesce(
-            func.sum(Record.amount).filter(Record.type == "expense"), 0
-        ),
-        func.count(Record.id),
-    ).where(Record.date >= start_date, Record.date <= end_date)
+            func.sum(Record.amount).filter(Record.type == "expense"), 0.0
+        ).label("total_expense"),
+        func.count(Record.id).label("transaction_count"),
+    ).where(Record.consume_time >= start_date, Record.consume_time <= end_filter)
 
     result = await db.exec(query)
     row = result.one()
-    total_income = float(row[0] or 0)
-    total_expense = float(row[1] or 0)
+    total_income = float(row[0] if row[0] is not None else 0)
+    total_expense = float(row[1] if row[1] is not None else 0)
     transaction_count = row[2] or 0
 
     return {
@@ -53,13 +57,15 @@ async def get_category_stats(
     end_date: str,
 ) -> dict[str, Any]:
     """Get expense statistics by category."""
+    end_filter = end_date + " 23:59" if len(end_date) <= 10 else end_date
+
     # Get total for percentage calculation
     total_stmt = select(
-        func.coalesce(func.sum(Record.amount), 0)
+        func.coalesce(func.sum(Record.amount), 0.0).label("total")
     ).where(
         Record.type == type_filter,
-        Record.date >= start_date,
-        Record.date <= end_date,
+        Record.consume_time >= start_date,
+        Record.consume_time <= end_filter,
     )
     total_result = await db.exec(total_stmt)
     total_amount = float(total_result.one() or 0)
@@ -68,13 +74,13 @@ async def get_category_stats(
     stmt = (
         select(
             Record.category_id,
-            func.sum(Record.amount),
-            func.count(Record.id),
+            func.coalesce(func.sum(Record.amount), 0.0).label("total"),
+            func.count(Record.id).label("count"),
         )
         .where(
             Record.type == type_filter,
-            Record.date >= start_date,
-            Record.date <= end_date,
+            Record.consume_time >= start_date,
+            Record.consume_time <= end_filter,
         )
         .group_by(Record.category_id)
         .order_by(func.sum(Record.amount).desc())
@@ -83,11 +89,13 @@ async def get_category_stats(
     rows = result.all()
 
     items = []
-    for category_id, total, count in rows:
+    for row in rows:
+        category_id = row[0]
+        total_val = float(row[1] or 0)
+        count_val = row[2] or 0
         category = await db.get(Category, category_id)
         category_name = category.name if category else "未知"
         icon = category.icon if category else "mdi-cash"
-        total_val = float(total or 0)
         percentage = round((total_val / total_amount * 100), 1) if total_amount > 0 else 0
         items.append({
             "category_id": category_id,
@@ -95,7 +103,7 @@ async def get_category_stats(
             "icon": icon,
             "total": total_val,
             "percentage": percentage,
-            "count": count or 0,
+            "count": count_val,
         })
 
     return {"items": items, "total_expense": total_amount}
@@ -106,17 +114,21 @@ async def get_tag_stats(
     start_date: str,
     end_date: str,
 ) -> dict[str, Any]:
-    """Get statistics by tag text."""
+    """Get statistics by tag (v1.1: single tag per record)."""
+    end_filter = end_date + " 23:59" if len(end_date) <= 10 else end_date
+
     stmt = (
         select(
             Tag.name,
-            func.sum(Record.amount),
-            func.count(Record.id),
+            func.coalesce(func.sum(Record.amount), 0.0).label("total"),
+            func.count(Record.id).label("count"),
         )
-        .select_from(RecordTag)
-        .join(Tag, RecordTag.tag_id == Tag.id)
-        .join(Record, RecordTag.record_id == Record.id)
-        .where(Record.date >= start_date, Record.date <= end_date)
+        .join(Tag, Record.tag_id == Tag.id, isouter=True)
+        .where(
+            Record.consume_time >= start_date,
+            Record.consume_time <= end_filter,
+            Record.tag_id.isnot(None),
+        )
         .group_by(Tag.name)
         .order_by(func.sum(Record.amount).desc())
     )
@@ -142,6 +154,8 @@ async def get_trend(
     end_date: str,
 ) -> dict[str, Any]:
     """Get income/expense trend grouped by day, week, month, or year."""
+    end_filter = end_date + " 23:59" if len(end_date) <= 10 else end_date
+
     # Build date format string for SQLite
     if group_by == "year":
         date_format = "%Y"
@@ -154,15 +168,15 @@ async def get_trend(
 
     stmt = (
         select(
-            func.strftime(date_format, Record.date).label("period"),
+            func.strftime(date_format, Record.consume_time).label("period"),
             func.coalesce(
-                func.sum(Record.amount).filter(Record.type == "income"), 0
-            ),
+                func.sum(Record.amount).filter(Record.type == "income"), 0.0
+            ).label("income"),
             func.coalesce(
-                func.sum(Record.amount).filter(Record.type == "expense"), 0
-            ),
+                func.sum(Record.amount).filter(Record.type == "expense"), 0.0
+            ).label("expense"),
         )
-        .where(Record.date >= start_date, Record.date <= end_date)
+        .where(Record.consume_time >= start_date, Record.consume_time <= end_filter)
         .group_by(text("period"))
         .order_by(text("period"))
     )

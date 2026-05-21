@@ -43,7 +43,7 @@
       </v-btn>
     </div>
 
-    <!-- Amount Input - Big and Bold -->
+    <!-- Amount Input -->
     <v-card class="pa-5 mb-4 amount-card" rounded="xl">
       <div class="text-caption text-grey mb-1 text-center">金额</div>
       <v-text-field
@@ -103,42 +103,68 @@
       </v-row>
     </v-card>
 
-    <!-- Date & Tags Row -->
+    <!-- Consume Time (Date + Time) & Tag Selector & Note -->
     <v-card class="pa-4 mb-4" rounded="xl">
+      <!-- Consume Time -->
       <div class="mb-3">
-        <div class="text-caption text-grey mb-1">日期</div>
-        <v-text-field
-          v-model="date"
-          type="date"
-          hide-details
-          variant="plain"
-          density="comfortable"
-        />
+        <div class="text-caption text-grey mb-1">消费时间</div>
+        <div class="d-flex ga-2">
+          <v-text-field
+            v-model="consumeDate"
+            type="date"
+            hide-details
+            variant="outlined"
+            density="compact"
+            class="flex-grow-1"
+          />
+          <v-text-field
+            v-model="consumeTime"
+            type="time"
+            hide-details
+            variant="outlined"
+            density="compact"
+            class="flex-shrink-0"
+            style="max-width: 140px;"
+          />
+        </div>
       </div>
       <v-divider class="mb-3" />
-      <div>
-        <div class="text-caption text-grey mb-1">标签 / 备注</div>
-        <v-text-field
-          v-model="tagInput"
-          placeholder="输入标签，按回车添加"
+
+      <!-- Tag Selector (Single) -->
+      <div class="mb-3">
+        <div class="text-caption text-grey mb-1">标签（可选）</div>
+        <v-select
+          v-model="selectedTagId"
+          :items="tagOptions"
+          item-title="name"
+          item-value="id"
+          placeholder="选择标签"
           hide-details
-          variant="plain"
-          density="comfortable"
-          @keydown.enter.prevent="addTag"
+          variant="outlined"
+          density="compact"
+          clearable
+          class="tag-select"
+          @update:model-value="onTagChange"
         />
-        <div v-if="tags.length" class="mt-2 d-flex flex-wrap">
-          <v-chip
-            v-for="(tag, i) in tags"
-            :key="i"
-            size="small"
-            closable
-            class="mr-1 mb-1"
-            variant="tonal"
-            @click:close="tags.splice(i, 1)"
-          >
-            {{ tag }}
-          </v-chip>
+        <div v-if="autoMatchedCategory" class="mt-1 text-caption" style="color: #8B7E74">
+          <v-icon size="x-small" class="mr-1">mdi-auto-fix</v-icon>
+          已自动匹配分类：{{ autoMatchedCategory }}
         </div>
+      </div>
+      <v-divider class="mb-3" />
+
+      <!-- Note -->
+      <div>
+        <div class="text-caption text-grey mb-1">备注（可选）</div>
+        <v-textarea
+          v-model="note"
+          placeholder="添加备注..."
+          hide-details
+          variant="outlined"
+          density="compact"
+          rows="2"
+          auto-grow
+        />
       </div>
     </v-card>
 
@@ -166,7 +192,7 @@
               {{ tpl.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
             </v-icon>
           </v-avatar>
-          {{ tpl.category_name }} · {{ formatAmount(tpl.amount) }}
+          {{ tpl.category_name }} · ¥{{ tpl.amount }}
         </v-chip>
       </div>
     </v-card>
@@ -193,8 +219,8 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { createRecord, updateRecord, getRecord, getQuickTemplates } from '@/api/records'
 import { getCategories } from '@/api/categories'
+import { getTags } from '@/api/tags'
 import { useAppStore } from '@/stores/useAppStore'
-import { formatAmount } from '@/utils/format'
 import dayjs from 'dayjs'
 
 const router = useRouter()
@@ -206,35 +232,62 @@ const isEdit = computed(() => !!route.params.id)
 const recordType = ref('expense')
 const amount = ref('')
 const categoryId = ref(null)
-const date = ref(dayjs().format('YYYY-MM-DD'))
-const tags = ref([])
-const tagInput = ref('')
+const consumeDate = ref(dayjs().format('YYYY-MM-DD'))
+const consumeTime = ref(dayjs().format('HH:mm'))
+const selectedTagId = ref(null)
+const note = ref('')
 const submitting = ref(false)
 const categories = ref([])
+const tags = ref([])
 const templates = ref([])
 const recordId = ref(null)
+const autoMatchedCategory = ref('')
 
 const currentCategories = computed(() =>
   categories.value.filter((c) => c.type === recordType.value)
 )
 
+const tagOptions = computed(() => {
+  const currentCatIds = currentCategories.value.map(c => c.id)
+  return tags.value.filter(t => !t.category_id || currentCatIds.includes(t.category_id))
+})
+
 const canSubmit = computed(() => {
   return parseFloat(amount.value) > 0 && categoryId.value !== null
 })
 
-function addTag() {
-  const text = tagInput.value.trim()
-  if (text && !tags.value.includes(text)) {
-    tags.value.push(text)
+function onTagChange(tagId) {
+  if (!tagId) {
+    autoMatchedCategory.value = ''
+    return
   }
-  tagInput.value = ''
+  const tag = tags.value.find(t => t.id === tagId)
+  if (tag && tag.category_id) {
+    const cat = categories.value.find(c => c.id === tag.category_id)
+    if (cat) {
+      categoryId.value = cat.id
+      autoMatchedCategory.value = cat.name
+    }
+  } else {
+    autoMatchedCategory.value = ''
+  }
 }
 
 function fillTemplate(tpl) {
   recordType.value = tpl.type
   amount.value = String(tpl.amount)
   categoryId.value = tpl.category_id
-  tags.value = [...tpl.tags]
+  if (tpl.consume_time) {
+    consumeDate.value = tpl.consume_time.substring(0, 10)
+    consumeTime.value = tpl.consume_time.substring(11, 16)
+  }
+  if (tpl.tag) {
+    selectedTagId.value = tpl.tag.id
+    onTagChange(tpl.tag.id)
+  } else {
+    selectedTagId.value = null
+  }
+  note.value = tpl.note || ''
 }
 
 async function submit() {
@@ -245,8 +298,9 @@ async function submit() {
       amount: parseFloat(amount.value),
       type: recordType.value,
       category_id: categoryId.value,
-      date: date.value,
-      tags: tags.value,
+      consume_time: `${consumeDate.value} ${consumeTime.value}`,
+      tag_id: selectedTagId.value || null,
+      note: note.value || null,
     }
     if (isEdit.value) {
       await updateRecord(recordId.value, data)
@@ -272,11 +326,13 @@ watch(recordType, () => {
 
 onMounted(async () => {
   try {
-    const [cats, tpls] = await Promise.all([
+    const [cats, tgs, tpls] = await Promise.all([
       getCategories(),
+      getTags(),
       getQuickTemplates(),
     ])
     categories.value = cats
+    tags.value = tgs || []
     templates.value = tpls || []
 
     const expenseCats = cats.filter((c) => c.type === 'expense')
@@ -291,8 +347,15 @@ onMounted(async () => {
         recordType.value = record.type
         amount.value = String(record.amount)
         categoryId.value = record.category_id
-        date.value = record.date
-        tags.value = [...(record.tags || [])]
+        if (record.consume_time) {
+          consumeDate.value = record.consume_time.substring(0, 10)
+          consumeTime.value = record.consume_time.substring(11, 16)
+        }
+        if (record.tag) {
+          selectedTagId.value = record.tag.id
+          onTagChange(record.tag.id)
+        }
+        note.value = record.note || ''
       }
     }
   } catch (e) {

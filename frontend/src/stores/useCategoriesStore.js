@@ -110,6 +110,7 @@ export const useCategoriesStore = defineStore('categories', () => {
     editCategory,
     removeCategory,
     addTag,
+    updateTagItem,
     removeTag,
   }
 })

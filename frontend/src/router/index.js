@@ -38,6 +38,12 @@ const routes = [
     meta: { title: '编辑账单', icon: 'mdi-pencil' },
   },
   {
+    path: '/detail/:id',
+    name: 'RecordDetail',
+    component: () => import('@/pages/RecordDetailPage.vue'),
+    meta: { title: '账单详情', icon: 'mdi-information-outline' },
+  },
+  {
     path: '/settings',
     name: 'Settings',
     component: () => import('@/pages/SettingsPage.vue'),
