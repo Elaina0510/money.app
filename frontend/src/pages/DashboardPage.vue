@@ -36,7 +36,7 @@
         <div class="d-flex ga-4">
           <div class="stat-item">
             <div class="stat-label">收入</div>
-            <div class="stat-value income">+¥{{ formatIncome }}</div>
+            <div class="stat-value income">+¥{{ formatIncomeStr }}</div>
           </div>
           <div class="stat-item">
             <div class="stat-label">笔数</div>
@@ -139,15 +139,13 @@
             </v-avatar>
           </template>
           <v-list-item-title class="text-body-2 font-weight-medium">
-            {{ record.category_name || '未分类' }}
+            <v-avatar size="22" color="rgba(139, 126, 116, 0.12)" class="mr-1">
+              <v-icon size="12" color="#8B7E74">{{ record.category_icon || 'mdi-circle' }}</v-icon>
+            </v-avatar>
+            {{ record.tag?.name || record.category_name || '未分类' }}
           </v-list-item-title>
           <v-list-item-subtitle class="text-caption">
-            {{ formatDate(record.date) }}
-            <template v-if="record.tags?.length">
-              <v-icon size="x-small" class="mx-1" style="opacity: 0.4">mdi-circle-small</v-icon>
-              {{ record.tags.slice(0, 2).join(', ') }}
-              <span v-if="record.tags.length > 2" class="text-grey">+{{ record.tags.length - 2 }}</span>
-            </template>
+            {{ record.consume_time?.substring(0, 16) || '' }}
           </v-list-item-subtitle>
           <template v-slot:append>
             <div
@@ -213,13 +211,13 @@ onMounted(async () => {
   const monthRange = getCurrentMonthRange()
   try {
     const [recordsData, summaryData, catStats] = await Promise.all([
-      getRecords({ page: 1, page_size: 10, sort_order: 'desc', sort_by: 'date' }),
-      getSummary({ start_date: monthRange.startDate, end_date: monthRange.endDate, period: 'monthly' }),
-      getByCategory({ start_date: monthRange.startDate, end_date: monthRange.endDate }),
+      getRecords({ page: 1, page_size: 10, sort_order: 'desc', sort_by: 'consume_time' }),
+      getSummary({ start_date: monthRange.startDate, end_date: monthRange.endDate, period: 'month' }),
+      getByCategory({ start_date: monthRange.startDate, end_date: monthRange.endDate, type: 'expense' }),
     ])
-    records.value = recordsData.items || recordsData
+    records.value = recordsData.items || []
     summary.value = summaryData
-    categoryStats.value = (catStats || []).filter(c => c.type === 'expense').sort((a, b) => b.total - a.total)
+    categoryStats.value = (catStats?.items || []).sort((a, b) => b.total - a.total)
   } catch (e) {
     console.error('Dashboard load error:', e)
   }

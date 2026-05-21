@@ -90,13 +90,21 @@
 
     <!-- Main Content Area -->
     <v-main class="main-content">
-      <!-- Mobile Top Bar -->
-      <div class="mobile-top-bar d-md-none pa-4 pb-0">
+      <!-- Top Bar (Mobile + Desktop) -->
+      <div class="app-top-bar pa-4 pb-0">
         <div class="d-flex align-center">
-          <v-app-bar-nav-icon variant="text" @click="drawer = !drawer" class="mr-2" />
+          <!-- Hamburger / Expand button -->
+          <v-btn
+            icon
+            variant="text"
+            class="mr-2"
+            @click="toggleNav()"
+          >
+            <v-icon>{{ rail ? 'mdi-menu' : 'mdi-arrow-collapse-left' }}</v-icon>
+          </v-btn>
           <div>
             <div class="text-h6 font-weight-bold">{{ currentTitle }}</div>
-            <div class="text-caption" style="color: rgba(0,0,0,0.45)">{{ currentSubtitle }}</div>
+            <div class="text-caption d-none d-md-block" style="color: rgba(0,0,0,0.45)">{{ currentSubtitle }}</div>
           </div>
           <v-spacer />
           <v-btn
@@ -146,8 +154,17 @@ import ToastNotification from '../common/ToastNotification.vue'
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
-const rail = ref(true)
+const rail = ref(true)  // 默认折叠，点击菜单图标展开
 const drawer = ref(false)
+
+// 点击菜单按钮切换 rail 模式（宽屏）或 drawer（窄屏）
+function toggleNav() {
+  if (useDisplay().mdAndUp) {
+    rail.value = !rail.value
+  } else {
+    drawer.value = !drawer.value
+  }
+}
 
 const navItems = [
   { to: '/', title: '主页', icon: 'mdi-view-dashboard-outline' },
@@ -237,22 +254,28 @@ onMounted(() => {
   margin-left: 8px;
 }
 
+.app-top-bar {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: rgb(var(--v-theme-background));
+  padding-bottom: 12px;
+}
+
 @media (max-width: 959px) {
   .content-wrapper {
     padding: 16px 16px 80px;
   }
 
-  .mobile-top-bar {
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    background: rgb(var(--v-theme-background));
-    padding-bottom: 12px;
-  }
-
   .fab-add {
     bottom: 16px;
     right: 16px;
+  }
+}
+
+@media (min-width: 960px) {
+  .app-top-bar .d-md-none {
+    display: block;
   }
 }
 </style>

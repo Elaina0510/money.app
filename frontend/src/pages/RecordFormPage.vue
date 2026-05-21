@@ -130,26 +130,31 @@
       </div>
       <v-divider class="mb-3" />
 
-      <!-- Tag Selector (Single) -->
+      <!-- Tag Input (Free Text + Auto Suggest) -->
       <div class="mb-3">
-        <div class="text-caption text-grey mb-1">标签（可选）</div>
-        <v-select
-          v-model="selectedTagId"
-          :items="tagOptions"
+        <div class="text-caption text-grey mb-1">标签</div>
+        <v-combobox
+          v-model="selectedTagName"
+          :items="tagSuggestions"
           item-title="name"
-          item-value="id"
-          placeholder="选择标签"
+          item-value="name"
+          placeholder="输入标签"
           hide-details
           variant="outlined"
           density="compact"
           clearable
-          class="tag-select"
-          @update:model-value="onTagChange"
-        />
-        <div v-if="autoMatchedCategory" class="mt-1 text-caption" style="color: #8B7E74">
-          <v-icon size="x-small" class="mr-1">mdi-auto-fix</v-icon>
-          已自动匹配分类：{{ autoMatchedCategory }}
-        </div>
+          class="tag-input"
+          no-filter
+          @update:model-value="onTagInput"
+        >
+          <template v-slot:no-data>
+            <v-list-item>
+              <v-list-item-title class="text-caption text-grey">
+                按回车创建新标签
+              </v-list-item-title>
+            </v-list-item>
+          </template>
+        </v-combobox>
       </div>
       <v-divider class="mb-3" />
 
@@ -219,7 +224,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { createRecord, updateRecord, getRecord, getQuickTemplates } from '@/api/records'
 import { getCategories } from '@/api/categories'
-import { getTags } from '@/api/tags'
+import { getTags, createTag as createTagData } from '@/api/tags'
 import { useAppStore } from '@/stores/useAppStore'
 import dayjs from 'dayjs'
 
@@ -234,6 +239,7 @@ const amount = ref('')
 const categoryId = ref(null)
 const consumeDate = ref(dayjs().format('YYYY-MM-DD'))
 const consumeTime = ref(dayjs().format('HH:mm'))
+const selectedTagName = ref(null)
 const selectedTagId = ref(null)
 const note = ref('')
 const submitting = ref(false)
@@ -247,7 +253,7 @@ const currentCategories = computed(() =>
   categories.value.filter((c) => c.type === recordType.value)
 )
 
-const tagOptions = computed(() => {
+const tagSuggestions = computed(() => {
   const currentCatIds = currentCategories.value.map(c => c.id)
   return tags.value.filter(t => !t.category_id || currentCatIds.includes(t.category_id))
 })
@@ -256,19 +262,32 @@ const canSubmit = computed(() => {
   return parseFloat(amount.value) > 0 && categoryId.value !== null
 })
 
-function onTagChange(tagId) {
-  if (!tagId) {
+function onTagInput(val) {
+  if (!val) {
+    selectedTagId.value = null
     autoMatchedCategory.value = ''
     return
   }
-  const tag = tags.value.find(t => t.id === tagId)
-  if (tag && tag.category_id) {
-    const cat = categories.value.find(c => c.id === tag.category_id)
-    if (cat) {
-      categoryId.value = cat.id
-      autoMatchedCategory.value = cat.name
+  // val could be string (typed) or object (selected from suggestions)
+  const tagName = typeof val === 'string' ? val : (val?.name || '')
+  selectedTagName.value = tagName
+
+  // Find matching tag in existing list
+  const match = tags.value.find(t => t.name === tagName)
+  if (match) {
+    selectedTagId.value = match.id
+    if (match.category_id) {
+      const cat = categories.value.find(c => c.id === match.category_id)
+      if (cat) {
+        categoryId.value = cat.id
+        autoMatchedCategory.value = cat.name
+      }
+    } else {
+      autoMatchedCategory.value = ''
     }
   } else {
+    // New tag - will create on submit
+    selectedTagId.value = null
     autoMatchedCategory.value = ''
   }
 }
@@ -283,9 +302,11 @@ function fillTemplate(tpl) {
   }
   if (tpl.tag) {
     selectedTagId.value = tpl.tag.id
-    onTagChange(tpl.tag.id)
+    selectedTagName.value = tpl.tag.name
+    onTagInput(tpl.tag.name)
   } else {
     selectedTagId.value = null
+    selectedTagName.value = null
   }
   note.value = tpl.note || ''
 }
@@ -294,12 +315,19 @@ async function submit() {
   if (!canSubmit.value) return
   submitting.value = true
   try {
+    // If tag name is entered but no matching tag exists, create it first
+    let tagId = selectedTagId.value
+    if (selectedTagName.value && !tagId) {
+      const newTag = await createTagData({ name: selectedTagName.value.trim(), category_id: categoryId.value })
+      tagId = newTag.id
+    }
+
     const data = {
       amount: parseFloat(amount.value),
       type: recordType.value,
       category_id: categoryId.value,
       consume_time: `${consumeDate.value} ${consumeTime.value}`,
-      tag_id: selectedTagId.value || null,
+      tag_id: tagId || null,
       note: note.value || null,
     }
     if (isEdit.value) {
@@ -353,7 +381,8 @@ onMounted(async () => {
         }
         if (record.tag) {
           selectedTagId.value = record.tag.id
-          onTagChange(record.tag.id)
+          selectedTagName.value = record.tag.name
+          onTagInput(record.tag.name)
         }
         note.value = record.note || ''
       }
