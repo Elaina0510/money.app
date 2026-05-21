@@ -154,12 +154,13 @@ import ToastNotification from '../common/ToastNotification.vue'
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
-const rail = ref(true)  // 默认折叠，点击菜单图标展开
+const display = useDisplay()
+const rail = ref(true)  // 默认折叠
 const drawer = ref(false)
 
-// 点击菜单按钮切换 rail 模式（宽屏）或 drawer（窄屏）
+// 点击菜单按钮切换侧边栏
 function toggleNav() {
-  if (useDisplay().mdAndUp) {
+  if (display.mdAndUp) {
     rail.value = !rail.value
   } else {
     drawer.value = !drawer.value
