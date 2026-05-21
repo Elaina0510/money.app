@@ -5,10 +5,10 @@
       v-model="drawer"
       :permanent="display.mdAndUp"
       :temporary="display.smAndDown"
-      :rail="display.mdAndUp ? rail : false"
-      rail-width="72"
-      width="260"
+      :rail="false"
+      :width="display.mdAndUp ? (rail ? 72 : 260) : 300"
       class="app-sidebar"
+      :class="{ 'sidebar-collapsed': display.mdAndUp && rail }"
       elevation="0"
     >
       <!-- App Logo Area -->
@@ -253,6 +253,38 @@ onMounted(() => {
 
 .theme-switch {
   margin-left: 8px;
+}
+
+/* 侧边栏折叠状态：隐藏文字，图标居中 */
+.sidebar-collapsed {
+  overflow: hidden;
+}
+
+.sidebar-collapsed .v-list-item-title {
+  display: none !important;
+}
+
+.sidebar-collapsed .v-list-item {
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+.sidebar-collapsed .v-list-item .v-icon {
+  margin: 0 auto;
+}
+
+.sidebar-collapsed .sidebar-header {
+  justify-content: center !important;
+  padding-left: 8px !important;
+  padding-right: 8px !important;
+}
+
+.sidebar-collapsed .sidebar-header .v-avatar {
+  margin-right: 0 !important;
+}
+
+.sidebar-collapsed .sidebar-header div:has(.text-h6) {
+  display: none !important;
 }
 
 .app-top-bar {
