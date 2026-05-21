@@ -1,5 +1,6 @@
 """Statistics business logic."""
 
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlmodel import select, func, text
@@ -52,7 +53,7 @@ async def get_category_stats(
     end_date: str,
 ) -> dict[str, Any]:
     """Get expense statistics by category."""
-    # Get total expense for percentage calculation
+    # Get total for percentage calculation
     total_stmt = select(
         func.coalesce(func.sum(Record.amount), 0)
     ).where(
@@ -61,7 +62,7 @@ async def get_category_stats(
         Record.date <= end_date,
     )
     total_result = await db.exec(total_stmt)
-    total_expense = float(total_result.one() or 0)
+    total_amount = float(total_result.one() or 0)
 
     # Get per-category stats
     stmt = (
@@ -87,7 +88,7 @@ async def get_category_stats(
         category_name = category.name if category else "未知"
         icon = category.icon if category else "mdi-cash"
         total_val = float(total or 0)
-        percentage = round((total_val / total_expense * 100), 1) if total_expense > 0 else 0
+        percentage = round((total_val / total_amount * 100), 1) if total_amount > 0 else 0
         items.append({
             "category_id": category_id,
             "category_name": category_name,
@@ -97,7 +98,7 @@ async def get_category_stats(
             "count": count or 0,
         })
 
-    return {"items": items, "total_expense": total_expense}
+    return {"items": items, "total_expense": total_amount}
 
 
 async def get_tag_stats(
@@ -140,12 +141,16 @@ async def get_trend(
     start_date: str,
     end_date: str,
 ) -> dict[str, Any]:
-    """Get income/expense trend grouped by month or year."""
+    """Get income/expense trend grouped by day, week, month, or year."""
     # Build date format string for SQLite
     if group_by == "year":
         date_format = "%Y"
-    else:  # month
+    elif group_by == "month":
         date_format = "%Y-%m"
+    elif group_by == "week":
+        date_format = "%Y-%W"
+    else:  # day
+        date_format = "%Y-%m-%d"
 
     stmt = (
         select(
@@ -175,3 +180,51 @@ async def get_trend(
     ]
 
     return {"items": items}
+
+
+async def get_compare(
+    db: AsyncSession,
+    start_date_1: str,
+    end_date_1: str,
+    start_date_2: str,
+    end_date_2: str,
+) -> dict[str, Any]:
+    """Compare income/expense between two periods."""
+    summary_1 = await get_summary(db, "custom", start_date_1, end_date_1)
+    summary_2 = await get_summary(db, "custom", start_date_2, end_date_2)
+
+    income_change = 0.0
+    expense_change = 0.0
+
+    if summary_1["total_income"] > 0:
+        income_change = round(
+            (summary_2["total_income"] - summary_1["total_income"])
+            / summary_1["total_income"]
+            * 100,
+            1,
+        )
+    elif summary_2["total_income"] > 0:
+        income_change = 100.0
+
+    if summary_1["total_expense"] > 0:
+        expense_change = round(
+            (summary_2["total_expense"] - summary_1["total_expense"])
+            / summary_1["total_expense"]
+            * 100,
+            1,
+        )
+    elif summary_2["total_expense"] > 0:
+        expense_change = 100.0
+
+    return {
+        "period_1": {
+            "total_income": summary_1["total_income"],
+            "total_expense": summary_1["total_expense"],
+        },
+        "period_2": {
+            "total_income": summary_2["total_income"],
+            "total_expense": summary_2["total_expense"],
+        },
+        "income_change": income_change,
+        "expense_change": expense_change,
+    }

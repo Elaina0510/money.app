@@ -14,7 +14,7 @@ from app.models.record import Record
 from app.models.record_tag import RecordTag
 from app.models.tag import Tag
 from app.models.attachment import Attachment
-from app.routers import records, categories, tags, attachments, statistics
+from app.routers import records, categories, tags, attachments, statistics, budgets
 from app.utils.file_utils import ensure_upload_dir
 
 # Determine frontend dist directory
@@ -102,6 +102,7 @@ app.include_router(tags.router)
 app.include_router(records.router)
 app.include_router(attachments.router)
 app.include_router(statistics.router)
+app.include_router(budgets.router)
 
 
 @app.get("/")
@@ -110,3 +111,4 @@ async def root():
     if FRONTEND_DIST.exists():
         return FileResponse(str(FRONTEND_DIST / "index.html"), media_type="text/html")
     return {"message": "Money App API", "version": "1.0.0", "docs": "/docs"}
+
