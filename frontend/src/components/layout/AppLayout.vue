@@ -3,9 +3,9 @@
     <!-- Navigation Drawer (Sidebar) -->
     <v-navigation-drawer
       v-model="drawer"
-      :permanent="$vuetify.display.mdAndUp"
-      :temporary="$vuetify.display.smAndDown"
-      :rail="$vuetify.display.mdAndUp && rail"
+      :permanent="display.mdAndUp"
+      :temporary="display.smAndDown"
+      :rail="display.mdAndUp ? rail : false"
       rail-width="72"
       width="260"
       class="app-sidebar"
