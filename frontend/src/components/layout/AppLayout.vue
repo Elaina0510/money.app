@@ -3,23 +3,19 @@
     <!-- Navigation Drawer (Sidebar) -->
     <v-navigation-drawer
       v-model="drawer"
-      :permanent="display.mdAndUp"
-      :temporary="display.smAndDown"
+      :permanent="display.mdAndUp ? !rail : false"
+      :temporary="display.mdAndUp ? rail : true"
       :rail="false"
-      :width="display.mdAndUp ? (rail ? 72 : 260) : 300"
+      :width="260"
       class="app-sidebar"
-      :class="{ 'sidebar-collapsed': display.mdAndUp && rail }"
       elevation="0"
     >
       <!-- App Logo Area -->
-      <div class="sidebar-header pa-4 d-flex align-center" :class="{ 'justify-center': rail }">
-        <v-avatar color="primary" size="40" class="mr-3" v-if="!rail">
+      <div class="sidebar-header pa-4 d-flex align-center">
+        <v-avatar color="primary" size="40" class="mr-3">
           <v-icon color="white" size="24">mdi-wallet</v-icon>
         </v-avatar>
-        <v-avatar color="primary" size="40" v-else>
-          <v-icon color="white" size="24">mdi-wallet</v-icon>
-        </v-avatar>
-        <div v-if="!rail">
+        <div>
           <div class="text-h6 font-weight-bold" style="line-height: 1.2">Money App</div>
           <div class="text-caption" style="color: rgba(0,0,0,0.5)">个人记账</div>
         </div>
@@ -67,12 +63,11 @@
           </v-list-item>
 
           <!-- Dark mode toggle -->
-          <div class="d-flex align-center pa-3 mt-2" :class="{ 'justify-center': rail }">
-            <v-icon size="20" class="mr-2" v-if="!rail">
+          <div class="d-flex align-center pa-3 mt-2">
+            <v-icon size="20" class="mr-2">
               {{ appStore.darkMode ? 'mdi-weather-night' : 'mdi-weather-sunny' }}
             </v-icon>
             <v-switch
-              v-if="!rail"
               :model-value="appStore.darkMode"
               hide-details
               density="compact"
@@ -80,9 +75,6 @@
               class="theme-switch"
               @update:model-value="appStore.toggleDarkMode()"
             />
-            <v-btn v-else icon variant="text" size="small" @click="appStore.toggleDarkMode()">
-              <v-icon>{{ appStore.darkMode ? 'mdi-weather-night' : 'mdi-weather-sunny' }}</v-icon>
-            </v-btn>
           </div>
         </div>
       </template>
@@ -100,7 +92,7 @@
             class="mr-2"
             @click="toggleNav()"
           >
-            <v-icon>{{ rail ? 'mdi-menu' : 'mdi-arrow-collapse-left' }}</v-icon>
+            <v-icon>{{ display.mdAndUp ? (rail ? 'mdi-menu' : 'mdi-close') : 'mdi-menu' }}</v-icon>
           </v-btn>
           <div>
             <div class="text-h6 font-weight-bold">{{ currentTitle }}</div>
@@ -161,8 +153,18 @@ const drawer = ref(false)
 // 点击菜单按钮切换侧边栏
 function toggleNav() {
   if (display.mdAndUp) {
-    rail.value = !rail.value
+    // 宽屏：如果当前折叠(rail=true)，切换为展开并显示；如果展开(rail=false)，切换为折叠
+    if (rail.value) {
+      // 折叠→展开：设为 permanent 显示
+      rail.value = false
+      drawer.value = true
+    } else {
+      // 展开→折叠：设为 temporary 隐藏
+      rail.value = true
+      drawer.value = false
+    }
   } else {
+    // 竖屏：切换临时抽屉
     drawer.value = !drawer.value
   }
 }
@@ -253,38 +255,6 @@ onMounted(() => {
 
 .theme-switch {
   margin-left: 8px;
-}
-
-/* 侧边栏折叠状态：隐藏文字，图标居中 */
-.sidebar-collapsed {
-  overflow: hidden;
-}
-
-.sidebar-collapsed .v-list-item-title {
-  display: none !important;
-}
-
-.sidebar-collapsed .v-list-item {
-  padding-left: 8px !important;
-  padding-right: 8px !important;
-}
-
-.sidebar-collapsed .v-list-item .v-icon {
-  margin: 0 auto;
-}
-
-.sidebar-collapsed .sidebar-header {
-  justify-content: center !important;
-  padding-left: 8px !important;
-  padding-right: 8px !important;
-}
-
-.sidebar-collapsed .sidebar-header .v-avatar {
-  margin-right: 0 !important;
-}
-
-.sidebar-collapsed .sidebar-header div:has(.text-h6) {
-  display: none !important;
 }
 
 .app-top-bar {
