@@ -12,9 +12,8 @@ engine = create_async_engine(DATABASE_URL, echo=False)
 
 
 async def create_all_tables() -> None:
-    """Drop and recreate all tables (v1.1 fresh start)."""
+    """Create all tables if they don't exist (preserve existing data)."""
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.drop_all)
         await conn.run_sync(SQLModel.metadata.create_all)
 
 
