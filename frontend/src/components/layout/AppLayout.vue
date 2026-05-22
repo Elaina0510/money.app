@@ -6,25 +6,27 @@
       :permanent="display.mdAndUp ? !rail : false"
       :temporary="display.mdAndUp ? rail : true"
       :rail="false"
-      :width="display.mdAndUp ? 260 : 200"
+
+      :width="display.mdAndUp ? 240 : 72"
       class="app-sidebar"
       elevation="0"
     >
       <!-- App Logo Area -->
-      <div class="sidebar-header pa-4 d-flex align-center">
-        <v-avatar color="primary" size="40" class="mr-3">
-          <v-icon color="white" size="24">mdi-wallet</v-icon>
+      <div class="sidebar-header px-2 py-2 d-flex align-center">
+        <v-avatar color="primary" size="28" class="mr-1 flex-shrink-0">
+          <v-icon color="white" size="16">mdi-wallet</v-icon>
         </v-avatar>
-        <div>
-          <div class="text-h6 font-weight-bold" style="line-height: 1.2">Money App</div>
-          <div class="text-caption" style="color: rgba(0,0,0,0.5)">个人记账</div>
+        <div class="sidebar-header-text" style="min-width:0">
+          <div class="text-subtitle-2 font-weight-bold text-truncate" style="line-height: 1.2">Money App</div>
+          <div class="text-caption text-truncate" style="color: rgba(0,0,0,0.5)">个人记账</div>
         </div>
       </div>
 
-      <v-divider class="mx-3" />
+
+      <v-divider class="mx-2" />
 
       <!-- Navigation Items -->
-      <v-list class="sidebar-nav pa-2" density="comfortable">
+      <v-list class="sidebar-nav pa-1" density="compact">
         <v-list-item
           v-for="item in navItems"
           :key="item.to"
@@ -45,7 +47,7 @@
       </v-list>
 
       <template v-slot:append>
-        <div class="pa-3">
+        <div class="pa-2">
           <v-list-item
             to="/settings"
             :active="route.path === '/settings'"
@@ -63,7 +65,7 @@
           </v-list-item>
 
           <!-- Dark mode toggle -->
-          <div class="d-flex align-center pa-3 mt-2">
+          <div class="d-flex align-center pa-1 mt-1">
             <v-icon size="20" class="mr-2">
               {{ appStore.darkMode ? 'mdi-weather-night' : 'mdi-weather-sunny' }}
             </v-icon>
@@ -204,7 +206,16 @@ onMounted(() => {
 }
 
 .sidebar-header {
-  min-height: 72px;
+  min-height: 64px;
+}
+
+@media (max-width: 959px) {
+  .sidebar-header .sidebar-header-text .text-subtitle-2 {
+    font-size: 0.7rem !important;
+  }
+  .sidebar-header .sidebar-header-text .text-caption {
+    font-size: 0.55rem !important;
+  }
 }
 
 .nav-item {
@@ -255,6 +266,28 @@ onMounted(() => {
 
 .theme-switch {
   margin-left: 8px;
+}
+
+@media (max-width: 959px) {
+  .sidebar-nav {
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+  }
+  .sidebar-nav .v-list-item {
+    padding-left: 2px !important;
+    padding-right: 2px !important;
+    min-height: 36px !important;
+  }
+  .sidebar-nav .v-list-item-title {
+    font-size: 0.7rem !important;
+  }
+  .app-sidebar :deep(.v-list-item__prepend) {
+    width: auto !important;
+    min-width: 0 !important;
+  }
+  .app-sidebar :deep(.v-list-item__prepend > .v-icon) {
+    margin-right: 4px !important;
+  }
 }
 
 .app-top-bar {

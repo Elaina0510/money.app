@@ -15,6 +15,15 @@ env/
 
 # Database
 *.db
+*.sqlite
+*.sqlite3
+
+# Environment files - sensitive configs
+.env
+.env.*
+!.env.example
+!.env.development
+!.env.production
 
 # IDE
 .vscode/
@@ -26,10 +35,30 @@ env/
 .DS_Store
 Thumbs.db
 
-# Uploads
+# Uploads / user content
 backend/uploads/
+backend/files/
 
 # Node
 node_modules/
+frontend/node_modules/
 
+# Build output
+frontend/dist/
+
+# Design docs / temp assets
 v1.1/
+v1.0/
+*.png
+*.jpg
+*.jpeg
+!design/prototype.png
+
+# Logs
+*.log
+logs/
+
+# Test cache
+.pytest_cache/
+__pycache__/
+*.egg
