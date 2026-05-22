@@ -6,7 +6,7 @@
       :permanent="display.mdAndUp ? !rail : false"
       :temporary="display.mdAndUp ? rail : true"
       :rail="false"
-      :width="260"
+      :width="display.mdAndUp ? 260 : 200"
       class="app-sidebar"
       elevation="0"
     >
