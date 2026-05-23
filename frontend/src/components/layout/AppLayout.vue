@@ -64,6 +64,23 @@
             </v-list-item-title>
           </v-list-item>
 
+          <!-- User info area -->
+          <!-- 登录状态显示 -->
+          <div class="pa-2 mt-1" v-if="isLoggedIn">
+            <v-divider class="mb-2" />
+            <div class="d-flex align-center pa-1">
+              <v-avatar size="28" color="primary" class="mr-2">
+                <span class="text-caption text-white font-weight-bold">{{ username.charAt(0) }}</span>
+              </v-avatar>
+              <div class="flex-grow-1 text-truncate">
+                <div class="text-caption font-weight-medium text-truncate">{{ username }}</div>
+              </div>
+              <v-btn icon variant="text" size="x-small" @click="handleLogout" title="退出登录">
+                <v-icon size="16">mdi-logout</v-icon>
+              </v-btn>
+            </div>
+          </div>
+
           <!-- Dark mode toggle -->
           <div class="d-flex align-center pa-1 mt-1">
             <v-icon size="20" class="mr-2">
@@ -139,7 +156,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { useAppStore } from '@/stores/useAppStore'
@@ -151,6 +168,44 @@ const appStore = useAppStore()
 const display = useDisplay()
 const rail = ref(true)  // 默认折叠
 const drawer = ref(false)
+
+// 登录状态
+const token = ref(localStorage.getItem('token') || '')
+const username = ref(localStorage.getItem('username') || '')
+const isLoggedIn = computed(() => !!token.value)
+
+// 检查登录状态
+function checkLogin() {
+  token.value = localStorage.getItem('token') || ''
+  username.value = localStorage.getItem('username') || ''
+}
+
+// 退出登录
+function handleLogout() {
+  localStorage.removeItem('token')
+  localStorage.removeItem('username')
+  localStorage.removeItem('userId')
+  checkLogin()
+  appStore.showToast('已退出登录', 'info')
+}
+
+// 监听外部登出事件（比如 token 过期）
+function handleAuthLogout() {
+  checkLogin()
+  // 不强制跳转，用户可继续浏览但操作会失败
+}
+
+let authLogoutHandler
+
+onMounted(() => {
+  checkLogin()
+  authLogoutHandler = () => handleAuthLogout()
+  window.addEventListener('auth:logout', authLogoutHandler)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('auth:logout', authLogoutHandler)
+})
 
 // 点击菜单按钮切换侧边栏
 function toggleNav() {

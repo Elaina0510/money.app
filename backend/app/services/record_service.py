@@ -92,7 +92,14 @@ async def get_records(
     count_result = await db.exec(count_query)
     total = count_result.one()
 
-    # Apply sorting
+    # Apply sorting — 使用白名单防止意外的属性注入
+    VALID_SORT_BY = {"consume_time", "amount", "created_at", "updated_at"}
+    if sort_by not in VALID_SORT_BY:
+        sort_by = "consume_time"
+    VALID_SORT_ORDER = {"asc", "desc"}
+    if sort_order not in VALID_SORT_ORDER:
+        sort_order = "desc"
+
     sort_column = getattr(Record, sort_by, Record.consume_time)
     if sort_order == "asc":
         query = query.order_by(sort_column.asc())

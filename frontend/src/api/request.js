@@ -8,6 +8,18 @@ const request = axios.create({
   },
 })
 
+// Request interceptor — 自动附加 JWT token
+request.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => Promise.reject(error)
+)
+
 // Response interceptor
 request.interceptors.response.use(
   (response) => {
@@ -25,7 +37,15 @@ request.interceptors.response.use(
     if (error.response) {
       const { status } = error.response
       let msg = '请求失败'
-      if (status === 422) {
+      if (status === 401) {
+        msg = '登录已过期，请重新登录'
+        // 清除过期的 token
+        localStorage.removeItem('token')
+        localStorage.removeItem('username')
+        localStorage.removeItem('userId')
+        // 触发全局事件，以便组件可以响应
+        window.dispatchEvent(new CustomEvent('auth:logout'))
+      } else if (status === 422) {
         msg = '参数错误'
       } else if (status === 500) {
         msg = '服务器错误'

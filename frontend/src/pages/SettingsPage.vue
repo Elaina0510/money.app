@@ -215,14 +215,51 @@
       confirm-text="删除"
       @confirm="handleDeleteTag"
     />
+
+    <!-- Account Section -->
+    <v-card class="pa-4 mb-3 settings-card" rounded="xl">
+      <div class="d-flex align-center mb-2">
+        <v-avatar size="36" color="rgba(255, 152, 0, 0.1)" class="mr-2">
+          <v-icon color="warning" size="20">mdi-account</v-icon>
+        </v-avatar>
+        <span class="text-subtitle-2 font-weight-bold">账号</span>
+      </div>
+
+      <div v-if="isLoggedIn" class="d-flex align-center justify-space-between mt-2">
+        <div class="d-flex align-center">
+          <v-avatar size="36" color="primary" class="mr-2">
+            <span class="text-body-2 text-white font-weight-bold">{{ username.charAt(0) }}</span>
+          </v-avatar>
+          <div>
+            <div class="text-body-2 font-weight-medium">{{ username }}</div>
+            <div class="text-caption text-grey">已登录</div>
+          </div>
+        </div>
+        <v-btn variant="tonal" color="error" size="small" @click="handleLogoutInSettings">
+          <v-icon start size="small">mdi-logout</v-icon>
+          退出
+        </v-btn>
+      </div>
+
+      <div v-else class="mt-2">
+        <div class="text-body-2 text-grey mb-3">未登录，部分功能可能受限</div>
+        <v-btn color="primary" variant="tonal" @click="goToLogin">
+          <v-icon start>mdi-login</v-icon>
+          去登录
+        </v-btn>
+      </div>
+    </v-card>
   </div>
 </template>
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import { useAppStore } from '@/stores/useAppStore'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+
+const router = useRouter()
 
 const categoriesStore = useCategoriesStore()
 const appStore = useAppStore()
@@ -257,6 +294,23 @@ const showTagDialog = ref(false)
 const savingTag = ref(false)
 
 const tagForm = reactive({ name: '', category_id: null })
+
+// 账号状态
+const isLoggedIn = computed(() => !!localStorage.getItem('token'))
+const username = computed(() => localStorage.getItem('username') || '')
+
+function goToLogin() {
+  router.push('/login')
+}
+
+function handleLogoutInSettings() {
+  localStorage.removeItem('token')
+  localStorage.removeItem('username')
+  localStorage.removeItem('userId')
+  appStore.showToast('已退出登录', 'info')
+  // 刷新页面让路由守卫重新检查
+  router.push('/login')
+}
 
 // Delete tag
 const showDeleteTagDialog = ref(false)

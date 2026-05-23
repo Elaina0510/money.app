@@ -7,11 +7,14 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.attachment import Attachment
+from app.config import MAX_FILE_SIZE
 from app.utils.file_utils import (
     ensure_upload_dir,
     generate_stored_path,
     validate_file_type,
+    validate_file_content,
     validate_file_size,
+    validate_total_upload_size,
     delete_file,
     get_full_path,
 )
@@ -31,7 +34,7 @@ async def upload_attachment(
     if not file.filename:
         return {"code": Code.PARAM_ERROR, "message": "未选择文件"}
 
-    # Validate file type
+    # Validate file type by extension
     if not validate_file_type(file.filename, file.content_type):
         return {
             "code": Code.FILE_INVALID,
@@ -46,7 +49,22 @@ async def upload_attachment(
     if not validate_file_size(file_size):
         return {
             "code": Code.FILE_INVALID,
-            "message": "文件大小超过限制（最大 10MB）",
+            "message": f"文件大小超过限制（最大 {MAX_FILE_SIZE // (1024*1024)}MB）",
+        }
+
+    # Validate file content by magic bytes (防止伪造 MIME 类型)
+    if not validate_file_content(content):
+        return {
+            "code": Code.FILE_INVALID,
+            "message": "文件内容格式无效，请上传真实图片文件",
+        }
+
+    # Validate total upload size
+    is_within_limit, current_total = validate_total_upload_size()
+    if not is_within_limit:
+        return {
+            "code": Code.FILE_INVALID,
+            "message": "上传空间已满，请删除部分附件后再试",
         }
 
     # Ensure upload directory exists

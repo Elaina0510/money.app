@@ -6,7 +6,9 @@ from pathlib import Path
 from app.config import (
     ALLOWED_IMAGE_EXTENSIONS,
     ALLOWED_MIME_TYPES,
+    IMAGE_SIGNATURES,
     MAX_FILE_SIZE,
+    MAX_TOTAL_UPLOAD_SIZE,
     UPLOAD_DIR,
 )
 
@@ -39,9 +41,35 @@ def validate_file_type(filename: str, mime_type: str | None = None) -> bool:
     return True
 
 
+def validate_file_content(content: bytes) -> bool:
+    """Validate file content by checking magic bytes (signature).
+
+    通过检查文件头部的 Magic Bytes 来验证文件类型，
+    防止客户端伪造 MIME 类型上传非图片文件。
+    """
+    for signature in IMAGE_SIGNATURES:
+        if content.startswith(signature):
+            return True
+    return False
+
+
 def validate_file_size(file_size: int) -> bool:
     """Validate that the file size does not exceed the maximum allowed."""
     return file_size <= MAX_FILE_SIZE
+
+
+def validate_total_upload_size() -> tuple[bool, int]:
+    """Validate that the total upload directory size does not exceed the limit.
+
+    Returns:
+        tuple[bool, int]: (is_within_limit, current_total_size)
+    """
+    total_size = 0
+    if UPLOAD_DIR.exists():
+        for file_path in UPLOAD_DIR.rglob("*"):
+            if file_path.is_file():
+                total_size += file_path.stat().st_size
+    return total_size <= MAX_TOTAL_UPLOAD_SIZE, total_size
 
 
 def delete_file(stored_path: str | Path) -> bool:

@@ -2,6 +2,12 @@ import { createRouter, createWebHashHistory } from 'vue-router'
 
 const routes = [
   {
+    path: '/login',
+    name: 'Login',
+    component: () => import('@/pages/LoginPage.vue'),
+    meta: { title: '登录', public: true },
+  },
+  {
     path: '/',
     name: 'Dashboard',
     component: () => import('@/pages/DashboardPage.vue'),
@@ -54,6 +60,20 @@ const routes = [
 const router = createRouter({
   history: createWebHashHistory(),
   routes,
+})
+
+// 路由守卫：未登录时跳转到登录页
+router.beforeEach((to, from, next) => {
+  if (to.meta.public) {
+    next()
+    return
+  }
+  const token = localStorage.getItem('token')
+  if (!token) {
+    next('/login')
+  } else {
+    next()
+  }
 })
 
 export default router

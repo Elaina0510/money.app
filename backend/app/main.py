@@ -14,7 +14,8 @@ from app.models.record import Record
 from app.models.record_tag import RecordTag
 from app.models.tag import Tag
 from app.models.attachment import Attachment
-from app.routers import records, categories, tags, attachments, statistics, budgets
+from app.models.user import User
+from app.routers import records, categories, tags, attachments, statistics, budgets, auth
 from app.utils.file_utils import ensure_upload_dir
 
 # Determine frontend dist directory
@@ -97,6 +98,7 @@ if FRONTEND_DIST.exists():
     app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="frontend_assets")
 
 # Register routers
+app.include_router(auth.router)
 app.include_router(categories.router)
 app.include_router(tags.router)
 app.include_router(records.router)
