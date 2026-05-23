@@ -11,6 +11,9 @@ class Record(SQLModel, table=True):
     __tablename__ = "records"
 
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(
+        default=None, nullable=True, foreign_key="users.id", ondelete="CASCADE"
+    )
     amount: float = Field(nullable=False)  # Always positive, type distinguishes income/expense
     type: str = Field(nullable=False)  # "income" or "expense"
     category_id: int = Field(nullable=False, foreign_key="categories.id")

@@ -10,10 +10,13 @@ class Category(SQLModel, table=True):
 
     __tablename__ = "categories"
     __table_args__ = (
-        UniqueConstraint("name", "type", name="idx_categories_name_type"),
+        UniqueConstraint("name", "type", "user_id", name="idx_categories_name_type_user"),
     )
 
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(
+        default=None, nullable=True, foreign_key="users.id", ondelete="CASCADE"
+    )
     name: str = Field(nullable=False)
     type: str = Field(nullable=False)  # "income" or "expense"
     icon: str = Field(default="mdi-cash", nullable=False)

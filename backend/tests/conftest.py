@@ -1,17 +1,20 @@
 """Test configuration and fixtures."""
 
-from typing import AsyncGenerator
+import asyncio
+from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import create_async_engine
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlalchemy.ext.asyncio import create_async_engine
 
-from app.main import app
 from app.database import get_session
+from app.main import app
 from app.models.category import Category
+from app.models.user import User
+from app.utils.auth import create_access_token, get_password_hash
 
 # Use in-memory SQLite for tests
 TEST_DATABASE_URL = "sqlite+aiosqlite://"
@@ -83,6 +86,38 @@ def event_loop():
     loop = asyncio.get_event_loop_policy().new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest_asyncio.fixture
+async def auth_user() -> User:
+    """Create a test user."""
+    async with AsyncSession(test_engine) as session:
+        user = User(
+            username="testuser",
+            hashed_password=get_password_hash("testpass"),
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        return user
+
+
+@pytest_asyncio.fixture
+async def auth_token(auth_user: User) -> str:
+    """Create a JWT token for the test user."""
+    return create_access_token(data={"sub": str(auth_user.id), "username": auth_user.username})
+
+
+@pytest_asyncio.fixture
+async def auth_client(
+    client: AsyncClient, auth_token: str
+) -> AsyncGenerator[AsyncClient, None]:
+    """Create an authenticated test client (independent from anonymous client)."""
+    del client  # Don't use the shared client — create an independent one
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        ac.headers["Authorization"] = f"Bearer {auth_token}"
+        yield ac
 
 
 @pytest_asyncio.fixture

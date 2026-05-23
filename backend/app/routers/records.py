@@ -4,9 +4,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
-from app.schemas.record import RecordCreate, RecordUpdate, BatchDeleteRequest
+from app.models.user import User
+from app.schemas.record import BatchDeleteRequest, RecordCreate, RecordUpdate
 from app.services import record_service
-from app.utils.response import success_response, error_response, Code
+from app.utils.auth import get_current_user
+from app.utils.response import Code, error_response, success_response
 
 router = APIRouter(prefix="/api/records", tags=["记账管理"])
 
@@ -15,10 +17,11 @@ router = APIRouter(prefix="/api/records", tags=["记账管理"])
 async def create_record(
     data: RecordCreate,
     db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Create a new record."""
     try:
-        record = await record_service.create_record(db, data)
+        record = await record_service.create_record(db, data, current_user)
         return success_response(
             data=await record_service._enrich_record(db, record),
             message="记账成功",
@@ -40,6 +43,7 @@ async def list_records(
     sort_by: str = Query("consume_time", description="排序字段: consume_time/amount"),
     sort_order: str = Query("desc", description="排序方向: asc/desc"),
     db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Get paginated records with filters."""
     result = await record_service.get_records(
@@ -54,6 +58,7 @@ async def list_records(
         keyword=keyword,
         sort_by=sort_by,
         sort_order=sort_order,
+        current_user=current_user,
     )
     return success_response(data=result)
 
@@ -61,9 +66,10 @@ async def list_records(
 @router.get("/quick-templates")
 async def quick_templates(
     db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Get recent records as quick-accounting templates."""
-    templates = await record_service.get_quick_templates(db)
+    templates = await record_service.get_quick_templates(db, current_user=current_user)
     return success_response(data=templates)
 
 

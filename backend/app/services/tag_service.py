@@ -3,15 +3,20 @@
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.tag import Tag
 from app.models.category import Category
+from app.models.tag import Tag
+from app.models.user import User
 from app.schemas.tag import TagCreate, TagUpdate
 from app.utils.response import Code
 
 
-async def get_tags(db: AsyncSession) -> list[Tag]:
-    """Get all tags."""
+async def get_tags(db: AsyncSession, current_user: User | None = None) -> list[Tag]:
+    """Get all tags visible to the user."""
     query = select(Tag).order_by(Tag.id)
+    if current_user:
+        query = query.where(Tag.user_id == current_user.id)
+    else:
+        query = query.where(Tag.user_id.is_(None))
     result = await db.exec(query)
     return list(result.all())
 
@@ -35,14 +40,20 @@ async def get_tag(db: AsyncSession, tag_id: int) -> dict | None:
     }
 
 
-async def create_tag(db: AsyncSession, data: TagCreate) -> Tag:
+async def create_tag(
+    db: AsyncSession, data: TagCreate, current_user: User | None = None
+) -> Tag:
     """Create a new tag, optionally with category_id."""
     # Validate category exists if provided
     if data.category_id:
         category = await db.get(Category, data.category_id)
         if not category:
             raise ValueError("关联的分类不存在")
-    tag = Tag(name=data.name, category_id=data.category_id)
+    tag = Tag(
+        name=data.name,
+        category_id=data.category_id,
+        user_id=current_user.id if current_user else None,
+    )
     db.add(tag)
     await db.commit()
     await db.refresh(tag)

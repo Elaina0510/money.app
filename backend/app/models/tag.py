@@ -11,6 +11,9 @@ class Tag(SQLModel, table=True):
     __tablename__ = "tags"
 
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(
+        default=None, nullable=True, foreign_key="users.id", ondelete="CASCADE"
+    )
     name: str = Field(nullable=False)
     # v1.1 新增：关联分类，可为 null
     category_id: int | None = Field(

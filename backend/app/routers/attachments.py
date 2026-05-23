@@ -1,13 +1,12 @@
 """Attachment API router."""
 
-from fastapi import APIRouter, Depends, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, File, Query, UploadFile
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.schemas.attachment import AttachmentResponse
 from app.services import attachment_service
-from app.utils.response import success_response, error_response, Code
-from app.config import UPLOAD_DIR
+from app.utils.response import Code, error_response, success_response
 
 router = APIRouter(prefix="/api/attachments", tags=["附件管理"])
 
@@ -22,7 +21,7 @@ async def upload_attachment(
     result = await attachment_service.upload_attachment(db, file, record_id)
     if isinstance(result, dict) and "code" in result:
         return error_response(result["code"], result["message"])
-    
+
     # Build response with URL
     url = f"/uploads/{result.stored_path}"
     resp = AttachmentResponse(

@@ -4,13 +4,14 @@ from calendar import monthrange
 from datetime import datetime
 from typing import Any
 
-from sqlmodel import select, func
+from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.budget import Budget
-from app.models.record import Record
 from app.models.category import Category
-from app.schemas.budget import BudgetCreate, BudgetUpdate, BatchBudgetRequest
+from app.models.record import Record
+from app.models.user import User
+from app.schemas.budget import BatchBudgetRequest, BudgetCreate, BudgetUpdate
 
 
 def _get_month_date_range(month: str) -> tuple[str, str]:
@@ -26,6 +27,7 @@ async def get_budgets(
     db: AsyncSession,
     month: str,
     type_filter: str | None = None,
+    current_user: User | None = None,
 ) -> list[dict[str, Any]]:
     """Get budgets for a given month, optionally filtered by category type."""
     if type_filter:
@@ -37,6 +39,12 @@ async def get_budgets(
         )
     else:
         stmt = select(Budget).where(Budget.month == month)
+
+    # Data isolation: filter by user_id
+    if current_user:
+        stmt = stmt.where(Budget.user_id == current_user.id)
+    else:
+        stmt = stmt.where(Budget.user_id.is_(None))
 
     result = await db.exec(stmt)
     budgets = list(result.all())
@@ -103,13 +111,15 @@ async def _enrich_budget(
 
 
 async def create_or_update_budget(
-    db: AsyncSession, data: BudgetCreate
+    db: AsyncSession, data: BudgetCreate, current_user: User | None = None
 ) -> Budget:
     """Create a budget or update if exists (upsert)."""
+    user_id = current_user.id if current_user else None
     # Check if budget already exists for this category and month
     stmt = select(Budget).where(
         Budget.category_id == data.category_id,
         Budget.month == data.month,
+        Budget.user_id == user_id,
     )
     result = await db.exec(stmt)
     existing = result.first()
@@ -130,6 +140,7 @@ async def create_or_update_budget(
         category_id=data.category_id,
         month=data.month,
         amount=data.amount,
+        user_id=user_id,
         created_at=now,
         updated_at=now,
     )
@@ -175,7 +186,7 @@ async def delete_budget(db: AsyncSession, budget_id: int) -> bool:
 
 
 async def batch_set_budgets(
-    db: AsyncSession, data: BatchBudgetRequest
+    db: AsyncSession, data: BatchBudgetRequest, current_user: User | None = None
 ) -> list[dict[str, Any]]:
     """Batch upsert budgets for a given month and return enriched data."""
     results = []
@@ -185,7 +196,7 @@ async def batch_set_budgets(
             month=data.month,
             amount=item.amount,
         )
-        budget = await create_or_update_budget(db, budget_data)
+        budget = await create_or_update_budget(db, budget_data, current_user)
         # Enrich immediately while the model is still fresh,
         # before any subsequent commits can expire it.
         enriched = await _enrich_budget(
@@ -198,13 +209,17 @@ async def batch_set_budgets(
 
 
 async def get_budget_overview(
-    db: AsyncSession, month: str
+    db: AsyncSession, month: str, current_user: User | None = None
 ) -> dict[str, Any]:
     """Get budget overview for a month."""
     start_date, end_date = _get_month_date_range(month)
 
     # Get all budgets for this month
     stmt = select(Budget).where(Budget.month == month)
+    if current_user:
+        stmt = stmt.where(Budget.user_id == current_user.id)
+    else:
+        stmt = stmt.where(Budget.user_id.is_(None))
     result = await db.exec(stmt)
     budgets = list(result.all())
 

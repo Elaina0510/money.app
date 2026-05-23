@@ -112,7 +112,7 @@ async def test_delete_budget(client, expense_category_id):
     assert resp.status_code == 200
 
     # Verify it's gone
-    resp = await client.get(f"/api/budgets?month=2026-06")
+    resp = await client.get("/api/budgets?month=2026-06")
     assert len(resp.json()["data"]) == 0
 
 
@@ -144,7 +144,7 @@ async def test_budget_overview(client, expense_category_id, income_category_id):
     # Create expense records
     await client.post(
         "/api/records",
-        json={"amount": 500.0, "type": "expense", "category_id": expense_category_id, "date": "2026-06-15", "tags": []},
+        json={"amount": 500.0, "type": "expense", "category_id": expense_category_id, "consume_time": "2026-06-15 12:00"},
     )
 
     # Create budget
@@ -176,8 +176,7 @@ async def test_budget_with_spending(client, expense_category_id):
                 "amount": 300.0,
                 "type": "expense",
                 "category_id": expense_category_id,
-                "date": "2026-06-15",
-                "tags": [],
+                "consume_time": "2026-06-15 12:00",
             },
         )
 
@@ -207,7 +206,7 @@ async def test_budget_exceeded(client, expense_category_id):
     """Test budget exceeded status."""
     await client.post(
         "/api/records",
-        json={"amount": 2500.0, "type": "expense", "category_id": expense_category_id, "date": "2026-06-15", "tags": []},
+        json={"amount": 2500.0, "type": "expense", "category_id": expense_category_id, "consume_time": "2026-06-15 12:00"},
     )
 
     await client.post(

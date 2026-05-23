@@ -32,8 +32,7 @@ async def test_create_expense_record(client, expense_category_id):
             "amount": 25.50,
             "type": "expense",
             "category_id": expense_category_id,
-            "date": "2026-06-01",
-            "tags": ["奶茶", "下午茶"],
+            "consume_time": "2026-06-01 12:00",
         },
     )
     assert resp.status_code == 200
@@ -41,7 +40,7 @@ async def test_create_expense_record(client, expense_category_id):
     assert data["code"] == 0
     assert data["data"]["amount"] == 25.50
     assert data["data"]["type"] == "expense"
-    assert data["data"]["tags"] == ["奶茶", "下午茶"]
+    assert data["data"]["tag"] is None
     assert data["data"]["category_name"] == "餐饮测试"
 
 
@@ -54,8 +53,7 @@ async def test_create_income_record(client, income_category_id):
             "amount": 5000.00,
             "type": "income",
             "category_id": income_category_id,
-            "date": "2026-06-01",
-            "tags": ["工资"],
+            "consume_time": "2026-06-01 12:00",
         },
     )
     assert resp.status_code == 200
@@ -74,8 +72,7 @@ async def test_create_record_with_zero_amount(client, expense_category_id):
             "amount": 0,
             "type": "expense",
             "category_id": expense_category_id,
-            "date": "2026-06-01",
-            "tags": [],
+            "consume_time": "2026-06-01 12:00",
         },
     )
     assert resp.status_code == 422  # Pydantic validation
@@ -90,8 +87,7 @@ async def test_create_record_with_negative_amount(client, expense_category_id):
             "amount": -50,
             "type": "expense",
             "category_id": expense_category_id,
-            "date": "2026-06-01",
-            "tags": [],
+            "consume_time": "2026-06-01 12:00",
         },
     )
     assert resp.status_code == 422
@@ -107,8 +103,7 @@ async def test_get_records(client, expense_category_id):
             "amount": 100.0,
             "type": "expense",
             "category_id": expense_category_id,
-            "date": "2026-06-01",
-            "tags": ["测试"],
+            "consume_time": "2026-06-01 12:00",
         },
     )
 
@@ -126,15 +121,15 @@ async def test_get_records_with_filters(client, expense_category_id, income_cate
     # Create records
     await client.post(
         "/api/records",
-        json={"amount": 100.0, "type": "expense", "category_id": expense_category_id, "date": "2026-06-01", "tags": []},
+        json={"amount": 100.0, "type": "expense", "category_id": expense_category_id, "consume_time": "2026-06-01 12:00"},
     )
     await client.post(
         "/api/records",
-        json={"amount": 200.0, "type": "expense", "category_id": expense_category_id, "date": "2026-06-02", "tags": []},
+        json={"amount": 200.0, "type": "expense", "category_id": expense_category_id, "consume_time": "2026-06-02 12:00"},
     )
     await client.post(
         "/api/records",
-        json={"amount": 5000.0, "type": "income", "category_id": income_category_id, "date": "2026-06-01", "tags": []},
+        json={"amount": 5000.0, "type": "income", "category_id": income_category_id, "consume_time": "2026-06-01 12:00"},
     )
 
     # Filter by type
@@ -154,7 +149,7 @@ async def test_get_single_record(client, expense_category_id):
     """Test fetching a single record."""
     resp = await client.post(
         "/api/records",
-        json={"amount": 50.0, "type": "expense", "category_id": expense_category_id, "date": "2026-06-01", "tags": ["午餐"]},
+        json={"amount": 50.0, "type": "expense", "category_id": expense_category_id, "consume_time": "2026-06-01 12:00"},
     )
     record_id = resp.json()["data"]["id"]
 
@@ -162,7 +157,7 @@ async def test_get_single_record(client, expense_category_id):
     assert resp.status_code == 200
     data = resp.json()
     assert data["data"]["id"] == record_id
-    assert data["data"]["tags"] == ["午餐"]
+    assert data["data"]["tag"] is None
 
 
 @pytest.mark.asyncio
@@ -170,18 +165,17 @@ async def test_update_record(client, expense_category_id):
     """Test updating a record."""
     resp = await client.post(
         "/api/records",
-        json={"amount": 50.0, "type": "expense", "category_id": expense_category_id, "date": "2026-06-01", "tags": ["旧标签"]},
+        json={"amount": 50.0, "type": "expense", "category_id": expense_category_id, "consume_time": "2026-06-01 12:00"},
     )
     record_id = resp.json()["data"]["id"]
 
     resp = await client.put(
         f"/api/records/{record_id}",
-        json={"amount": 75.0, "tags": ["新标签"]},
+        json={"amount": 75.0},
     )
     assert resp.status_code == 200
     data = resp.json()
     assert data["data"]["amount"] == 75.0
-    assert data["data"]["tags"] == ["新标签"]
 
 
 @pytest.mark.asyncio
@@ -189,7 +183,7 @@ async def test_delete_record(client, expense_category_id):
     """Test deleting a record."""
     resp = await client.post(
         "/api/records",
-        json={"amount": 50.0, "type": "expense", "category_id": expense_category_id, "date": "2026-06-01", "tags": []},
+        json={"amount": 50.0, "type": "expense", "category_id": expense_category_id, "consume_time": "2026-06-01 12:00"},
     )
     record_id = resp.json()["data"]["id"]
 
@@ -207,7 +201,7 @@ async def test_batch_delete(client, expense_category_id):
     for i in range(3):
         resp = await client.post(
             "/api/records",
-            json={"amount": float(i + 1), "type": "expense", "category_id": expense_category_id, "date": "2026-06-01", "tags": []},
+            json={"amount": float(i + 1), "type": "expense", "category_id": expense_category_id, "consume_time": "2026-06-01 12:00"},
         )
         ids.append(resp.json()["data"]["id"])
 
@@ -234,8 +228,7 @@ async def test_quick_templates(client, expense_category_id):
                 "amount": float(i + 1) * 10,
                 "type": "expense",
                 "category_id": expense_category_id,
-                "date": f"2026-06-{i + 1:02d}",
-                "tags": [f"标签{i}"],
+                "consume_time": f"2026-06-{i + 1:02d} 12:00",
             },
         )
 

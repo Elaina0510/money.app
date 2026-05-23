@@ -10,10 +10,13 @@ class Budget(SQLModel, table=True):
 
     __tablename__ = "budgets"
     __table_args__ = (
-        UniqueConstraint("category_id", "month", name="idx_budgets_category_month"),
+        UniqueConstraint("category_id", "month", "user_id", name="idx_budgets_category_month_user"),
     )
 
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(
+        default=None, nullable=True, foreign_key="users.id", ondelete="CASCADE"
+    )
     category_id: int = Field(nullable=False, foreign_key="categories.id")
     month: str = Field(nullable=False)  # YYYY-MM format
     amount: float = Field(nullable=False)  # Budget amount

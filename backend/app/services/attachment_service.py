@@ -1,22 +1,21 @@
 """Attachment business logic."""
 
-from pathlib import Path
 
 from fastapi import UploadFile
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.attachment import Attachment
 from app.config import MAX_FILE_SIZE
+from app.models.attachment import Attachment
 from app.utils.file_utils import (
+    delete_file,
     ensure_upload_dir,
     generate_stored_path,
-    validate_file_type,
+    get_full_path,
     validate_file_content,
     validate_file_size,
+    validate_file_type,
     validate_total_upload_size,
-    delete_file,
-    get_full_path,
 )
 from app.utils.response import Code
 

@@ -2,23 +2,39 @@
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, HTTPException, status
-from sqlmodel import select
+from fastapi import APIRouter, Depends
+from sqlmodel import SQLModel, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
 from app.database import get_session
+from app.models.budget import Budget
+from app.models.category import Category
+from app.models.record import Record
+from app.models.tag import Tag
 from app.models.user import User
-from app.schemas.user import UserRegister, UserLogin, TokenResponse, UserInfo
+from app.schemas.user import TokenResponse, UserInfo, UserLogin, UserRegister
 from app.utils.auth import (
-    get_password_hash,
-    verify_password,
     create_access_token,
     get_current_user,
+    get_password_hash,
+    verify_password,
 )
-from app.utils.response import success_response, error_response, Code
+from app.utils.response import Code, error_response, success_response
 
 router = APIRouter(prefix="/api/auth", tags=["用户认证"])
+
+
+async def _migrate_orphan_data(db: AsyncSession, user_id: int):
+    """Assign orphan data (user_id IS NULL) to the first registered user."""
+    tables: list[type[SQLModel]] = [Record, Budget, Category, Tag]
+    for table in tables:
+        stmt = select(table).where(table.user_id.is_(None))  # type: ignore[attr-defined]
+        result = await db.exec(stmt)
+        orphans = list(result.all())
+        for row in orphans:
+            row.user_id = user_id
+    await db.commit()
 
 
 @router.post("/register")
@@ -34,11 +50,23 @@ async def register(
     if existing:
         return error_response(Code.CONFLICT, "用户名已存在")
 
+    # Check if this is the first user
+    count_stmt = select(func.count(User.id))
+    count_result = await db.exec(count_stmt)
+    user_count = count_result.one()
+    is_first_user = user_count == 0
+
     user = User(
         username=data.username,
         hashed_password=get_password_hash(data.password),
     )
     db.add(user)
+    await db.flush()
+
+    # First user inherits all orphan data
+    if is_first_user:
+        await _migrate_orphan_data(db, user.id)
+
     await db.commit()
     await db.refresh(user)
 

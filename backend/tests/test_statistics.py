@@ -4,6 +4,36 @@ import pytest
 
 
 @pytest.fixture
+async def tag_lunch(client):
+    """Create a tag for lunch."""
+    resp = await client.post(
+        "/api/tags",
+        json={"name": "午餐"},
+    )
+    return resp.json()["data"]["id"]
+
+
+@pytest.fixture
+async def tag_dinner(client):
+    """Create a tag for dinner."""
+    resp = await client.post(
+        "/api/tags",
+        json={"name": "晚餐"},
+    )
+    return resp.json()["data"]["id"]
+
+
+@pytest.fixture
+async def tag_salary(client):
+    """Create a tag for salary."""
+    resp = await client.post(
+        "/api/tags",
+        json={"name": "月薪"},
+    )
+    return resp.json()["data"]["id"]
+
+
+@pytest.fixture
 async def expense_category_id(client):
     """Create an expense category."""
     resp = await client.post(
@@ -24,25 +54,25 @@ async def income_category_id(client):
 
 
 @pytest.fixture
-async def setup_test_data(client, expense_category_id, income_category_id):
+async def setup_test_data(client, expense_category_id, income_category_id, tag_lunch, tag_dinner, tag_salary):
     """Create test records for statistics."""
     # Expense records
     await client.post(
         "/api/records",
-        json={"amount": 100.0, "type": "expense", "category_id": expense_category_id, "date": "2026-01-15", "tags": ["午餐"]},
+        json={"amount": 100.0, "type": "expense", "category_id": expense_category_id, "consume_time": "2026-01-15 12:00", "tag_id": tag_lunch},
     )
     await client.post(
         "/api/records",
-        json={"amount": 200.0, "type": "expense", "category_id": expense_category_id, "date": "2026-02-10", "tags": ["晚餐"]},
+        json={"amount": 200.0, "type": "expense", "category_id": expense_category_id, "consume_time": "2026-02-10 12:00", "tag_id": tag_dinner},
     )
     # Income records
     await client.post(
         "/api/records",
-        json={"amount": 5000.0, "type": "income", "category_id": income_category_id, "date": "2026-01-01", "tags": ["月薪"]},
+        json={"amount": 5000.0, "type": "income", "category_id": income_category_id, "consume_time": "2026-01-01 12:00", "tag_id": tag_salary},
     )
     await client.post(
         "/api/records",
-        json={"amount": 5000.0, "type": "income", "category_id": income_category_id, "date": "2026-02-01", "tags": ["月薪"]},
+        json={"amount": 5000.0, "type": "income", "category_id": income_category_id, "consume_time": "2026-02-01 12:00", "tag_id": tag_salary},
     )
     yield
 

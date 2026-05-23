@@ -4,9 +4,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
-from app.schemas.category import CategoryCreate, CategoryUpdate, CategoryResponse
+from app.models.user import User
+from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
 from app.services import category_service
-from app.utils.response import success_response, error_response, Code
+from app.utils.auth import get_current_user
+from app.utils.response import Code, error_response, success_response
 
 router = APIRouter(prefix="/api/categories", tags=["分类管理"])
 
@@ -15,9 +17,10 @@ router = APIRouter(prefix="/api/categories", tags=["分类管理"])
 async def list_categories(
     type: str | None = Query(None, description="筛选类型: income/expense"),
     db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Get all categories, optionally filtered by type."""
-    categories = await category_service.get_categories(db, type)
+    categories = await category_service.get_categories(db, type, current_user)
     return success_response(
         data=[CategoryResponse.model_validate(c, from_attributes=True).model_dump() for c in categories]
     )
@@ -27,14 +30,17 @@ async def list_categories(
 async def create_category(
     data: CategoryCreate,
     db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Create a new custom category."""
     try:
-        category = await category_service.create_category(db, data)
+        category = await category_service.create_category(db, data, current_user)
         return success_response(
             data=CategoryResponse.model_validate(category, from_attributes=True).model_dump(),
             message="分类创建成功",
         )
+    except ValueError as e:
+        return error_response(Code.CONFLICT, str(e))
     except Exception as e:
         if "UNIQUE constraint" in str(e):
             return error_response(Code.CONFLICT, "该名称的分类已存在")

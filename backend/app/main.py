@@ -1,19 +1,15 @@
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-
-from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 
 from app.config import UPLOAD_DIR
 from app.database import create_all_tables, engine
 from app.models.category import Category
-from app.models.record import Record
-from app.models.tag import Tag
-from app.models.attachment import Attachment
-from app.routers import records, categories, tags, attachments, statistics, budgets, auth
+from app.routers import attachments, auth, budgets, categories, records, statistics, tags
 from app.utils.file_utils import ensure_upload_dir
 
 # Determine frontend dist directory
@@ -45,8 +41,8 @@ PRESET_CATEGORIES = [
 
 async def init_preset_data() -> None:
     """Insert preset categories if they don't exist."""
-    from sqlmodel.ext.asyncio.session import AsyncSession
     from sqlmodel import select
+    from sqlmodel.ext.asyncio.session import AsyncSession
 
     async with AsyncSession(engine) as session:
         for cat_data in PRESET_CATEGORIES:

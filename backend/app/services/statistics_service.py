@@ -2,12 +2,20 @@
 
 from typing import Any
 
-from sqlmodel import select, func, text
+from sqlmodel import func, select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.category import Category
 from app.models.record import Record
 from app.models.tag import Tag
-from app.models.category import Category
+from app.models.user import User
+
+
+def _apply_user_filter(query, current_user: User | None):
+    """Apply user_id filter to a statistics query on Record table."""
+    if current_user:
+        return query.where(Record.user_id == current_user.id)
+    return query.where(Record.user_id.is_(None))
 
 
 async def get_summary(
@@ -15,6 +23,7 @@ async def get_summary(
     period: str,
     start_date: str,
     end_date: str,
+    current_user: User | None = None,
 ) -> dict[str, Any]:
     """Get income/expense summary for a given period.
     Uses consume_time for date filtering (v1.1).
@@ -31,6 +40,7 @@ async def get_summary(
         ).label("total_expense"),
         func.count(Record.id).label("transaction_count"),
     ).where(Record.consume_time >= start_date, Record.consume_time <= end_filter)
+    query = _apply_user_filter(query, current_user)
 
     result = await db.exec(query)
     row = result.one()
@@ -54,6 +64,7 @@ async def get_category_stats(
     type_filter: str,
     start_date: str,
     end_date: str,
+    current_user: User | None = None,
 ) -> dict[str, Any]:
     """Get expense statistics by category."""
     end_filter = end_date + " 23:59" if len(end_date) <= 10 else end_date
@@ -66,6 +77,7 @@ async def get_category_stats(
         Record.consume_time >= start_date,
         Record.consume_time <= end_filter,
     )
+    total_stmt = _apply_user_filter(total_stmt, current_user)
     total_result = await db.exec(total_stmt)
     total_amount = float(total_result.one() or 0)
 
@@ -84,6 +96,7 @@ async def get_category_stats(
         .group_by(Record.category_id)
         .order_by(func.sum(Record.amount).desc())
     )
+    stmt = _apply_user_filter(stmt, current_user)
     result = await db.exec(stmt)
     rows = result.all()
 
@@ -112,6 +125,7 @@ async def get_tag_stats(
     db: AsyncSession,
     start_date: str,
     end_date: str,
+    current_user: User | None = None,
 ) -> dict[str, Any]:
     """Get statistics by tag (v1.1: single tag per record)."""
     end_filter = end_date + " 23:59" if len(end_date) <= 10 else end_date
@@ -131,6 +145,7 @@ async def get_tag_stats(
         .group_by(Tag.name)
         .order_by(func.sum(Record.amount).desc())
     )
+    stmt = _apply_user_filter(stmt, current_user)
     result = await db.exec(stmt)
     rows = result.all()
 
@@ -151,6 +166,7 @@ async def get_trend(
     group_by: str,
     start_date: str,
     end_date: str,
+    current_user: User | None = None,
 ) -> dict[str, Any]:
     """Get income/expense trend grouped by day, week, month, or year."""
     end_filter = end_date + " 23:59" if len(end_date) <= 10 else end_date
@@ -179,6 +195,7 @@ async def get_trend(
         .group_by(text("period"))
         .order_by(text("period"))
     )
+    stmt = _apply_user_filter(stmt, current_user)
     result = await db.exec(stmt)
     rows = result.all()
 
@@ -201,10 +218,11 @@ async def get_compare(
     end_date_1: str,
     start_date_2: str,
     end_date_2: str,
+    current_user: User | None = None,
 ) -> dict[str, Any]:
     """Compare income/expense between two periods."""
-    summary_1 = await get_summary(db, "custom", start_date_1, end_date_1)
-    summary_2 = await get_summary(db, "custom", start_date_2, end_date_2)
+    summary_1 = await get_summary(db, "custom", start_date_1, end_date_1, current_user)
+    summary_2 = await get_summary(db, "custom", start_date_2, end_date_2, current_user)
 
     income_change = 0.0
     expense_change = 0.0

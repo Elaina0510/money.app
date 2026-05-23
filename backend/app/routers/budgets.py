@@ -4,13 +4,15 @@ from fastapi import APIRouter, Depends, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
+from app.models.user import User
 from app.schemas.budget import (
+    BatchBudgetRequest,
     BudgetCreate,
     BudgetUpdate,
-    BatchBudgetRequest,
 )
 from app.services import budget_service
-from app.utils.response import success_response, error_response, Code
+from app.utils.auth import get_current_user
+from app.utils.response import Code, error_response, success_response
 
 router = APIRouter(prefix="/api/budgets", tags=["预算管理"])
 
@@ -20,9 +22,10 @@ async def list_budgets(
     month: str = Query(..., pattern=r"^\d{4}-\d{2}$", description="月份 YYYY-MM"),
     type: str | None = Query(None, description="分类类型: income/expense"),
     db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Get budgets for a given month, optionally filtered by category type."""
-    budgets = await budget_service.get_budgets(db, month, type)
+    budgets = await budget_service.get_budgets(db, month, type, current_user)
     return success_response(data=budgets)
 
 
@@ -30,10 +33,11 @@ async def list_budgets(
 async def create_budget(
     data: BudgetCreate,
     db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Create or update a budget (upsert)."""
     try:
-        budget = await budget_service.create_or_update_budget(db, data)
+        budget = await budget_service.create_or_update_budget(db, data, current_user)
         # Enrich for response
         enriched = await budget_service._enrich_budget(
             db, budget, data.month, category_id=data.category_id, budget_amount=data.amount
@@ -79,8 +83,9 @@ async def delete_budget(
 async def batch_set_budgets(
     data: BatchBudgetRequest,
     db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
 ):
     """Batch set budgets (upsert)."""
-    enriched_list = await budget_service.batch_set_budgets(db, data)
+    enriched_list = await budget_service.batch_set_budgets(db, data, current_user)
     return success_response(data=enriched_list, message="预算批量设置成功")
 

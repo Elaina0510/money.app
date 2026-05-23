@@ -3,19 +3,19 @@
 from datetime import datetime
 from typing import Any
 
-from sqlmodel import select, func, or_
+from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.attachment import Attachment
+from app.models.category import Category
 from app.models.record import Record
 from app.models.tag import Tag
-from app.models.category import Category
-from app.models.attachment import Attachment
+from app.models.user import User
 from app.schemas.record import RecordCreate, RecordUpdate
-from app.utils.response import Code
 
 
 async def create_record(
-    db: AsyncSession, data: RecordCreate
+    db: AsyncSession, data: RecordCreate, current_user: User | None = None
 ) -> Record:
     """Create a new record with a single tag."""
     # Validate category exists
@@ -39,6 +39,7 @@ async def create_record(
         tag_id=data.tag_id,
         consume_time=consume_time,
         note=data.note,
+        user_id=current_user.id if current_user else None,
         created_at=now,
         updated_at=now,
     )
@@ -60,10 +61,19 @@ async def get_records(
     keyword: str | None = None,
     sort_by: str = "consume_time",
     sort_order: str = "desc",
+    current_user: User | None = None,
 ) -> dict[str, Any]:
     """Get paginated records with optional filters."""
     query = select(Record)
     count_query = select(func.count(Record.id))
+
+    # Data isolation: filter by user_id
+    if current_user:
+        query = query.where(Record.user_id == current_user.id)
+        count_query = count_query.where(Record.user_id == current_user.id)
+    else:
+        query = query.where(Record.user_id.is_(None))
+        count_query = count_query.where(Record.user_id.is_(None))
 
     # Apply filters
     if start_date:
@@ -93,11 +103,11 @@ async def get_records(
     total = count_result.one()
 
     # Apply sorting — 使用白名单防止意外的属性注入
-    VALID_SORT_BY = {"consume_time", "amount", "created_at", "updated_at"}
-    if sort_by not in VALID_SORT_BY:
+    _valid_sort_by = {"consume_time", "amount", "created_at", "updated_at"}
+    if sort_by not in _valid_sort_by:
         sort_by = "consume_time"
-    VALID_SORT_ORDER = {"asc", "desc"}
-    if sort_order not in VALID_SORT_ORDER:
+    _valid_sort_order = {"asc", "desc"}
+    if sort_order not in _valid_sort_order:
         sort_order = "desc"
 
     sort_column = getattr(Record, sort_by, Record.consume_time)
@@ -186,14 +196,15 @@ async def batch_delete_records(db: AsyncSession, ids: list[int]) -> int:
 
 
 async def get_quick_templates(
-    db: AsyncSession, limit: int = 10
+    db: AsyncSession, limit: int = 10, current_user: User | None = None
 ) -> list[dict[str, Any]]:
     """Get recent records as quick-accounting templates."""
-    query = (
-        select(Record)
-        .order_by(Record.updated_at.desc())
-        .limit(limit)
-    )
+    query = select(Record).order_by(Record.updated_at.desc())
+    if current_user:
+        query = query.where(Record.user_id == current_user.id)
+    else:
+        query = query.where(Record.user_id.is_(None))
+    query = query.limit(limit)
     result = await db.exec(query)
     records = list(result.all())
     items = []

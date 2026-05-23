@@ -1,33 +1,55 @@
 """Category business logic."""
 
-from sqlmodel import select, func
+from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.category import Category
 from app.models.record import Record
+from app.models.user import User
 from app.schemas.category import CategoryCreate, CategoryUpdate
 from app.utils.response import Code
 
 
 async def get_categories(
-    db: AsyncSession, type_filter: str | None = None
+    db: AsyncSession, type_filter: str | None = None, current_user: User | None = None
 ) -> list[Category]:
-    """Get all categories, optionally filtered by type."""
+    """Get all categories visible to the user: presets + own custom ones."""
     query = select(Category).order_by(Category.sort_order, Category.id)
     if type_filter:
         query = query.where(Category.type == type_filter)
+    # Filter by user_id: preset categories visible to all, custom only to owner
+    if current_user:
+        query = query.where(
+            (Category.is_preset == 1) | (Category.user_id == current_user.id)
+        )
+    else:
+        query = query.where(Category.user_id.is_(None))
     result = await db.exec(query)
     return list(result.all())
 
 
-async def create_category(db: AsyncSession, data: CategoryCreate) -> Category:
+async def create_category(
+    db: AsyncSession, data: CategoryCreate, current_user: User | None = None
+) -> Category:
     """Create a new custom category."""
+    # Check for duplicate name+type for this user
+    user_id = current_user.id if current_user else None
+    dup_stmt = select(Category).where(
+        Category.name == data.name,
+        Category.type == data.type,
+        Category.user_id == user_id,
+    )
+    dup_result = await db.exec(dup_stmt)
+    if dup_result.first():
+        raise ValueError("该名称的分类已存在")
+
     category = Category(
         name=data.name,
         type=data.type,
         icon=data.icon,
         sort_order=data.sort_order,
         is_preset=0,
+        user_id=user_id,
     )
     db.add(category)
     await db.commit()
