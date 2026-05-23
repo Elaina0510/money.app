@@ -1,6 +1,5 @@
 """Statistics business logic."""
 
-from datetime import datetime, timedelta
 from typing import Any
 
 from sqlmodel import select, func, text

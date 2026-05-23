@@ -5,7 +5,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.schemas.record import RecordCreate, RecordUpdate, BatchDeleteRequest
-from app.schemas.record import RecordResponse, RecordListResponse
 from app.services import record_service
 from app.utils.response import success_response, error_response, Code
 

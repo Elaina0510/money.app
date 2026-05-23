@@ -34,33 +34,6 @@ class RecordUpdate(BaseModel):
     note: str | None = Field(default=None, max_length=500)
 
 
-class RecordResponse(BaseModel):
-    """Schema for record detail response."""
-
-    id: int
-    amount: float
-    type: str
-    category_id: int
-    category_name: str = ""
-    category_icon: str = ""  # v1.1 新增
-    tag: dict | None = None  # v1.1 变更：替换 tags: list[str]
-    attachment_ids: list[int] = []
-    consume_time: str  # v1.1 变更：替换 date
-    note: str | None = None  # v1.1 新增
-    created_at: str
-    updated_at: str
-
-
-class RecordListResponse(BaseModel):
-    """Schema for paginated record list response."""
-
-    items: list[RecordResponse] = []
-    total: int = 0
-    page: int = 1
-    page_size: int = 20
-    total_pages: int = 0
-
-
 class BatchDeleteRequest(BaseModel):
     """Schema for batch delete request."""
 

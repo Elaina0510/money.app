@@ -11,7 +11,6 @@ from app.models.budget import Budget
 from app.models.record import Record
 from app.models.category import Category
 from app.schemas.budget import BudgetCreate, BudgetUpdate, BatchBudgetRequest
-from app.utils.response import Code
 
 
 def _get_month_date_range(month: str) -> tuple[str, str]:
@@ -79,8 +78,8 @@ async def _enrich_budget(
     ).where(
         Record.category_id == cid,
         Record.type == "expense",
-        Record.date >= start_date,
-        Record.date <= end_date,
+        Record.consume_time >= start_date,
+        Record.consume_time <= end_date,
     )
     spent_result = await db.exec(spent_stmt)
     spent = float(spent_result.one() or 0)
@@ -227,8 +226,8 @@ async def get_budget_overview(
         ).where(
             Record.category_id == cid,
             Record.type == "expense",
-            Record.date >= start_date,
-            Record.date <= end_date,
+            Record.consume_time >= start_date,
+            Record.consume_time <= end_date,
         )
         spent_result = await db.exec(spent_stmt)
         spent = float(spent_result.one() or 0)

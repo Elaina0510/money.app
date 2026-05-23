@@ -6,7 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.category import Category
 from app.models.record import Record
 from app.schemas.category import CategoryCreate, CategoryUpdate
-from app.utils.response import Code, error_response
+from app.utils.response import Code
 
 
 async def get_categories(

@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { getCategories, createCategory, updateCategory, deleteCategory } from '@/api/categories'
-import { getTags, createTag, updateTag, deleteTag } from '@/api/tags'
+import { getTags, createTag, deleteTag } from '@/api/tags'
 import { useAppStore } from './useAppStore'
 
 export const useCategoriesStore = defineStore('categories', () => {
@@ -110,7 +110,6 @@ export const useCategoriesStore = defineStore('categories', () => {
     editCategory,
     removeCategory,
     addTag,
-    updateTagItem,
     removeTag,
   }
 })

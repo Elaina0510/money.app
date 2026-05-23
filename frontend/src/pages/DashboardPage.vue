@@ -166,16 +166,8 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { getRecords } from '@/api/records'
 import { getSummary, getByCategory } from '@/api/statistics'
-import { formatAmount, formatDate, getCurrentMonthRange } from '@/utils/format'
+import { formatAmount, getCurrentMonthRange } from '@/utils/format'
 import dayjs from 'dayjs'
-function recordTypeColor(name) {
-  const colors = ['#FFE8E8', '#FFF3E0', '#FFF8E1', '#E8F5E9', '#E0F7FA', '#E3F2FD', '#EDE7F6', '#FCE4EC']
-  let hash = 0
-  for (let i = 0; i < (name || '').length; i++) {
-    hash = name.charCodeAt(i) + ((hash << 5) - hash)
-  }
-  return colors[Math.abs(hash) % colors.length]
-}
 
 const router = useRouter()
 const records = ref([])

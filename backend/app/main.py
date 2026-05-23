@@ -11,10 +11,8 @@ from app.config import UPLOAD_DIR
 from app.database import create_all_tables, engine
 from app.models.category import Category
 from app.models.record import Record
-from app.models.record_tag import RecordTag
 from app.models.tag import Tag
 from app.models.attachment import Attachment
-from app.models.user import User
 from app.routers import records, categories, tags, attachments, statistics, budgets, auth
 from app.utils.file_utils import ensure_upload_dir
 

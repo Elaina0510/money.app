@@ -13,9 +13,3 @@ class AttachmentResponse(BaseModel):
     file_size: int
     mime_type: str
     created_at: str
-
-
-class AttachmentListResponse(BaseModel):
-    """Schema for list of attachments."""
-
-    items: list[AttachmentResponse] = []
