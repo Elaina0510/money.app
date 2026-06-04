@@ -126,3 +126,53 @@ async def db_session() -> AsyncGenerator[AsyncSession, None]:
     async with AsyncSession(test_engine) as session:
         yield session
 
+
+@pytest_asyncio.fixture
+async def user_a() -> User:
+    """Create test user A."""
+    async with AsyncSession(test_engine) as session:
+        user = User(
+            username="user_a",
+            hashed_password=get_password_hash("pass_a"),
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        return user
+
+
+@pytest_asyncio.fixture
+async def user_b() -> User:
+    """Create test user B."""
+    async with AsyncSession(test_engine) as session:
+        user = User(
+            username="user_b",
+            hashed_password=get_password_hash("pass_b"),
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        return user
+
+
+@pytest_asyncio.fixture
+async def auth_client_a(client: AsyncClient, user_a: User) -> AsyncGenerator[AsyncClient, None]:
+    """Authenticated client for user A."""
+    del client  # Ensure get_session override is active; create independent client
+    token = create_access_token(data={"sub": str(user_a.id), "username": user_a.username})
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        ac.headers["Authorization"] = f"Bearer {token}"
+        yield ac
+
+
+@pytest_asyncio.fixture
+async def auth_client_b(client: AsyncClient, user_b: User) -> AsyncGenerator[AsyncClient, None]:
+    """Authenticated client for user B."""
+    del client  # Ensure get_session override is active; create independent client
+    token = create_access_token(data={"sub": str(user_b.id), "username": user_b.username})
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        ac.headers["Authorization"] = f"Bearer {token}"
+        yield ac
+

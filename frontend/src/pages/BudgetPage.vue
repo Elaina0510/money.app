@@ -30,7 +30,7 @@
     <v-card class="pa-4 mb-3">
       <div class="d-flex justify-space-between align-center mb-3">
         <span class="text-subtitle-2 font-weight-bold">分类预算</span>
-        <v-btn size="small" color="primary" variant="tonal" @click="showAddDialog = true">
+        <v-btn size="small" color="primary" variant="tonal" @click="openAddDialog">
           <v-icon start size="small">mdi-plus</v-icon>
           设置
         </v-btn>
@@ -40,22 +40,48 @@
         暂无预算设置，点击上方按钮添加分类预算
       </div>
 
-      <div v-for="item in budgets" :key="item.category_id" class="budget-item mb-3">
+      <div v-for="(item, index) in enrichedBudgets" :key="item.category_id" class="budget-item mb-3">
         <div class="d-flex justify-space-between align-center mb-1">
           <div class="d-flex align-center">
-            <v-avatar size="32" :color="item.color + '20'" class="mr-2">
-              <v-icon size="small" :color="item.color">{{ item.icon }}</v-icon>
+            <v-avatar size="32" :color="getColor(index) + '20'" class="mr-2">
+              <v-icon size="small" :color="getColor(index)">{{ item.icon }}</v-icon>
             </v-avatar>
             <span class="text-body-2 font-weight-medium">{{ item.category_name }}</span>
           </div>
-          <div class="text-body-2 text-right">
-            <span class="font-weight-bold">{{ formatAmount(item.spent) }}</span>
-            <span class="text-grey"> / {{ formatAmount(item.budget) }}</span>
+          <div class="d-flex align-center">
+            <template v-if="editingBudget === item.category_id">
+              <v-text-field
+                v-model.number="editAmount"
+                type="number"
+                density="compact"
+                hide-details
+                variant="outlined"
+                prefix="¥"
+                style="width: 120px"
+                class="mr-1"
+                autofocus
+                @keyup.enter="saveEdit(item)"
+                @keyup.escape="cancelEdit"
+              />
+              <v-btn icon size="x-small" variant="text" color="primary" @click="saveEdit(item)" :loading="saving">
+                <v-icon size="small">mdi-check</v-icon>
+              </v-btn>
+              <v-btn icon size="x-small" variant="text" @click="cancelEdit">
+                <v-icon size="small">mdi-close</v-icon>
+              </v-btn>
+            </template>
+            <template v-else>
+              <span class="text-body-2 font-weight-bold">{{ formatAmount(item.spent) }}</span>
+              <span class="text-grey"> / {{ formatAmount(item.amount) }}</span>
+              <v-btn icon size="x-small" variant="text" class="ml-1" @click="startEdit(item)">
+                <v-icon size="small" color="grey">mdi-pencil</v-icon>
+              </v-btn>
+            </template>
           </div>
         </div>
         <v-progress-linear
-          :model-value="(item.spent / item.budget) * 100"
-          :color="(item.spent / item.budget) > 0.8 ? 'error' : (item.spent / item.budget) > 0.5 ? 'warning' : 'primary'"
+          :model-value="item.amount > 0 ? (item.spent / item.amount) * 100 : 0"
+          :color="item.amount > 0 && (item.spent / item.amount) > 0.8 ? 'error' : item.amount > 0 && (item.spent / item.amount) > 0.5 ? 'warning' : 'primary'"
           height="6"
           rounded
         />
@@ -68,7 +94,7 @@
         <v-card-title class="text-h6 pa-0 mb-3">设置分类预算</v-card-title>
         <v-select
           v-model="budgetForm.category_id"
-          :items="categories"
+          :items="availableCategories"
           item-title="name"
           item-value="id"
           label="选择分类"
@@ -94,56 +120,128 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import dayjs from 'dayjs'
+import { getBudgets, batchSetBudgets } from '@/api/budgets'
 import { getCategories } from '@/api/categories'
-import { getByCategory, getSummary } from '@/api/statistics'
-import { formatAmount, getCurrentMonthRange } from '@/utils/format'
+import { formatAmount } from '@/utils/format'
+
+const COLOR_PALETTE = [
+  '#FF6B6B', '#4DABF7', '#9775FA', '#51CF66', '#FF922B',
+  '#22B8CF', '#F06595', '#845EF7', '#20C997', '#FD7E14',
+]
+
+function getColor(index) {
+  return COLOR_PALETTE[index % COLOR_PALETTE.length]
+}
 
 const showAddDialog = ref(false)
 const saving = ref(false)
 const categories = ref([])
-const categoryStats = ref([])
-const summary = ref(null)
-const budgets = ref([
-  // Sample budget data - in a real app this would come from backend
-  { category_id: 1, category_name: '餐饮', icon: 'mdi-food', color: '#FF6B6B', budget: 2000, spent: 1560 },
-  { category_id: 2, category_name: '交通', icon: 'mdi-car', color: '#4DABF7', budget: 500, spent: 320 },
-  { category_id: 3, category_name: '购物', icon: 'mdi-shopping', color: '#9775FA', budget: 1000, spent: 890 },
-])
+const budgets = ref([])
+const editingBudget = ref(null)
+const editAmount = ref(0)
+
+const currentMonth = dayjs().format('YYYY-MM')
 
 const budgetForm = ref({
   category_id: null,
   amount: 0,
 })
 
-const totalBudget = computed(() => budgets.value.reduce((sum, b) => sum + b.budget, 0))
+const totalBudget = computed(() => budgets.value.reduce((sum, b) => sum + b.amount, 0))
 const totalSpent = computed(() => budgets.value.reduce((sum, b) => sum + b.spent, 0))
 const budgetUsagePercent = computed(() => {
   if (totalBudget.value === 0) return 0
   return (totalSpent.value / totalBudget.value) * 100
 })
 
-async function saveBudget() {
+// Merge budget data with category icon for display
+const enrichedBudgets = computed(() => {
+  return budgets.value.map(b => {
+    const cat = categories.value.find(c => c.id === b.category_id)
+    return {
+      ...b,
+      icon: cat?.icon || 'mdi-cash',
+    }
+  })
+})
+
+// Filter categories to only show expense categories that don't already have a budget
+const availableCategories = computed(() => {
+  const budgetCategoryIds = budgets.value.map(b => b.category_id)
+  return categories.value.filter(c => c.type === 'expense' && !budgetCategoryIds.includes(c.id))
+})
+
+async function loadBudgets() {
+  try {
+    budgets.value = await getBudgets({ month: currentMonth }) || []
+  } catch (e) {
+    console.error('Load budgets error:', e)
+    budgets.value = []
+  }
+}
+
+async function loadCategories() {
+  try {
+    categories.value = await getCategories() || []
+  } catch (e) {
+    console.error('Load categories error:', e)
+    categories.value = []
+  }
+}
+
+function startEdit(item) {
+  editingBudget.value = item.category_id
+  editAmount.value = item.amount
+}
+
+function cancelEdit() {
+  editingBudget.value = null
+  editAmount.value = 0
+}
+
+async function saveEdit(item) {
+  if (editAmount.value <= 0) return
   saving.value = true
   try {
-    // In a real app, would call an API
+    await batchSetBudgets({
+      month: currentMonth,
+      budgets: [{ category_id: item.category_id, amount: editAmount.value }],
+    })
+    editingBudget.value = null
+    await loadBudgets()
+  } catch (e) {
+    console.error('Save budget error:', e)
+  } finally {
+    saving.value = false
+  }
+}
+
+function openAddDialog() {
+  budgetForm.value = { category_id: null, amount: 0 }
+  showAddDialog.value = true
+}
+
+async function saveBudget() {
+  if (!budgetForm.value.category_id || budgetForm.value.amount <= 0) return
+  saving.value = true
+  try {
+    await batchSetBudgets({
+      month: currentMonth,
+      budgets: [{ category_id: budgetForm.value.category_id, amount: budgetForm.value.amount }],
+    })
     showAddDialog.value = false
+    budgetForm.value = { category_id: null, amount: 0 }
+    await loadBudgets()
+  } catch (e) {
+    console.error('Save budget error:', e)
   } finally {
     saving.value = false
   }
 }
 
 onMounted(async () => {
-  try {
-    const range = getCurrentMonthRange()
-    const [cats, stats] = await Promise.all([
-      getCategories(),
-      getByCategory(range),
-    ])
-    categories.value = cats
-    categoryStats.value = stats || []
-  } catch (e) {
-    console.error('Budget page load error:', e)
-  }
+  await Promise.all([loadBudgets(), loadCategories()])
 })
 </script>
 

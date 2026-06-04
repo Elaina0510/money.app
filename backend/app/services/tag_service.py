@@ -1,5 +1,7 @@
 """Tag business logic."""
 
+from typing import Any
+
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -21,7 +23,7 @@ async def get_tags(db: AsyncSession, current_user: User | None = None) -> list[T
     return list(result.all())
 
 
-async def get_tag(db: AsyncSession, tag_id: int) -> dict | None:
+async def get_tag(db: AsyncSession, tag_id: int) -> dict[str, Any] | None:
     """Get a single tag with its associated category."""
     tag = await db.get(Tag, tag_id)
     if not tag:
@@ -40,9 +42,7 @@ async def get_tag(db: AsyncSession, tag_id: int) -> dict | None:
     }
 
 
-async def create_tag(
-    db: AsyncSession, data: TagCreate, current_user: User | None = None
-) -> Tag:
+async def create_tag(db: AsyncSession, data: TagCreate, current_user: User | None = None) -> Tag:
     """Create a new tag, optionally with category_id."""
     # Validate category exists if provided
     if data.category_id:
@@ -61,12 +61,20 @@ async def create_tag(
 
 
 async def update_tag(
-    db: AsyncSession, tag_id: int, data: TagUpdate
-) -> Tag | None:
+    db: AsyncSession,
+    tag_id: int,
+    data: TagUpdate,
+    current_user: User | None = None,
+) -> Tag | dict[str, Any] | None:
     """Update a tag name and/or category_id."""
     tag = await db.get(Tag, tag_id)
     if not tag:
         return None
+
+    # Ownership check
+    if tag.user_id is not None and (current_user is None or tag.user_id != current_user.id):
+        return {"code": Code.FORBIDDEN, "message": "无权操作"}
+
     update_data = data.model_dump(exclude_unset=True)
     # Validate category exists if being set
     if "category_id" in update_data and update_data["category_id"] is not None:
@@ -80,11 +88,18 @@ async def update_tag(
     return tag
 
 
-async def delete_tag(db: AsyncSession, tag_id: int) -> dict | None:
+async def delete_tag(
+    db: AsyncSession, tag_id: int, current_user: User | None = None
+) -> dict[str, Any] | None:
     """Delete a tag. Returns None if successful, or an error dict."""
     tag = await db.get(Tag, tag_id)
     if not tag:
         return {"code": Code.NOT_FOUND, "message": "标签不存在"}
+
+    # Ownership check
+    if tag.user_id is not None and (current_user is None or tag.user_id != current_user.id):
+        return {"code": Code.FORBIDDEN, "message": "无权操作"}
+
     await db.delete(tag)
     await db.commit()
     return None

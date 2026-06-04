@@ -58,6 +58,34 @@
       </div>
     </v-card>
 
+    <!-- Month Switcher -->
+    <v-card class="pa-2 mb-3" rounded="xl">
+      <div class="d-flex align-center">
+        <v-btn v-if="selectedYear !== currentYear - 5" icon variant="text" size="x-small"
+          class="d-none d-md-flex" @click="prevYear">
+          <v-icon size="small">mdi-chevron-left</v-icon>
+        </v-btn>
+        <div class="d-flex ga-1 overflow-x-auto flex-grow-1 pb-1" style="scrollbar-width: none;">
+          <div v-for="m in 12" :key="m" class="text-center flex-shrink-0" style="min-width: 48px;">
+            <v-chip
+              :color="selectedMonth === m && selectedYear === currentYear ? 'primary' : ''"
+              :variant="selectedMonth === m ? 'flat' : 'text'"
+              size="small" rounded="xl" @click="selectMonth(m)">
+              {{ m }}月
+            </v-chip>
+            <div v-if="selectedYear !== currentYear"
+              class="text-caption text-grey" style="font-size: 10px; line-height: 1; margin-top: 2px;">
+              {{ selectedYear }}
+            </div>
+          </div>
+        </div>
+        <v-btn v-if="selectedYear < currentYear" icon variant="text" size="x-small"
+          class="d-none d-md-flex" @click="nextYear">
+          <v-icon size="small">mdi-chevron-right</v-icon>
+        </v-btn>
+      </div>
+    </v-card>
+
     <!-- Batch Actions Bar -->
     <div v-if="selected.length > 0" class="batch-bar mb-3">
       <v-card rounded="xl" class="pa-2">
@@ -157,6 +185,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import dayjs from 'dayjs'
 import { getRecords } from '@/api/records'
 import { getCategories } from '@/api/categories'
 import { useRecordsStore } from '@/stores/useRecordsStore'
@@ -190,6 +219,23 @@ const categoryOptions = computed(() => {
   const list = [{ name: '全部分类', id: null }]
   return list.concat(categories.value)
 })
+
+const selectedMonth = ref(new Date().getMonth() + 1)
+const selectedYear = ref(new Date().getFullYear())
+const currentYear = new Date().getFullYear()
+
+function selectMonth(month) {
+  selectedMonth.value = month
+  const start = `${selectedYear.value}-${String(month).padStart(2, '0')}-01`
+  const endDate = new Date(selectedYear.value, month, 0)
+  const end = `${selectedYear.value}-${String(month).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
+  filters.start_date = start
+  filters.end_date = end
+  search()
+}
+
+function prevYear() { selectedYear.value-- }
+function nextYear() { if (selectedYear.value < currentYear) selectedYear.value++ }
 
 function goToDetail(id) {
   router.push(`/detail/${id}`)
@@ -232,7 +278,7 @@ async function handleBatchDelete() {
 onMounted(async () => {
   try {
     categories.value = await getCategories()
-    await search()
+    selectMonth(new Date().getMonth() + 1)
   } catch (e) {
     console.error('List load error:', e)
   }

@@ -18,10 +18,9 @@
       <v-btn
         :color="recordType === 'expense' ? '#FF6B6B' : ''"
         :variant="recordType === 'expense' ? 'flat' : 'outlined'"
-        block
         size="large"
         rounded="xl"
-        class="type-btn expense-btn"
+        class="type-btn expense-btn flex-grow-1"
         :class="{ 'active-expense': recordType === 'expense' }"
         @click="recordType = 'expense'"
       >
@@ -31,10 +30,9 @@
       <v-btn
         :color="recordType === 'income' ? '#20C997' : ''"
         :variant="recordType === 'income' ? 'flat' : 'outlined'"
-        block
         size="large"
         rounded="xl"
-        class="type-btn income-btn"
+        class="type-btn income-btn flex-grow-1"
         :class="{ 'active-income': recordType === 'income' }"
         @click="recordType = 'income'"
       >
@@ -197,7 +195,7 @@
               {{ tpl.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
             </v-icon>
           </v-avatar>
-          {{ tpl.category_name }} · ¥{{ tpl.amount }}
+          {{ tpl.tag?.name || tpl.category_name }} · ¥{{ tpl.amount }}
         </v-chip>
       </div>
     </v-card>
@@ -296,10 +294,9 @@ function fillTemplate(tpl) {
   recordType.value = tpl.type
   amount.value = String(tpl.amount)
   categoryId.value = tpl.category_id
-  if (tpl.consume_time) {
-    consumeDate.value = tpl.consume_time.substring(0, 10)
-    consumeTime.value = tpl.consume_time.substring(11, 16)
-  }
+  // 时间重置为当前时间
+  consumeDate.value = dayjs().format('YYYY-MM-DD')
+  consumeTime.value = dayjs().format('HH:mm')
   if (tpl.tag) {
     selectedTagId.value = tpl.tag.id
     selectedTagName.value = tpl.tag.name

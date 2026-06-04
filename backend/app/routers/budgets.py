@@ -88,4 +88,3 @@ async def batch_set_budgets(
     """Batch set budgets (upsert)."""
     enriched_list = await budget_service.batch_set_budgets(db, data, current_user)
     return success_response(data=enriched_list, message="预算批量设置成功")
-

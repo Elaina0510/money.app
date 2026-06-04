@@ -12,6 +12,7 @@ class Code:
     NOT_FOUND = 40002
     CONFLICT = 40003
     FILE_INVALID = 40004
+    FORBIDDEN = 40005
     SERVER_ERROR = 50001
 
 
@@ -21,6 +22,7 @@ CODE_MESSAGES: dict[int, str] = {
     Code.NOT_FOUND: "资源不存在",
     Code.CONFLICT: "操作冲突",
     Code.FILE_INVALID: "文件违规",
+    Code.FORBIDDEN: "无权操作",
     Code.SERVER_ERROR: "服务器内部错误",
 }
 

@@ -7,7 +7,7 @@
       :temporary="display.mdAndUp ? rail : true"
       :rail="false"
 
-      :width="display.mdAndUp ? 240 : 72"
+      :width="display.mdAndUp ? 240 : 56"
       class="app-sidebar"
       elevation="0"
     >
@@ -16,7 +16,7 @@
         <v-avatar color="primary" size="28" class="mr-1 flex-shrink-0">
           <v-icon color="white" size="16">mdi-wallet</v-icon>
         </v-avatar>
-        <div class="sidebar-header-text" style="min-width:0">
+        <div class="sidebar-header-text" style="min-width:0" v-show="display.mdAndUp">
           <div class="text-subtitle-2 font-weight-bold text-truncate" style="line-height: 1.2">Money App</div>
           <div class="text-caption text-truncate" style="color: rgba(0,0,0,0.5)">个人记账</div>
         </div>
@@ -40,7 +40,7 @@
           <template v-slot:prepend>
             <v-icon :icon="item.icon" size="24" />
           </template>
-          <v-list-item-title class="text-body-2 font-weight-medium">
+          <v-list-item-title class="text-body-2 font-weight-medium" :class="{ 'd-none': !display.mdAndUp }">
             {{ item.title }}
           </v-list-item-title>
         </v-list-item>
@@ -59,7 +59,7 @@
             <template v-slot:prepend>
               <v-icon icon="mdi-cog-outline" size="24" />
             </template>
-            <v-list-item-title class="text-body-2 font-weight-medium">
+            <v-list-item-title class="text-body-2 font-weight-medium" :class="{ 'd-none': !display.mdAndUp }">
               设置
             </v-list-item-title>
           </v-list-item>
@@ -195,16 +195,24 @@ function handleAuthLogout() {
   // 不强制跳转，用户可继续浏览但操作会失败
 }
 
+function handleAuthLogin() {
+  checkLogin()
+}
+
 let authLogoutHandler
+let authLoginHandler
 
 onMounted(() => {
   checkLogin()
   authLogoutHandler = () => handleAuthLogout()
+  authLoginHandler = () => handleAuthLogin()
   window.addEventListener('auth:logout', authLogoutHandler)
+  window.addEventListener('auth:login', authLoginHandler)
 })
 
 onUnmounted(() => {
   window.removeEventListener('auth:logout', authLogoutHandler)
+  window.removeEventListener('auth:login', authLoginHandler)
 })
 
 // 点击菜单按钮切换侧边栏
@@ -264,14 +272,6 @@ onMounted(() => {
   min-height: 64px;
 }
 
-@media (max-width: 959px) {
-  .sidebar-header .sidebar-header-text .text-subtitle-2 {
-    font-size: 0.7rem !important;
-  }
-  .sidebar-header .sidebar-header-text .text-caption {
-    font-size: 0.55rem !important;
-  }
-}
 
 .nav-item {
   transition: all 0.15s ease;

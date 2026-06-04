@@ -1,6 +1,7 @@
 """Statistics API router."""
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
@@ -19,7 +20,7 @@ async def get_summary(
     end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
     db: AsyncSession = Depends(get_session),
     current_user: User | None = Depends(get_current_user),
-):
+) -> JSONResponse:
     """Get income/expense summary."""
     if period not in ("day", "week", "month", "year"):
         return error_response(Code.PARAM_ERROR, "period 参数无效，可选: day/week/month/year")
@@ -34,11 +35,13 @@ async def get_by_category(
     end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
     db: AsyncSession = Depends(get_session),
     current_user: User | None = Depends(get_current_user),
-):
+) -> JSONResponse:
     """Get statistics by category (supports both expense and income)."""
     if type not in ("expense", "income"):
         return error_response(Code.PARAM_ERROR, "type 参数无效，可选: expense/income")
-    result = await statistics_service.get_category_stats(db, type, start_date, end_date, current_user)
+    result = await statistics_service.get_category_stats(
+        db, type, start_date, end_date, current_user
+    )
     return success_response(data=result)
 
 
@@ -48,7 +51,7 @@ async def get_by_tag(
     end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
     db: AsyncSession = Depends(get_session),
     current_user: User | None = Depends(get_current_user),
-):
+) -> JSONResponse:
     """Get statistics by tag."""
     result = await statistics_service.get_tag_stats(db, start_date, end_date, current_user)
     return success_response(data=result)
@@ -61,7 +64,7 @@ async def get_trend(
     end_date: str = Query(..., description="结束日期 YYYY-MM-DD"),
     db: AsyncSession = Depends(get_session),
     current_user: User | None = Depends(get_current_user),
-):
+) -> JSONResponse:
     """Get income/expense trend."""
     if group_by not in ("day", "week", "month", "year"):
         return error_response(Code.PARAM_ERROR, "group_by 参数无效，可选: day/week/month/year")
@@ -74,7 +77,7 @@ async def get_budget_overview(
     month: str = Query(..., pattern=r"^\d{4}-\d{2}$", description="月份 YYYY-MM"),
     db: AsyncSession = Depends(get_session),
     current_user: User | None = Depends(get_current_user),
-):
+) -> JSONResponse:
     """Get budget overview for a month."""
     result = await budget_service.get_budget_overview(db, month, current_user)
     return success_response(data=result)
@@ -88,7 +91,7 @@ async def get_compare(
     end_date_2: str = Query(..., description="时段2结束日期 YYYY-MM-DD"),
     db: AsyncSession = Depends(get_session),
     current_user: User | None = Depends(get_current_user),
-):
+) -> JSONResponse:
     """Compare two periods."""
     if start_date_1 > end_date_1 or start_date_2 > end_date_2:
         return error_response(Code.PARAM_ERROR, "日期范围无效")

@@ -193,6 +193,39 @@ async def test_trend_yearly(client, setup_test_data):
 
 
 @pytest.mark.asyncio
+async def test_category_stats_has_type_field(client, setup_test_data):
+    """Test that category stats items include the type field."""
+    resp = await client.get(
+        "/api/statistics/by-category",
+        params={"type": "expense", "start_date": "2026-01-01", "end_date": "2026-12-31"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["code"] == 0
+    items = data["data"]["items"]
+    assert len(items) > 0
+    for item in items:
+        assert "type" in item
+        assert item["type"] == "expense"
+
+
+@pytest.mark.asyncio
+async def test_category_stats_type_matches_filter(client, setup_test_data):
+    """Test that the type field value matches the type_filter parameter."""
+    # Test with income type
+    resp = await client.get(
+        "/api/statistics/by-category",
+        params={"type": "income", "start_date": "2026-01-01", "end_date": "2026-12-31"},
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    items = data["data"]["items"]
+    assert len(items) > 0
+    for item in items:
+        assert item["type"] == "income"
+
+
+@pytest.mark.asyncio
 async def test_invalid_period(client):
     """Test invalid period parameter."""
     resp = await client.get(

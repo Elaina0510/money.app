@@ -158,3 +158,240 @@ async def test_custom_categories_visible_only_to_owner(client, auth_client):
     resp = await client.get("/api/categories")
     names = {c["name"] for c in resp.json()["data"]}
     assert "我的私有分类" not in names
+
+
+@pytest.mark.asyncio
+async def test_user_b_cannot_update_user_a_record(auth_client_a, auth_client_b):
+    """7. User A creates record, User B tries to update → 403."""
+    # User A creates category and record
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/records",
+        json={"amount": 100.0, "type": "expense", "category_id": cat_id, "consume_time": "2026-06-01 12:00"},
+    )
+    record_id = resp.json()["data"]["id"]
+
+    # User B tries to update → 403
+    resp = await auth_client_b.put(
+        f"/api/records/{record_id}",
+        json={"amount": 999.0},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40005
+
+
+@pytest.mark.asyncio
+async def test_user_b_cannot_delete_user_a_record(auth_client_a, auth_client_b):
+    """8. User A creates record, User B tries to delete → 403."""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/records",
+        json={"amount": 100.0, "type": "expense", "category_id": cat_id, "consume_time": "2026-06-01 12:00"},
+    )
+    record_id = resp.json()["data"]["id"]
+
+    # User B tries to delete → 403
+    resp = await auth_client_b.delete(f"/api/records/{record_id}")
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40005
+
+
+@pytest.mark.asyncio
+async def test_user_b_cannot_batch_delete_user_a_records(auth_client_a, auth_client_b):
+    """9. User A creates records, User B tries to batch delete → 403."""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/records",
+        json={"amount": 100.0, "type": "expense", "category_id": cat_id, "consume_time": "2026-06-01 12:00"},
+    )
+    record_id = resp.json()["data"]["id"]
+
+    # User B tries to batch delete → 403
+    resp = await auth_client_b.post(
+        "/api/records/batch-delete",
+        json={"ids": [record_id]},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40005
+
+
+@pytest.mark.asyncio
+async def test_user_b_cannot_update_user_a_tag(auth_client_a, auth_client_b):
+    """10. User A creates tag, User B tries to update → 403."""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/tags",
+        json={"name": "A标签", "category_id": cat_id},
+    )
+    tag_id = resp.json()["data"]["id"]
+
+    # User B tries to update → 403
+    resp = await auth_client_b.put(
+        f"/api/tags/{tag_id}",
+        json={"name": "被篡改"},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40005
+
+
+@pytest.mark.asyncio
+async def test_user_b_cannot_delete_user_a_tag(auth_client_a, auth_client_b):
+    """11. User A creates tag, User B tries to delete → 403."""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/tags",
+        json={"name": "A标签", "category_id": cat_id},
+    )
+    tag_id = resp.json()["data"]["id"]
+
+    # User B tries to delete → 403
+    resp = await auth_client_b.delete(f"/api/tags/{tag_id}")
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40005
+
+
+@pytest.mark.asyncio
+async def test_user_can_update_own_record(auth_client_a):
+    """12. User updates own record → success (200)."""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/records",
+        json={"amount": 100.0, "type": "expense", "category_id": cat_id, "consume_time": "2026-06-01 12:00"},
+    )
+    record_id = resp.json()["data"]["id"]
+
+    # User A updates own record → 200
+    resp = await auth_client_a.put(
+        f"/api/records/{record_id}",
+        json={"amount": 200.0},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["amount"] == 200.0
+
+
+@pytest.mark.asyncio
+async def test_user_can_delete_own_record(auth_client_a):
+    """13. User deletes own record → success (200)."""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/records",
+        json={"amount": 100.0, "type": "expense", "category_id": cat_id, "consume_time": "2026-06-01 12:00"},
+    )
+    record_id = resp.json()["data"]["id"]
+
+    # User A deletes own record → 200
+    resp = await auth_client_a.delete(f"/api/records/{record_id}")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_user_can_update_own_tag(auth_client_a):
+    """14. User updates own tag → success (200)."""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/tags",
+        json={"name": "A标签", "category_id": cat_id},
+    )
+    tag_id = resp.json()["data"]["id"]
+
+    # User A updates own tag → 200
+    resp = await auth_client_a.put(
+        f"/api/tags/{tag_id}",
+        json={"name": "新名称"},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["data"]["name"] == "新名称"
+
+
+@pytest.mark.asyncio
+async def test_user_can_delete_own_tag(auth_client_a):
+    """15. User deletes own tag → success (200)."""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/tags",
+        json={"name": "A标签", "category_id": cat_id},
+    )
+    tag_id = resp.json()["data"]["id"]
+
+    # User A deletes own tag → 200
+    resp = await auth_client_a.delete(f"/api/tags/{tag_id}")
+    assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_anonymous_cannot_update_user_record(client, auth_client_a):
+    """16. Anonymous user tries to update record with user_id → 403."""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/records",
+        json={"amount": 100.0, "type": "expense", "category_id": cat_id, "consume_time": "2026-06-01 12:00"},
+    )
+    record_id = resp.json()["data"]["id"]
+
+    # Anonymous tries to update → 403
+    resp = await client.put(
+        f"/api/records/{record_id}",
+        json={"amount": 999.0},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40005
+
+
+@pytest.mark.asyncio
+async def test_anonymous_cannot_delete_user_record(client, auth_client_a):
+    """17. Anonymous user tries to delete record with user_id → 403."""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    resp = await auth_client_a.post(
+        "/api/records",
+        json={"amount": 100.0, "type": "expense", "category_id": cat_id, "consume_time": "2026-06-01 12:00"},
+    )
+    record_id = resp.json()["data"]["id"]
+
+    # Anonymous tries to delete → 403
+    resp = await client.delete(f"/api/records/{record_id}")
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40005

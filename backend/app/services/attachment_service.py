@@ -1,6 +1,5 @@
 """Attachment business logic."""
 
-
 from fastapi import UploadFile
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -48,7 +47,7 @@ async def upload_attachment(
     if not validate_file_size(file_size):
         return {
             "code": Code.FILE_INVALID,
-            "message": f"文件大小超过限制（最大 {MAX_FILE_SIZE // (1024*1024)}MB）",
+            "message": f"文件大小超过限制（最大 {MAX_FILE_SIZE // (1024 * 1024)}MB）",
         }
 
     # Validate file content by magic bytes (防止伪造 MIME 类型)
@@ -95,9 +94,7 @@ async def get_attachment(db: AsyncSession, attachment_id: int) -> Attachment | N
     return await db.get(Attachment, attachment_id)
 
 
-async def delete_attachment(
-    db: AsyncSession, attachment_id: int
-) -> dict | None:
+async def delete_attachment(db: AsyncSession, attachment_id: int) -> dict | None:
     """Delete an attachment (file + DB record). Returns None on success."""
     attachment = await db.get(Attachment, attachment_id)
     if not attachment:
@@ -112,14 +109,10 @@ async def delete_attachment(
     return None
 
 
-async def get_record_attachments(
-    db: AsyncSession, record_id: int
-) -> list[Attachment]:
+async def get_record_attachments(db: AsyncSession, record_id: int) -> list[Attachment]:
     """Get all attachments for a specific record."""
     stmt = (
-        select(Attachment)
-        .where(Attachment.record_id == record_id)
-        .order_by(Attachment.created_at)
+        select(Attachment).where(Attachment.record_id == record_id).order_by(Attachment.created_at)
     )
     result = await db.exec(stmt)
     return list(result.all())

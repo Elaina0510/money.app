@@ -57,7 +57,9 @@ async def get_budgets(
 
 
 async def _enrich_budget(
-    db: AsyncSession, budget: Budget, month: str,
+    db: AsyncSession,
+    budget: Budget,
+    month: str,
     category_id: int | None = None,
     budget_amount: float | None = None,
 ) -> dict[str, Any]:
@@ -81,9 +83,7 @@ async def _enrich_budget(
     # Calculate spent amount for this category in the given month
     start_date, end_date = _get_month_date_range(month)
 
-    spent_stmt = select(
-        func.coalesce(func.sum(Record.amount), 0)
-    ).where(
+    spent_stmt = select(func.coalesce(func.sum(Record.amount), 0)).where(
         Record.category_id == cid,
         Record.type == "expense",
         Record.consume_time >= start_date,
@@ -154,9 +154,7 @@ async def create_or_update_budget(
     return fresh_result.first()
 
 
-async def update_budget(
-    db: AsyncSession, budget_id: int, data: BudgetUpdate
-) -> Budget | None:
+async def update_budget(db: AsyncSession, budget_id: int, data: BudgetUpdate) -> Budget | None:
     """Update an existing budget."""
     budget_stmt = select(Budget).where(Budget.id == budget_id)
     result = await db.exec(budget_stmt)
@@ -200,7 +198,9 @@ async def batch_set_budgets(
         # Enrich immediately while the model is still fresh,
         # before any subsequent commits can expire it.
         enriched = await _enrich_budget(
-            db, budget, data.month,
+            db,
+            budget,
+            data.month,
             category_id=item.category_id,
             budget_amount=item.amount,
         )
@@ -236,9 +236,7 @@ async def get_budget_overview(
         cid = budget.category_id
 
         # Calculate spent
-        spent_stmt = select(
-            func.coalesce(func.sum(Record.amount), 0)
-        ).where(
+        spent_stmt = select(func.coalesce(func.sum(Record.amount), 0)).where(
             Record.category_id == cid,
             Record.type == "expense",
             Record.consume_time >= start_date,
@@ -261,21 +259,21 @@ async def get_budget_overview(
         total_budget += budget.amount
         total_spent += spent
 
-        categories_data.append({
-            "category_id": budget.category_id,
-            "category_name": category_name,
-            "icon": icon,
-            "budget": budget.amount,
-            "spent": spent,
-            "remaining": remaining,
-            "percentage": percentage,
-            "status": status,
-        })
+        categories_data.append(
+            {
+                "category_id": budget.category_id,
+                "category_name": category_name,
+                "icon": icon,
+                "budget": budget.amount,
+                "spent": spent,
+                "remaining": remaining,
+                "percentage": percentage,
+                "status": status,
+            }
+        )
 
     total_remaining = max(total_budget - total_spent, 0)
-    overall_percentage = (
-        round((total_spent / total_budget * 100), 1) if total_budget > 0 else 0
-    )
+    overall_percentage = round((total_spent / total_budget * 100), 1) if total_budget > 0 else 0
 
     return {
         "month": month,

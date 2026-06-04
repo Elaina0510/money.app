@@ -1,3 +1,4 @@
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -25,17 +26,35 @@ PRESET_CATEGORIES = [
     {"name": "交通", "type": "expense", "icon": "mdi-bus", "sort_order": 2, "is_preset": 1},
     {"name": "购物", "type": "expense", "icon": "mdi-cart", "sort_order": 3, "is_preset": 1},
     {"name": "娱乐", "type": "expense", "icon": "mdi-gamepad", "sort_order": 4, "is_preset": 1},
-    {"name": "医疗", "type": "expense", "icon": "mdi-hospital-box", "sort_order": 5, "is_preset": 1},
+    {
+        "name": "医疗",
+        "type": "expense",
+        "icon": "mdi-hospital-box",
+        "sort_order": 5,
+        "is_preset": 1,
+    },
     {"name": "居住", "type": "expense", "icon": "mdi-home", "sort_order": 6, "is_preset": 1},
     {"name": "通讯", "type": "expense", "icon": "mdi-cellphone", "sort_order": 7, "is_preset": 1},
     {"name": "教育", "type": "expense", "icon": "mdi-school", "sort_order": 8, "is_preset": 1},
-    {"name": "其他支出", "type": "expense", "icon": "mdi-cash-minus", "sort_order": 99, "is_preset": 1},
+    {
+        "name": "其他支出",
+        "type": "expense",
+        "icon": "mdi-cash-minus",
+        "sort_order": 99,
+        "is_preset": 1,
+    },
     # Income categories
     {"name": "工资", "type": "income", "icon": "mdi-wallet", "sort_order": 1, "is_preset": 1},
     {"name": "兼职", "type": "income", "icon": "mdi-briefcase", "sort_order": 2, "is_preset": 1},
     {"name": "红包", "type": "income", "icon": "mdi-gift", "sort_order": 3, "is_preset": 1},
     {"name": "理财", "type": "income", "icon": "mdi-finance", "sort_order": 4, "is_preset": 1},
-    {"name": "其他收入", "type": "income", "icon": "mdi-cash-plus", "sort_order": 99, "is_preset": 1},
+    {
+        "name": "其他收入",
+        "type": "income",
+        "icon": "mdi-cash-plus",
+        "sort_order": 99,
+        "is_preset": 1,
+    },
 ]
 
 
@@ -59,7 +78,7 @@ async def init_preset_data() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown events."""
     # Startup: create tables and insert preset data
     ensure_upload_dir()
@@ -89,7 +108,8 @@ app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 
 # Serve frontend static files if dist exists
 if FRONTEND_DIST.exists():
-    app.mount("/assets", StaticFiles(directory=str(FRONTEND_DIST / "assets")), name="frontend_assets")
+    assets_dir = str(FRONTEND_DIST / "assets")
+    app.mount("/assets", StaticFiles(directory=assets_dir), name="frontend_assets")
 
 # Register routers
 app.include_router(auth.router)
@@ -101,10 +121,9 @@ app.include_router(statistics.router)
 app.include_router(budgets.router)
 
 
-@app.get("/")
-async def root():
+@app.get("/", response_model=None)
+async def root() -> FileResponse | dict[str, str]:
     """Root endpoint - serve frontend if available."""
     if FRONTEND_DIST.exists():
         return FileResponse(str(FRONTEND_DIST / "index.html"), media_type="text/html")
     return {"message": "Money App API", "version": "1.0.0", "docs": "/docs"}
-

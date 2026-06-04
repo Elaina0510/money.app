@@ -47,7 +47,6 @@
                   <v-icon size="small" color="grey">mdi-pencil</v-icon>
                 </v-btn>
                 <v-btn
-                  v-if="!cat.is_preset"
                   icon
                   variant="text"
                   size="x-small"
@@ -83,7 +82,6 @@
                   <v-icon size="small" color="grey">mdi-pencil</v-icon>
                 </v-btn>
                 <v-btn
-                  v-if="!cat.is_preset"
                   icon
                   variant="text"
                   size="x-small"
@@ -148,7 +146,7 @@
     <ConfirmDialog
       v-model="showDeleteCategoryDialog"
       title="删除分类"
-      :message="`确定要删除「${deletingCategory?.name}」吗？`"
+      :message="deleteCategoryMessage"
       confirm-text="删除"
       @confirm="handleDeleteCategory"
     />
@@ -176,14 +174,17 @@
         <v-chip
           v-for="tag in tags"
           :key="tag.id"
-          closable
           size="small"
           variant="tonal"
           class="mb-1"
-          @click:close="confirmDeleteTag(tag)"
         >
           <v-icon start size="x-small">mdi-tag</v-icon>
           {{ tag.name }}
+          <template v-slot:append>
+            <v-icon size="x-small" class="ml-1 tag-delete-icon" @click.stop="confirmDeleteTag(tag)">
+              mdi-close
+            </v-icon>
+          </template>
         </v-chip>
       </div>
     </v-card>
@@ -257,6 +258,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import { useAppStore } from '@/stores/useAppStore'
+import { getRecords } from '@/api/records'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const router = useRouter()
@@ -264,7 +266,7 @@ const router = useRouter()
 const categoriesStore = useCategoriesStore()
 const appStore = useAppStore()
 
-const categories = ref([])
+const categories = categoriesStore.categories
 const tags = ref([])
 
 const expenseCategories = computed(() => categories.value.filter(c => c.type === 'expense'))
@@ -288,6 +290,7 @@ const typeOptions = [
 // Delete category
 const showDeleteCategoryDialog = ref(false)
 const deletingCategory = ref(null)
+const deleteCategoryMessage = ref('')
 
 // Tag CRUD
 const showTagDialog = ref(false)
@@ -354,8 +357,19 @@ function resetCategoryForm() {
   categoryForm.sort_order = 0
 }
 
-function confirmDeleteCategory(cat) {
+async function confirmDeleteCategory(cat) {
   deletingCategory.value = cat
+  try {
+    const result = await getRecords({ category_id: cat.id, page_size: 1 })
+    const count = result.total || 0
+    if (count > 0) {
+      deleteCategoryMessage.value = `「${cat.name}」下有 ${count} 条账单记录，删除分类将同时删除所有关联账单，确认删除？`
+    } else {
+      deleteCategoryMessage.value = `确定要删除「${cat.name}」吗？`
+    }
+  } catch {
+    deleteCategoryMessage.value = `确定要删除「${cat.name}」吗？`
+  }
   showDeleteCategoryDialog.value = true
 }
 
@@ -407,7 +421,7 @@ async function handleDeleteTag() {
 
 async function loadCategories() {
   try {
-    categories.value = await categoriesStore.fetchCategories() || []
+    await categoriesStore.fetchCategories()
   } catch (e) {
     console.error('Load categories error:', e)
   }
@@ -460,5 +474,15 @@ onMounted(async () => {
 
 .category-list-item:hover {
   background: rgba(var(--v-theme-primary), 0.04);
+}
+
+.tag-delete-icon {
+  cursor: pointer;
+  opacity: 0.5;
+  transition: opacity 0.15s ease;
+}
+.tag-delete-icon:hover {
+  opacity: 1;
+  color: rgb(var(--v-theme-error));
 }
 </style>

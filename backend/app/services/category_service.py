@@ -1,13 +1,15 @@
 """Category business logic."""
 
+from typing import Any
+
 from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.budget import Budget
 from app.models.category import Category
 from app.models.record import Record
 from app.models.user import User
 from app.schemas.category import CategoryCreate, CategoryUpdate
-from app.utils.response import Code
 
 
 async def get_categories(
@@ -19,9 +21,7 @@ async def get_categories(
         query = query.where(Category.type == type_filter)
     # Filter by user_id: preset categories visible to all, custom only to owner
     if current_user:
-        query = query.where(
-            (Category.is_preset == 1) | (Category.user_id == current_user.id)
-        )
+        query = query.where((Category.is_preset == 1) | (Category.user_id == current_user.id))
     else:
         query = query.where(Category.user_id.is_(None))
     result = await db.exec(query)
@@ -58,12 +58,23 @@ async def create_category(
 
 
 async def update_category(
-    db: AsyncSession, category_id: int, data: CategoryUpdate
+    db: AsyncSession,
+    category_id: int,
+    data: CategoryUpdate,
+    current_user: User | None = None,
 ) -> Category | None:
     """Update an existing category."""
     category = await db.get(Category, category_id)
     if not category:
         return None
+    # Ownership check: preset categories editable by all, custom only by creator
+    if category.is_preset == 0:
+        if current_user is None:
+            # Anonymous user: only allowed to modify anonymous data (user_id=None)
+            if category.user_id is not None:
+                raise PermissionError("无权修改此分类")
+        elif category.user_id != current_user.id:
+            raise PermissionError("无权修改此分类")
     update_data = data.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(category, key, value)
@@ -72,22 +83,43 @@ async def update_category(
     return category
 
 
-async def delete_category(db: AsyncSession, category_id: int) -> dict | None:
-    """Delete a category. Returns None if successful, or an error dict."""
+async def delete_category(
+    db: AsyncSession, category_id: int, current_user: User | None = None
+) -> dict[str, Any] | None:
+    """Delete a category with cascade (records + budgets).
+
+    Returns None on error (not found), or a dict with deleted_records count on success.
+    Raises PermissionError if the user is not authorized.
+    """
     category = await db.get(Category, category_id)
     if not category:
-        return {"code": Code.NOT_FOUND, "message": "分类不存在"}
+        return None
 
-    # Check if any records reference this category
-    stmt = select(func.count(Record.id)).where(Record.category_id == category_id)
-    result = await db.exec(stmt)
-    count = result.one()
-    if count > 0:
-        return {
-            "code": Code.CONFLICT,
-            "message": f"该分类下有 {count} 条记录，无法删除",
-        }
+    # Ownership check: preset categories deletable by all, custom only by creator
+    if category.is_preset == 0:
+        if current_user is None:
+            # Anonymous user: only allowed to delete anonymous data (user_id=None)
+            if category.user_id is not None:
+                raise PermissionError("无权删除此分类")
+        elif category.user_id != current_user.id:
+            raise PermissionError("无权删除此分类")
+
+    # Count associated records for the response
+    count_stmt = select(func.count(Record.id)).where(Record.category_id == category_id)
+    count_result = await db.exec(count_stmt)
+    record_count: int = count_result.one() or 0
+
+    # Cascade delete: remove associated budgets first, then records, then category
+    budget_stmt = select(Budget).where(Budget.category_id == category_id)
+    budget_result = await db.exec(budget_stmt)
+    for budget in budget_result.all():
+        await db.delete(budget)
+
+    record_stmt = select(Record).where(Record.category_id == category_id)
+    record_result = await db.exec(record_stmt)
+    for record in record_result.all():
+        await db.delete(record)
 
     await db.delete(category)
     await db.commit()
-    return None
+    return {"deleted_records": record_count}

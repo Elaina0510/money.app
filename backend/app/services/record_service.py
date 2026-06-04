@@ -148,12 +148,19 @@ async def get_record(db: AsyncSession, record_id: int) -> dict[str, Any] | None:
 
 
 async def update_record(
-    db: AsyncSession, record_id: int, data: RecordUpdate
+    db: AsyncSession,
+    record_id: int,
+    data: RecordUpdate,
+    current_user: User | None = None,
 ) -> dict[str, Any] | None:
     """Update an existing record."""
     record = await db.get(Record, record_id)
     if not record:
         return None
+
+    # Ownership check
+    if record.user_id is not None and (current_user is None or record.user_id != current_user.id):
+        raise PermissionError("无权操作")
 
     update_data = data.model_dump(exclude_unset=True)
 
@@ -173,22 +180,34 @@ async def update_record(
     return await _enrich_record(db, record)
 
 
-async def delete_record(db: AsyncSession, record_id: int) -> bool:
+async def delete_record(db: AsyncSession, record_id: int, current_user: User | None = None) -> bool:
     """Delete a record. Returns True if deleted, False if not found."""
     record = await db.get(Record, record_id)
     if not record:
         return False
+
+    # Ownership check
+    if record.user_id is not None and (current_user is None or record.user_id != current_user.id):
+        raise PermissionError("无权操作")
+
     await db.delete(record)
     await db.commit()
     return True
 
 
-async def batch_delete_records(db: AsyncSession, ids: list[int]) -> int:
+async def batch_delete_records(
+    db: AsyncSession, ids: list[int], current_user: User | None = None
+) -> int:
     """Delete multiple records. Returns the number deleted."""
     count = 0
     for rid in ids:
         record = await db.get(Record, rid)
         if record:
+            # Ownership check
+            if record.user_id is not None and (
+                current_user is None or record.user_id != current_user.id
+            ):
+                raise PermissionError("无权操作")
             await db.delete(record)
             count += 1
     await db.commit()
@@ -213,9 +232,7 @@ async def get_quick_templates(
     return items
 
 
-async def _enrich_record(
-    db: AsyncSession, record: Record
-) -> dict[str, Any]:
+async def _enrich_record(db: AsyncSession, record: Record) -> dict[str, Any]:
     """Enrich a record with category name/icon, tag, and attachment IDs."""
     category_name = ""
     category_icon = ""

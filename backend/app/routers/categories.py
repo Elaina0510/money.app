@@ -1,6 +1,7 @@
 """Category API router."""
 
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import JSONResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
@@ -18,12 +19,13 @@ async def list_categories(
     type: str | None = Query(None, description="筛选类型: income/expense"),
     db: AsyncSession = Depends(get_session),
     current_user: User | None = Depends(get_current_user),
-):
+) -> JSONResponse:
     """Get all categories, optionally filtered by type."""
     categories = await category_service.get_categories(db, type, current_user)
-    return success_response(
-        data=[CategoryResponse.model_validate(c, from_attributes=True).model_dump() for c in categories]
-    )
+    items = [
+        CategoryResponse.model_validate(c, from_attributes=True).model_dump() for c in categories
+    ]
+    return success_response(data=items)
 
 
 @router.post("")
@@ -31,7 +33,7 @@ async def create_category(
     data: CategoryCreate,
     db: AsyncSession = Depends(get_session),
     current_user: User | None = Depends(get_current_user),
-):
+) -> JSONResponse:
     """Create a new custom category."""
     try:
         category = await category_service.create_category(db, data, current_user)
@@ -52,24 +54,38 @@ async def update_category(
     category_id: int,
     data: CategoryUpdate,
     db: AsyncSession = Depends(get_session),
-):
+    current_user: User | None = Depends(get_current_user),
+) -> JSONResponse:
     """Update an existing category."""
-    category = await category_service.update_category(db, category_id, data)
-    if not category:
-        return error_response(Code.NOT_FOUND, "分类不存在")
-    return success_response(
-        data=CategoryResponse.model_validate(category, from_attributes=True).model_dump(),
-        message="分类更新成功",
-    )
+    try:
+        category = await category_service.update_category(db, category_id, data, current_user)
+        if not category:
+            return error_response(Code.NOT_FOUND, "分类不存在")
+        return success_response(
+            data=CategoryResponse.model_validate(category, from_attributes=True).model_dump(),
+            message="分类更新成功",
+        )
+    except PermissionError as e:
+        return error_response(Code.FORBIDDEN, str(e), status_code=403)
 
 
 @router.delete("/{category_id}")
 async def delete_category(
     category_id: int,
     db: AsyncSession = Depends(get_session),
-):
-    """Delete a category."""
-    result = await category_service.delete_category(db, category_id)
-    if result:
-        return error_response(result["code"], result["message"])
-    return success_response(message="分类删除成功")
+    current_user: User | None = Depends(get_current_user),
+) -> JSONResponse:
+    """Delete a category and cascade-delete its records and budgets."""
+    try:
+        result = await category_service.delete_category(db, category_id, current_user)
+        if result is None:
+            return error_response(Code.NOT_FOUND, "分类不存在")
+        record_count = result["deleted_records"]
+        if record_count > 0:
+            return success_response(
+                data=result,
+                message=f"分类删除成功，同时删除了 {record_count} 条关联账单",
+            )
+        return success_response(data=result, message="分类删除成功")
+    except PermissionError as e:
+        return error_response(Code.FORBIDDEN, str(e), status_code=403)

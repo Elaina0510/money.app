@@ -187,6 +187,7 @@ async function handleLogin() {
     localStorage.setItem('token', result.access_token)
     localStorage.setItem('username', result.username)
     localStorage.setItem('userId', String(result.user_id))
+    window.dispatchEvent(new Event('auth:login'))
     router.replace('/')
   } catch (e) {
     errorMsg.value = e.message || '登录失败'
@@ -218,6 +219,7 @@ async function handleRegister() {
     localStorage.setItem('token', result.access_token)
     localStorage.setItem('username', result.username)
     localStorage.setItem('userId', String(result.user_id))
+    window.dispatchEvent(new Event('auth:login'))
     router.replace('/')
   } catch (e) {
     errorMsg.value = e.message || '注册失败'

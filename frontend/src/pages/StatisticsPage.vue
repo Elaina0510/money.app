@@ -73,7 +73,7 @@
       </v-col>
     </v-row>
 
-    <!-- Category Pie Chart -->
+    <!-- Category Bar Chart -->
     <v-card class="pa-4 mb-3 chart-card" rounded="xl">
       <div class="d-flex justify-space-between align-center mb-3">
         <span class="text-subtitle-2 font-weight-bold">分类统计</span>
@@ -84,7 +84,7 @@
       </div>
       <div v-else>
         <div style="height: 200px;" class="mb-3">
-          <Pie :data="categoryChartData" :options="chartOptions" />
+          <Bar :data="categoryBarData" :options="barChartOptions" />
         </div>
         <div class="category-list">
           <div
@@ -129,7 +129,7 @@ import { ref, computed, onMounted } from 'vue'
 import { getSummary, getByCategory, getTrend } from '@/api/statistics'
 import { formatAmount } from '@/utils/format'
 import dayjs from 'dayjs'
-import { Pie, Line } from 'vue-chartjs'
+import { Bar, Line } from 'vue-chartjs'
 import {
   Chart as ChartJS,
   ArcElement,
@@ -141,11 +141,14 @@ import {
   LineElement,
   Title,
   Filler,
+  BarElement,
+  BarController,
 } from 'chart.js'
 
 ChartJS.register(
   ArcElement, Tooltip, Legend,
-  CategoryScale, LinearScale, PointElement, LineElement, Title, Filler
+  CategoryScale, LinearScale, PointElement, LineElement, Title, Filler,
+  BarElement, BarController
 )
 
 const chartColors = ['#FF6B6B', '#FFA94D', '#FFD43B', '#69DB7C', '#38D9A9', '#4DABF7', '#748FFC', '#9775FA', '#F783AC']
@@ -180,24 +183,34 @@ const categoryTotal = computed(() => {
   return categoryStats.value.reduce((sum, c) => sum + c.total, 0)
 })
 
-const categoryChartData = computed(() => ({
+const categoryBarData = computed(() => ({
   labels: categoryStats.value.map((c) => c.category_name),
   datasets: [{
+    label: '金额',
     data: categoryStats.value.map((c) => c.total),
     backgroundColor: chartColors.slice(0, categoryStats.value.length),
-    borderWidth: 0,
+    borderRadius: 6,
+    borderSkipped: false,
   }],
 }))
 
-const chartOptions = {
+const barChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
-  cutout: '55%',
   plugins: {
     legend: { display: false },
     tooltip: {
-      callbacks: {
-        label: (ctx) => `¥${Number(ctx.raw).toLocaleString()}`,
+      callbacks: { label: (ctx) => `¥${Number(ctx.raw).toLocaleString()}` },
+    },
+  },
+  scales: {
+    x: { grid: { display: false }, ticks: { font: { size: 10 } } },
+    y: {
+      grid: { color: 'rgba(0,0,0,0.04)' },
+      beginAtZero: true,
+      ticks: {
+        font: { size: 10 },
+        callback: (val) => `¥${val >= 1000 ? (val / 1000).toFixed(0) + 'k' : val}`,
       },
     },
   },
@@ -289,7 +302,7 @@ async function loadData() {
       getTrend({ ...range, group_by: groupBy }),
     ])
     summary.value = s
-    categoryStats.value = (c?.items || []).filter(item => item.type === 'expense')
+    categoryStats.value = c?.items || []
     trendData.value = t?.items || []
   } catch (e) {
     console.error('Statistics load error:', e)

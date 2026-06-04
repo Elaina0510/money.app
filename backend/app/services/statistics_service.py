@@ -11,7 +11,7 @@ from app.models.tag import Tag
 from app.models.user import User
 
 
-def _apply_user_filter(query, current_user: User | None):
+def _apply_user_filter(query: Any, current_user: User | None) -> Any:
     """Apply user_id filter to a statistics query on Record table."""
     if current_user:
         return query.where(Record.user_id == current_user.id)
@@ -32,12 +32,12 @@ async def get_summary(
     end_filter = end_date + " 23:59" if len(end_date) <= 10 else end_date
 
     query = select(
-        func.coalesce(
-            func.sum(Record.amount).filter(Record.type == "income"), 0.0
-        ).label("total_income"),
-        func.coalesce(
-            func.sum(Record.amount).filter(Record.type == "expense"), 0.0
-        ).label("total_expense"),
+        func.coalesce(func.sum(Record.amount).filter(Record.type == "income"), 0.0).label(
+            "total_income"
+        ),
+        func.coalesce(func.sum(Record.amount).filter(Record.type == "expense"), 0.0).label(
+            "total_expense"
+        ),
         func.count(Record.id).label("transaction_count"),
     ).where(Record.consume_time >= start_date, Record.consume_time <= end_filter)
     query = _apply_user_filter(query, current_user)
@@ -70,9 +70,7 @@ async def get_category_stats(
     end_filter = end_date + " 23:59" if len(end_date) <= 10 else end_date
 
     # Get total for percentage calculation
-    total_stmt = select(
-        func.coalesce(func.sum(Record.amount), 0.0).label("total")
-    ).where(
+    total_stmt = select(func.coalesce(func.sum(Record.amount), 0.0).label("total")).where(
         Record.type == type_filter,
         Record.consume_time >= start_date,
         Record.consume_time <= end_filter,
@@ -109,14 +107,17 @@ async def get_category_stats(
         category_name = category.name if category else "未知"
         icon = category.icon if category else "mdi-cash"
         percentage = round((total_val / total_amount * 100), 1) if total_amount > 0 else 0
-        items.append({
-            "category_id": category_id,
-            "category_name": category_name,
-            "icon": icon,
-            "total": total_val,
-            "percentage": percentage,
-            "count": count_val,
-        })
+        items.append(
+            {
+                "category_id": category_id,
+                "category_name": category_name,
+                "icon": icon,
+                "type": type_filter,
+                "total": total_val,
+                "percentage": percentage,
+                "count": count_val,
+            }
+        )
 
     return {"items": items, "total_expense": total_amount}
 
@@ -184,12 +185,12 @@ async def get_trend(
     stmt = (
         select(
             func.strftime(date_format, Record.consume_time).label("period"),
-            func.coalesce(
-                func.sum(Record.amount).filter(Record.type == "income"), 0.0
-            ).label("income"),
-            func.coalesce(
-                func.sum(Record.amount).filter(Record.type == "expense"), 0.0
-            ).label("expense"),
+            func.coalesce(func.sum(Record.amount).filter(Record.type == "income"), 0.0).label(
+                "income"
+            ),
+            func.coalesce(func.sum(Record.amount).filter(Record.type == "expense"), 0.0).label(
+                "expense"
+            ),
         )
         .where(Record.consume_time >= start_date, Record.consume_time <= end_filter)
         .group_by(text("period"))

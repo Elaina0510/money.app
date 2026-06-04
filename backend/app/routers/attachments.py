@@ -68,4 +68,3 @@ async def delete_attachment(
     if result:
         return error_response(result["code"], result["message"])
     return success_response(message="附件删除成功")
-
