@@ -180,7 +180,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { getRecords } from '@/api/records'
@@ -199,12 +199,8 @@ const showDeleteDialog = ref(false)
 const hasMore = ref(false)
 const totalCount = ref(0)
 
-const filters = reactive({
-  start_date: '',
-  end_date: '',
-  type: '',
-  category_id: null,
-})
+// Use store's filters so they persist across page navigation
+const filters = recordsStore.filters
 
 const typeOptions = [
   { title: '全部', value: '' },
@@ -214,6 +210,11 @@ const typeOptions = [
 
 const categoryOptions = computed(() => {
   const list = [{ name: '全部分类', id: null }]
+  if (filters.type) {
+    // Filter categories by selected type
+    const filtered = categories.value.filter(c => c.type === filters.type)
+    return list.concat(filtered)
+  }
   return list.concat(categories.value)
 })
 
@@ -244,7 +245,7 @@ async function search() {
     const params = { page: 1, page_size: 20 }
     if (filters.start_date) params.start_date = filters.start_date
     if (filters.end_date) params.end_date = filters.end_date
-    if (filters.type) params.type_filter = filters.type
+    if (filters.type) params.type = filters.type
     if (filters.category_id) params.category_id = filters.category_id
     const result = await getRecords(params)
     records.value = result.items
@@ -268,6 +269,14 @@ watch(
   () => {
     clearTimeout(searchDebounceTimer)
     searchDebounceTimer = setTimeout(() => { search() }, 300)
+  }
+)
+
+// When type changes, clear selected category
+watch(
+  () => filters.type,
+  () => {
+    filters.category_id = null
   }
 )
 

@@ -15,3 +15,7 @@ export function updateCategory(id, data) {
 export function deleteCategory(id) {
   return request.delete(`/categories/${id}`)
 }
+
+export function restoreDefaultCategories() {
+  return request.post('/categories/restore-defaults')
+}

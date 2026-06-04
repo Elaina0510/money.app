@@ -123,3 +123,68 @@ async def delete_category(
     await db.delete(category)
     await db.commit()
     return {"deleted_records": record_count}
+
+
+async def restore_default_categories(
+    db: AsyncSession, current_user: User | None = None
+) -> dict[str, int]:
+    """Restore default categories: delete custom ones, reset preset sort_order.
+
+    - Delete all is_preset=0 custom categories for the user
+    - Associated records保留, category_id set to NULL
+    - Associated budgets deleted
+    - Reset preset categories' sort_order to defaults
+    """
+    from app.main import PRESET_CATEGORIES
+
+    user_id = current_user.id if current_user else None
+
+    # Step 1: Delete custom categories (is_preset=0)
+    custom_query = select(Category).where(
+        Category.is_preset == 0,
+        Category.user_id == user_id,
+    )
+    custom_result = await db.exec(custom_query)
+    custom_categories = list(custom_result.all())
+
+    deleted_count = 0
+    affected_records = 0
+
+    for cat in custom_categories:
+        # Count associated records
+        count_stmt = select(func.count(Record.id)).where(Record.category_id == cat.id)
+        count_result = await db.exec(count_stmt)
+        record_count = count_result.one() or 0
+        affected_records += record_count
+
+        # Set associated records' category_id to NULL (preserve records)
+        record_stmt = select(Record).where(Record.category_id == cat.id)
+        record_result = await db.exec(record_stmt)
+        for record in record_result.all():
+            record.category_id = None
+
+        # Delete associated budgets
+        budget_stmt = select(Budget).where(Budget.category_id == cat.id)
+        budget_result = await db.exec(budget_stmt)
+        for budget in budget_result.all():
+            await db.delete(budget)
+
+        # Delete the category
+        await db.delete(cat)
+        deleted_count += 1
+
+    # Step 2: Reset preset categories' sort_order
+    for preset in PRESET_CATEGORIES:
+        stmt = select(Category).where(
+            Category.name == preset["name"],
+            Category.type == preset["type"],
+            Category.is_preset == 1,
+        )
+        result = await db.exec(stmt)
+        category = result.first()
+        if category:
+            category.sort_order = preset["sort_order"]
+            category.icon = preset["icon"]
+
+    await db.commit()
+    return {"deleted_categories": deleted_count, "affected_records": affected_records}

@@ -35,20 +35,24 @@ request.interceptors.response.use(
   },
   (error) => {
     if (error.response) {
-      const { status } = error.response
+      const { status, data } = error.response
       let msg = '请求失败'
       if (status === 401) {
-        msg = '登录已过期，请重新登录'
-        // 清除过期的 token
-        localStorage.removeItem('token')
-        localStorage.removeItem('username')
-        localStorage.removeItem('userId')
-        // 触发全局事件，以便组件可以响应
-        window.dispatchEvent(new CustomEvent('auth:logout'))
+        // Prefer backend message (e.g. "用户名或密码错误" from login endpoint)
+        if (data && data.message) {
+          msg = data.message
+        } else {
+          msg = '登录已过期，请重新登录'
+          // Clear expired token
+          localStorage.removeItem('token')
+          localStorage.removeItem('username')
+          localStorage.removeItem('userId')
+          window.dispatchEvent(new CustomEvent('auth:logout'))
+        }
       } else if (status === 422) {
-        msg = '参数错误'
+        msg = (data && data.message) || '参数错误'
       } else if (status === 500) {
-        msg = '服务器错误'
+        msg = (data && data.message) || '服务器错误'
       }
       return Promise.reject(new Error(msg))
     }

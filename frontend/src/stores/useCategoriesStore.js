@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getCategories, createCategory, updateCategory, deleteCategory } from '@/api/categories'
+import { getCategories, createCategory, updateCategory, deleteCategory, restoreDefaultCategories } from '@/api/categories'
 import { getTags, createTag, deleteTag } from '@/api/tags'
 import { useAppStore } from './useAppStore'
 
@@ -98,6 +98,12 @@ export const useCategoriesStore = defineStore('categories', () => {
     }
   }
 
+  async function restoreDefaults() {
+    const result = await restoreDefaultCategories()
+    await fetchCategories()
+    return result
+  }
+
   return {
     categories,
     tags,
@@ -111,5 +117,6 @@ export const useCategoriesStore = defineStore('categories', () => {
     removeCategory,
     addTag,
     removeTag,
+    restoreDefaults,
   }
 })

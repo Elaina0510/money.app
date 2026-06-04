@@ -15,10 +15,16 @@
           </v-avatar>
           <span class="text-subtitle-2 font-weight-bold">分类管理</span>
         </div>
-        <v-btn size="small" color="primary" variant="tonal" @click="showCategoryDialog = true">
-          <v-icon start size="small">mdi-plus</v-icon>
-          新增
-        </v-btn>
+        <div class="d-flex ga-2">
+          <v-btn size="small" color="warning" variant="tonal" @click="showRestoreConfirm = true">
+            <v-icon start size="small">mdi-restore</v-icon>
+            恢复默认
+          </v-btn>
+          <v-btn size="small" color="primary" variant="tonal" @click="showCategoryDialog = true">
+            <v-icon start size="small">mdi-plus</v-icon>
+            新增
+          </v-btn>
+        </div>
       </div>
 
       <div v-if="categories.length === 0" class="text-center pa-4 text-grey text-caption">
@@ -178,6 +184,32 @@
       confirm-text="删除"
       @confirm="handleDeleteCategory"
     />
+
+    <!-- Restore Defaults Confirm Dialog -->
+    <v-dialog v-model="showRestoreConfirm" max-width="400">
+      <v-card class="pa-4" rounded="xl">
+        <v-card-title class="text-h6 pa-0 mb-2">恢复默认分类</v-card-title>
+        <v-card-text class="pa-0 mb-4">
+          <v-alert type="warning" variant="tonal" class="mb-3">
+            此操作不可撤销！
+          </v-alert>
+          <p class="text-body-2">
+            恢复默认分类将：
+          </p>
+          <ul class="text-body-2 text-medium-emphasis">
+            <li>删除所有自定义分类</li>
+            <li>自定义分类下的账单记录将被保留，但失去分类关联</li>
+            <li>重置预设分类为默认排序</li>
+          </ul>
+        </v-card-text>
+        <div class="d-flex justify-end ga-2">
+          <v-btn variant="text" @click="showRestoreConfirm = false">取消</v-btn>
+          <v-btn color="warning" @click="handleRestoreDefaults" :loading="restoring">
+            确认恢复
+          </v-btn>
+        </div>
+      </v-card>
+    </v-dialog>
 
     <!-- Tags Management -->
     <v-card class="pa-4 mb-3 settings-card" rounded="xl">
@@ -525,6 +557,10 @@ const showDeleteCategoryDialog = ref(false)
 const deletingCategory = ref(null)
 const deleteCategoryMessage = ref('')
 
+// Restore defaults
+const showRestoreConfirm = ref(false)
+const restoring = ref(false)
+
 // Tag CRUD
 const showTagDialog = ref(false)
 const savingTag = ref(false)
@@ -671,6 +707,19 @@ async function handleDeleteCategory() {
   }
   showDeleteCategoryDialog.value = false
   deletingCategory.value = null
+}
+
+async function handleRestoreDefaults() {
+  restoring.value = true
+  try {
+    const result = await categoriesStore.restoreDefaults()
+    appStore.showToast(result.message || '已恢复默认分类')
+    showRestoreConfirm.value = false
+  } catch (e) {
+    appStore.showToast(e.message || '恢复失败', 'error')
+  } finally {
+    restoring.value = false
+  }
 }
 
 async function saveTag() {

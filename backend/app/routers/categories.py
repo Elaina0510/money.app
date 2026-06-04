@@ -89,3 +89,19 @@ async def delete_category(
         return success_response(data=result, message="分类删除成功")
     except PermissionError as e:
         return error_response(Code.FORBIDDEN, str(e), status_code=403)
+
+
+@router.post("/restore-defaults")
+async def restore_defaults(
+    db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
+) -> JSONResponse:
+    """Restore default category settings."""
+    if current_user is None:
+        return error_response(Code.PARAM_ERROR, "请先登录", status_code=401)
+    result = await category_service.restore_default_categories(db, current_user)
+    return success_response(
+        data=result,
+        message=f"已恢复默认分类，删除 {result['deleted_categories']} 个自定义分类，"
+                f"{result['affected_records']} 条记录已解除分类关联",
+    )

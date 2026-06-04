@@ -264,7 +264,13 @@ const canSubmit = computed(() => {
 
 async function onTagSearch(query) {
   if (!query || query.length < 1) {
-    tagSearchResults.value = []
+    // When search clears, retain the currently selected tag so v-autocomplete displays its name
+    if (selectedTagId.value) {
+      const currentItem = tagSearchResults.value.find(t => t.id === selectedTagId.value)
+      tagSearchResults.value = currentItem ? [currentItem] : []
+    } else {
+      tagSearchResults.value = []
+    }
     return
   }
   clearTimeout(searchDebounceTimer)
@@ -299,7 +305,7 @@ function onTagSelected(tagId) {
 
 async function onCreateTagFromSearch() {
   if (!tagSearchQuery.value || tagSearchQuery.value.length < 1) return
-  // Only create if no exact match found
+  // Only select if exact match found
   const exactMatch = tagSearchResults.value.find(t => t.name === tagSearchQuery.value)
   if (exactMatch) {
     selectedTagId.value = exactMatch.id
@@ -309,14 +315,16 @@ async function onCreateTagFromSearch() {
     }
     return
   }
-  try {
-    const newTag = await createTagData({ name: tagSearchQuery.value.trim(), category_id: categoryId.value })
-    selectedTagId.value = newTag.id
-    selectedTagName.value = newTag.name
-    tagSearchResults.value = [newTag]
-  } catch (e) {
-    console.error('Create tag error:', e)
+  // New tag: confirm on UI only, don't save to DB yet
+  selectedTagName.value = tagSearchQuery.value.trim()
+  // Add as temp item so v-autocomplete can display the name
+  const tempTag = {
+    id: -1,  // temp ID, not saved
+    name: selectedTagName.value,
+    category_id: categoryId.value,
   }
+  tagSearchResults.value = [tempTag]
+  selectedTagId.value = -1
 }
 
 function fillTemplate(tpl) {
@@ -328,6 +336,10 @@ function fillTemplate(tpl) {
   selectedTagId.value = tpl.tag_id || tpl.tag?.id || null
   selectedTagName.value = tpl.tag_name || tpl.tag?.name || ''
   tagSearchQuery.value = selectedTagName.value
+  // Seed tagSearchResults so v-autocomplete can display the tag name immediately
+  if (selectedTagId.value && selectedTagName.value) {
+    tagSearchResults.value = [{ id: selectedTagId.value, name: selectedTagName.value }]
+  }
   note.value = ''
 }
 
@@ -335,9 +347,9 @@ async function submit() {
   if (!canSubmit.value) return
   submitting.value = true
   try {
-    // If tag name is entered but no matching tag exists, create it first
+    // If tag name is entered but no matching tag exists (or temp ID), create it first
     let tagId = selectedTagId.value
-    if (selectedTagName.value && !tagId) {
+    if (selectedTagName.value && (!tagId || tagId === -1)) {
       const newTag = await createTagData({ name: selectedTagName.value.trim(), category_id: categoryId.value })
       tagId = newTag.id
     }
@@ -401,6 +413,8 @@ onMounted(async () => {
           selectedTagId.value = record.tag.id
           selectedTagName.value = record.tag.name
           tagSearchQuery.value = record.tag.name
+          // Seed tagSearchResults so v-autocomplete displays the tag name immediately
+          tagSearchResults.value = [{ id: record.tag.id, name: record.tag.name }]
         }
         note.value = record.note || ''
       }
