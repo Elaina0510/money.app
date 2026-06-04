@@ -27,9 +27,7 @@ const routes = [
   },
   {
     path: '/budget',
-    name: 'Budget',
-    component: () => import('@/pages/BudgetPage.vue'),
-    meta: { title: '预算', icon: 'mdi-piggy-bank-outline', nav: true },
+    redirect: '/settings',
   },
   {
     path: '/add',

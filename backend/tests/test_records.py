@@ -219,20 +219,30 @@ async def test_batch_delete_empty(client):
 
 @pytest.mark.asyncio
 async def test_quick_templates(client, expense_category_id):
-    """Test getting quick accounting templates."""
-    # Create multiple records
-    for i in range(5):
+    """Test getting quick accounting templates (requires count >= 2)."""
+    # Create a tag first
+    tag_resp = await client.post(
+        "/api/tags",
+        json={"name": "午餐", "category_id": expense_category_id},
+    )
+    tag_id = tag_resp.json()["data"]["id"]
+
+    # Create 2 records with same tag, type, and amount to trigger >= 2 threshold
+    for _ in range(2):
         await client.post(
             "/api/records",
             json={
-                "amount": float(i + 1) * 10,
+                "amount": 25.0,
                 "type": "expense",
                 "category_id": expense_category_id,
-                "consume_time": f"2026-06-{i + 1:02d} 12:00",
+                "tag_id": tag_id,
+                "consume_time": "2026-06-01 12:00",
             },
         )
 
     resp = await client.get("/api/records/quick-templates")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data["data"]) == 5
+    assert len(data["data"]) == 1
+    assert data["data"][0]["tag_id"] == tag_id
+    assert data["data"][0]["amount"] == 25.0

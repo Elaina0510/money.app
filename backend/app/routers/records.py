@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
@@ -64,14 +65,46 @@ async def list_records(
     return success_response(data=result)
 
 
+class QuickTemplateCreate(BaseModel):
+    """Schema for manually adding a quick template."""
+    tag_id: int = Field(..., gt=0)
+    amount: float = Field(..., gt=0)
+
+
 @router.get("/quick-templates")
 async def quick_templates(
     db: AsyncSession = Depends(get_session),
     current_user: User | None = Depends(get_current_user),
 ) -> JSONResponse:
-    """Get recent records as quick-accounting templates."""
+    """Get quick-accounting templates (auto + manual)."""
     templates = await record_service.get_quick_templates(db, current_user=current_user)
     return success_response(data=templates)
+
+
+@router.post("/quick-templates")
+async def add_quick_template(
+    data: QuickTemplateCreate,
+    db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
+) -> JSONResponse:
+    """Manually add a quick template."""
+    qt = await record_service.add_quick_template(db, data.tag_id, data.amount, current_user)
+    if not qt:
+        return error_response(Code.NOT_FOUND, "标签不存在")
+    return success_response(message="快速记账模板添加成功")
+
+
+@router.delete("/quick-templates/{template_id}")
+async def delete_quick_template(
+    template_id: int,
+    db: AsyncSession = Depends(get_session),
+    current_user: User | None = Depends(get_current_user),
+) -> JSONResponse:
+    """Delete a manual quick template."""
+    deleted = await record_service.delete_quick_template(db, template_id, current_user)
+    if not deleted:
+        return error_response(Code.NOT_FOUND, "模板不存在")
+    return success_response(message="模板删除成功")
 
 
 @router.get("/{record_id}")

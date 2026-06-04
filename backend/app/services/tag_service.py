@@ -1,5 +1,6 @@
 """Tag business logic."""
 
+from datetime import datetime
 from typing import Any
 
 from sqlmodel import select
@@ -12,13 +13,16 @@ from app.schemas.tag import TagCreate, TagUpdate
 from app.utils.response import Code
 
 
-async def get_tags(db: AsyncSession, current_user: User | None = None) -> list[Tag]:
-    """Get all tags visible to the user."""
-    query = select(Tag).order_by(Tag.id)
+async def get_tags(db: AsyncSession, current_user: User | None = None, search: str | None = None) -> list[Tag]:
+    """Get all tags visible to the user, excluding soft-deleted tags."""
+    query = select(Tag).where(Tag.deleted_at.is_(None)).order_by(Tag.id)
     if current_user:
         query = query.where(Tag.user_id == current_user.id)
     else:
         query = query.where(Tag.user_id.is_(None))
+    if search:
+        query = query.where(Tag.name.contains(search))
+    query = query.limit(20)
     result = await db.exec(query)
     return list(result.all())
 
@@ -91,7 +95,7 @@ async def update_tag(
 async def delete_tag(
     db: AsyncSession, tag_id: int, current_user: User | None = None
 ) -> dict[str, Any] | None:
-    """Delete a tag. Returns None if successful, or an error dict."""
+    """Soft-delete a tag by setting deleted_at. Returns None if successful, or an error dict."""
     tag = await db.get(Tag, tag_id)
     if not tag:
         return {"code": Code.NOT_FOUND, "message": "标签不存在"}
@@ -100,6 +104,6 @@ async def delete_tag(
     if tag.user_id is not None and (current_user is None or tag.user_id != current_user.id):
         return {"code": Code.FORBIDDEN, "message": "无权操作"}
 
-    await db.delete(tag)
+    tag.deleted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     await db.commit()
     return None

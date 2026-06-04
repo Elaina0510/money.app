@@ -1,13 +1,14 @@
 <template>
   <v-app :theme="appStore.darkMode ? 'dark' : 'light'">
-    <!-- Navigation Drawer (Sidebar) -->
+    <!-- Navigation Drawer (Sidebar) - Desktop only -->
     <v-navigation-drawer
+      v-show="isDesktop"
       v-model="drawer"
-      :permanent="display.mdAndUp ? !rail : false"
-      :temporary="display.mdAndUp ? rail : true"
+      :permanent="!rail"
+      :temporary="rail"
       :rail="false"
-
-      :width="display.mdAndUp ? 240 : 56"
+      :width="240"
+      :mobile-breakpoint="0"
       class="app-sidebar"
       elevation="0"
     >
@@ -16,9 +17,9 @@
         <v-avatar color="primary" size="28" class="mr-1 flex-shrink-0">
           <v-icon color="white" size="16">mdi-wallet</v-icon>
         </v-avatar>
-        <div class="sidebar-header-text" style="min-width:0" v-show="display.mdAndUp">
+        <div class="sidebar-header-text" style="min-width:0" v-show="isDesktop">
           <div class="text-subtitle-2 font-weight-bold text-truncate" style="line-height: 1.2">Money App</div>
-          <div class="text-caption text-truncate" style="color: rgba(0,0,0,0.5)">个人记账</div>
+          <div class="text-caption text-truncate page-subtitle">个人记账</div>
         </div>
       </div>
 
@@ -40,7 +41,7 @@
           <template v-slot:prepend>
             <v-icon :icon="item.icon" size="24" />
           </template>
-          <v-list-item-title class="text-body-2 font-weight-medium" :class="{ 'd-none': !display.mdAndUp }">
+          <v-list-item-title class="text-body-2 font-weight-medium" :class="{ 'd-none': !isDesktop }">
             {{ item.title }}
           </v-list-item-title>
         </v-list-item>
@@ -59,7 +60,7 @@
             <template v-slot:prepend>
               <v-icon icon="mdi-cog-outline" size="24" />
             </template>
-            <v-list-item-title class="text-body-2 font-weight-medium" :class="{ 'd-none': !display.mdAndUp }">
+            <v-list-item-title class="text-body-2 font-weight-medium" :class="{ 'd-none': !isDesktop }">
               设置
             </v-list-item-title>
           </v-list-item>
@@ -101,21 +102,22 @@
 
     <!-- Main Content Area -->
     <v-main class="main-content">
-      <!-- Top Bar (Mobile + Desktop) -->
+      <!-- Top Bar -->
       <div class="app-top-bar pa-4 pb-0">
         <div class="d-flex align-center">
-          <!-- Hamburger / Expand button -->
+          <!-- Hamburger button - Desktop only -->
           <v-btn
+            v-if="isDesktop"
             icon
             variant="text"
             class="mr-2"
             @click="toggleNav()"
           >
-            <v-icon>{{ display.mdAndUp ? (rail ? 'mdi-menu' : 'mdi-close') : 'mdi-menu' }}</v-icon>
+            <v-icon>{{ rail ? 'mdi-menu' : 'mdi-close' }}</v-icon>
           </v-btn>
           <div>
             <div class="text-h6 font-weight-bold">{{ currentTitle }}</div>
-            <div class="text-caption d-none d-md-block" style="color: rgba(0,0,0,0.45)">{{ currentSubtitle }}</div>
+            <div class="text-caption d-none d-md-block page-subtitle">{{ currentSubtitle }}</div>
           </div>
           <v-spacer />
           <v-btn
@@ -151,6 +153,31 @@
       <v-icon size="28">mdi-plus</v-icon>
     </v-btn>
 
+    <!-- Bottom Navigation Bar - Mobile only -->
+    <v-bottom-navigation
+      v-if="!isDesktop"
+      v-model="currentRoute"
+      grow
+      class="bottom-nav"
+    >
+      <v-btn value="/" to="/">
+        <v-icon>mdi-view-dashboard-outline</v-icon>
+        <span>主页</span>
+      </v-btn>
+      <v-btn value="/records" to="/records">
+        <v-icon>mdi-format-list-bulleted</v-icon>
+        <span>账单</span>
+      </v-btn>
+      <v-btn value="/statistics" to="/statistics">
+        <v-icon>mdi-chart-box-outline</v-icon>
+        <span>统计</span>
+      </v-btn>
+      <v-btn value="/settings" to="/settings">
+        <v-icon>mdi-cog-outline</v-icon>
+        <span>设置</span>
+      </v-btn>
+    </v-bottom-navigation>
+
     <ToastNotification />
   </v-app>
 </template>
@@ -158,16 +185,22 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
-import { useDisplay } from 'vuetify'
 import { useAppStore } from '@/stores/useAppStore'
 import ToastNotification from '../common/ToastNotification.vue'
 
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
-const display = useDisplay()
 const rail = ref(true)  // 默认折叠
 const drawer = ref(false)
+
+// 响应式屏幕宽度检测（960px 为桌面/移动端分界线）
+const BREAKPOINT = 960
+const isDesktop = ref(window.innerWidth >= BREAKPOINT)
+
+function onResize() {
+  isDesktop.value = window.innerWidth >= BREAKPOINT
+}
 
 // 登录状态
 const token = ref(localStorage.getItem('token') || '')
@@ -208,16 +241,18 @@ onMounted(() => {
   authLoginHandler = () => handleAuthLogin()
   window.addEventListener('auth:logout', authLogoutHandler)
   window.addEventListener('auth:login', authLoginHandler)
+  window.addEventListener('resize', onResize)
 })
 
 onUnmounted(() => {
   window.removeEventListener('auth:logout', authLogoutHandler)
   window.removeEventListener('auth:login', authLoginHandler)
+  window.removeEventListener('resize', onResize)
 })
 
 // 点击菜单按钮切换侧边栏
 function toggleNav() {
-  if (display.mdAndUp) {
+  if (isDesktop.value) {
     // 宽屏：如果当前折叠(rail=true)，切换为展开并显示；如果展开(rail=false)，切换为折叠
     if (rail.value) {
       // 折叠→展开：设为 permanent 显示
@@ -238,8 +273,16 @@ const navItems = [
   { to: '/', title: '主页', icon: 'mdi-view-dashboard-outline' },
   { to: '/records', title: '账单', icon: 'mdi-format-list-bulleted' },
   { to: '/statistics', title: '统计', icon: 'mdi-chart-box-outline' },
-  { to: '/budget', title: '预算', icon: 'mdi-piggy-bank-outline' },
 ]
+
+const currentRoute = computed(() => {
+  const path = route.path
+  if (path === '/') return '/'
+  if (path.startsWith('/records') || path.startsWith('/detail')) return '/records'
+  if (path.startsWith('/statistics')) return '/statistics'
+  if (path.startsWith('/settings')) return '/settings'
+  return '/'
+})
 
 const currentTitle = computed(() => route.meta?.title || 'Money App')
 
@@ -323,28 +366,6 @@ onMounted(() => {
   margin-left: 8px;
 }
 
-@media (max-width: 959px) {
-  .sidebar-nav {
-    padding-left: 2px !important;
-    padding-right: 2px !important;
-  }
-  .sidebar-nav .v-list-item {
-    padding-left: 2px !important;
-    padding-right: 2px !important;
-    min-height: 36px !important;
-  }
-  .sidebar-nav .v-list-item-title {
-    font-size: 0.7rem !important;
-  }
-  .app-sidebar :deep(.v-list-item__prepend) {
-    width: auto !important;
-    min-width: 0 !important;
-  }
-  .app-sidebar :deep(.v-list-item__prepend > .v-icon) {
-    margin-right: 4px !important;
-  }
-}
-
 .app-top-bar {
   position: sticky;
   top: 0;
@@ -353,20 +374,30 @@ onMounted(() => {
   padding-bottom: 12px;
 }
 
+/* Bottom navigation bar */
+.bottom-nav {
+  border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
+}
+
+.v-theme--dark .bottom-nav {
+  border-top-color: rgba(255, 255, 255, 0.06) !important;
+}
+
 @media (max-width: 959px) {
   .content-wrapper {
-    padding: 16px 16px 80px;
+    padding: 16px 16px 100px;
   }
 
   .fab-add {
-    bottom: 16px;
+    bottom: 80px;
     right: 16px;
   }
-}
 
-@media (min-width: 960px) {
-  .app-top-bar .d-md-none {
-    display: block;
+  /* 确保移动端侧边栏完全隐藏 */
+  .app-sidebar {
+    display: none !important;
+    transform: translateX(-100%) !important;
+    visibility: hidden !important;
   }
 }
 </style>

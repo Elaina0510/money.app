@@ -1,6 +1,6 @@
 """Tag API router."""
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import JSONResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -16,11 +16,12 @@ router = APIRouter(prefix="/api/tags", tags=["标签管理"])
 
 @router.get("")
 async def list_tags(
+    q: str | None = Query(None, description="搜索关键词"),
     db: AsyncSession = Depends(get_session),
     current_user: User | None = Depends(get_current_user),
 ) -> JSONResponse:
-    """Get all tags."""
-    tags = await tag_service.get_tags(db, current_user)
+    """Get all tags, optionally filtered by search keyword."""
+    tags = await tag_service.get_tags(db, current_user, search=q)
     return success_response(
         data=[TagResponse.model_validate(t, from_attributes=True).model_dump() for t in tags]
     )

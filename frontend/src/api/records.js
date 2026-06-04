@@ -27,3 +27,11 @@ export function batchDeleteRecords(ids) {
 export function getQuickTemplates() {
   return request.get('/records/quick-templates')
 }
+
+export function addQuickTemplate(data) {
+  return request.post('/records/quick-templates', data)
+}
+
+export function deleteQuickTemplate(id) {
+  return request.delete(`/records/quick-templates/${id}`)
+}

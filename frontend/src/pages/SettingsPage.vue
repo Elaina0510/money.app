@@ -43,6 +43,20 @@
             </v-list-item-title>
             <template v-slot:append>
               <div class="d-flex ga-1">
+                <v-btn
+                  v-if="expenseCategories.indexOf(cat) > 0"
+                  icon variant="text" size="x-small"
+                  @click="moveCategory(cat, -1)"
+                >
+                  <v-icon size="small" color="grey">mdi-chevron-up</v-icon>
+                </v-btn>
+                <v-btn
+                  v-if="expenseCategories.indexOf(cat) < expenseCategories.length - 1"
+                  icon variant="text" size="x-small"
+                  @click="moveCategory(cat, 1)"
+                >
+                  <v-icon size="small" color="grey">mdi-chevron-down</v-icon>
+                </v-btn>
                 <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
                   <v-icon size="small" color="grey">mdi-pencil</v-icon>
                 </v-btn>
@@ -78,6 +92,20 @@
             </v-list-item-title>
             <template v-slot:append>
               <div class="d-flex ga-1">
+                <v-btn
+                  v-if="incomeCategories.indexOf(cat) > 0"
+                  icon variant="text" size="x-small"
+                  @click="moveCategory(cat, -1)"
+                >
+                  <v-icon size="small" color="grey">mdi-chevron-up</v-icon>
+                </v-btn>
+                <v-btn
+                  v-if="incomeCategories.indexOf(cat) < incomeCategories.length - 1"
+                  icon variant="text" size="x-small"
+                  @click="moveCategory(cat, 1)"
+                >
+                  <v-icon size="small" color="grey">mdi-chevron-down</v-icon>
+                </v-btn>
                 <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
                   <v-icon size="small" color="grey">mdi-pencil</v-icon>
                 </v-btn>
@@ -197,9 +225,20 @@
           v-model="tagForm.name"
           label="标签名称"
           hide-details
-          class="mb-4"
+          class="mb-3"
           variant="outlined"
           @keydown.enter="saveTag"
+        />
+        <v-select
+          v-model="tagForm.category_id"
+          :items="categories"
+          item-title="name"
+          item-value="id"
+          label="所属分类 *"
+          :rules="[v => !!v || '请选择分类']"
+          hide-details="auto"
+          class="mb-3"
+          variant="outlined"
         />
         <div class="d-flex justify-end ga-2">
           <v-btn variant="text" @click="showTagDialog = false">取消</v-btn>
@@ -216,6 +255,196 @@
       confirm-text="删除"
       @confirm="handleDeleteTag"
     />
+
+    <!-- Budget Management -->
+    <v-card class="pa-4 mb-3 settings-card" rounded="xl">
+      <div class="d-flex justify-space-between align-center mb-3">
+        <div class="d-flex align-center">
+          <v-avatar size="36" color="rgba(156, 39, 176, 0.1)" class="mr-2">
+            <v-icon color="purple" size="20">mdi-piggy-bank-outline</v-icon>
+          </v-avatar>
+          <span class="text-subtitle-2 font-weight-bold">预算管理</span>
+        </div>
+        <v-btn size="small" color="primary" variant="tonal" @click="openBudgetAddDialog">
+          <v-icon start size="small">mdi-plus</v-icon>
+          设置
+        </v-btn>
+      </div>
+
+      <!-- 月度预算概览 -->
+      <v-card variant="tonal" class="pa-4 mb-3" rounded="lg">
+        <div class="text-caption text-grey mb-1">本月预算</div>
+        <div class="text-h5 font-weight-bold mb-2">¥{{ formatAmount(totalBudget) }}</div>
+        <v-progress-linear
+          :model-value="budgetUsagePercent"
+          :color="budgetUsagePercent > 80 ? 'error' : budgetUsagePercent > 50 ? 'warning' : 'success'"
+          height="8"
+          rounded
+          class="mb-2"
+        />
+        <div class="d-flex justify-space-between text-caption">
+          <span>已用 ¥{{ formatAmount(totalSpent) }}</span>
+          <span>{{ budgetUsagePercent.toFixed(0) }}%</span>
+        </div>
+      </v-card>
+
+      <!-- 分类预算列表 -->
+      <div v-if="budgets.length === 0" class="text-center pa-4 text-grey text-caption">
+        暂无预算设置，点击上方按钮添加分类预算
+      </div>
+
+      <div v-for="(item, index) in enrichedBudgets" :key="item.category_id" class="budget-item mb-3">
+        <div class="d-flex justify-space-between align-center mb-1">
+          <div class="d-flex align-center">
+            <v-avatar size="32" :color="getBudgetColor(index) + '20'" class="mr-2">
+              <v-icon size="small" :color="getBudgetColor(index)">{{ item.icon }}</v-icon>
+            </v-avatar>
+            <span class="text-body-2 font-weight-medium">{{ item.category_name }}</span>
+          </div>
+          <div class="d-flex align-center">
+            <template v-if="editingBudget === item.category_id">
+              <v-text-field
+                v-model.number="editBudgetAmount"
+                type="number"
+                density="compact"
+                hide-details
+                variant="outlined"
+                prefix="¥"
+                style="width: 120px"
+                class="mr-1"
+                autofocus
+                @keyup.enter="saveBudgetEdit(item)"
+                @keyup.escape="cancelBudgetEdit"
+              />
+              <v-btn icon size="x-small" variant="text" color="primary" @click="saveBudgetEdit(item)" :loading="savingBudget">
+                <v-icon size="small">mdi-check</v-icon>
+              </v-btn>
+              <v-btn icon size="x-small" variant="text" @click="cancelBudgetEdit">
+                <v-icon size="small">mdi-close</v-icon>
+              </v-btn>
+            </template>
+            <template v-else>
+              <span class="text-body-2 font-weight-bold">{{ formatAmount(item.spent) }}</span>
+              <span class="text-grey"> / {{ formatAmount(item.amount) }}</span>
+              <v-btn icon size="x-small" variant="text" class="ml-1" @click="startBudgetEdit(item)">
+                <v-icon size="small" color="grey">mdi-pencil</v-icon>
+              </v-btn>
+            </template>
+          </div>
+        </div>
+        <v-progress-linear
+          :model-value="item.amount > 0 ? (item.spent / item.amount) * 100 : 0"
+          :color="item.amount > 0 && (item.spent / item.amount) > 0.8 ? 'error' : item.amount > 0 && (item.spent / item.amount) > 0.5 ? 'warning' : 'primary'"
+          height="6"
+          rounded
+        />
+      </div>
+    </v-card>
+
+    <!-- Budget Add Dialog -->
+    <v-dialog v-model="showBudgetAddDialog" max-width="400">
+      <v-card class="pa-4" rounded="xl">
+        <v-card-title class="text-h6 pa-0 mb-3">设置分类预算</v-card-title>
+        <v-select
+          v-model="budgetForm.category_id"
+          :items="availableBudgetCategories"
+          item-title="name"
+          item-value="id"
+          label="选择分类"
+          hide-details
+          class="mb-3"
+          variant="outlined"
+        />
+        <v-text-field
+          v-model.number="budgetForm.amount"
+          label="预算金额"
+          type="number"
+          prefix="¥"
+          hide-details
+          class="mb-3"
+          variant="outlined"
+        />
+        <div class="d-flex justify-end ga-2">
+          <v-btn variant="text" @click="showBudgetAddDialog = false">取消</v-btn>
+          <v-btn color="primary" :loading="savingBudget" @click="saveBudget">保存</v-btn>
+        </div>
+      </v-card>
+    </v-dialog>
+
+    <!-- Quick Template Management -->
+    <v-card class="pa-4 mb-3 settings-card" rounded="xl">
+      <div class="d-flex justify-space-between align-center mb-3">
+        <div class="d-flex align-center">
+          <v-avatar size="36" color="rgba(0, 150, 136, 0.1)" class="mr-2">
+            <v-icon color="teal" size="20">mdi-lightning-bolt</v-icon>
+          </v-avatar>
+          <span class="text-subtitle-2 font-weight-bold">快速记账</span>
+        </div>
+        <v-btn size="small" color="primary" variant="tonal" @click="showQuickTemplateDialog = true">
+          <v-icon start size="small">mdi-plus</v-icon>
+          新增
+        </v-btn>
+      </div>
+
+      <div v-if="quickTemplates.length === 0" class="text-center pa-4 text-grey text-caption">
+        暂无快速记账模板
+      </div>
+
+      <v-list v-else density="compact" class="bg-transparent pa-0">
+        <v-list-item v-for="tpl in quickTemplates" :key="(tpl.tag_id || '') + '-' + tpl.amount + '-' + tpl.source" class="quick-template-item">
+          <template v-slot:prepend>
+            <v-avatar size="32" :color="tpl.type === 'expense' ? '#FFE8E8' : '#E8FFF3'" class="mr-2">
+              <v-icon size="16" :color="tpl.type === 'expense' ? '#FF6B6B' : '#20C997'">
+                {{ tpl.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
+              </v-icon>
+            </v-avatar>
+          </template>
+          <v-list-item-title class="text-body-2">
+            {{ tpl.tag_name }} · ¥{{ tpl.amount }}
+          </v-list-item-title>
+          <v-list-item-subtitle class="text-caption">
+            {{ tpl.category_name }}{{ tpl.count > 0 ? ` · 使用 ${tpl.count} 次` : '' }}
+          </v-list-item-subtitle>
+          <template v-slot:append>
+            <v-btn icon variant="text" size="x-small" @click="removeQuickTemplate(tpl)">
+              <v-icon size="small" color="error">mdi-delete</v-icon>
+            </v-btn>
+          </template>
+        </v-list-item>
+      </v-list>
+    </v-card>
+
+    <!-- Quick Template Add Dialog -->
+    <v-dialog v-model="showQuickTemplateDialog" max-width="400">
+      <v-card class="pa-4" rounded="xl">
+        <v-card-title class="text-h6 pa-0 mb-4">新增快速记账</v-card-title>
+        <v-select
+          v-model="quickTemplateForm.tag_id"
+          :items="tags"
+          item-title="name"
+          item-value="id"
+          label="选择标签 *"
+          :rules="[v => !!v || '请选择标签']"
+          hide-details="auto"
+          class="mb-3"
+          variant="outlined"
+        />
+        <v-text-field
+          v-model.number="quickTemplateForm.amount"
+          label="金额 *"
+          type="number"
+          prefix="¥"
+          :rules="[v => v > 0 || '请输入金额']"
+          hide-details="auto"
+          class="mb-3"
+          variant="outlined"
+        />
+        <div class="d-flex justify-end ga-2">
+          <v-btn variant="text" @click="showQuickTemplateDialog = false">取消</v-btn>
+          <v-btn color="primary" :loading="savingQuickTemplate" @click="saveQuickTemplate">保存</v-btn>
+        </div>
+      </v-card>
+    </v-dialog>
 
     <!-- Account Section -->
     <v-card class="pa-4 mb-3 settings-card" rounded="xl">
@@ -258,7 +487,10 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import { useAppStore } from '@/stores/useAppStore'
-import { getRecords } from '@/api/records'
+import { getRecords, getQuickTemplates, addQuickTemplate, deleteQuickTemplate } from '@/api/records'
+import { getBudgets, batchSetBudgets } from '@/api/budgets'
+import { formatAmount } from '@/utils/format'
+import dayjs from 'dayjs'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const router = useRouter()
@@ -298,6 +530,45 @@ const savingTag = ref(false)
 
 const tagForm = reactive({ name: '', category_id: null })
 
+// Budget state
+const budgets = ref([])
+const showBudgetAddDialog = ref(false)
+const savingBudget = ref(false)
+const editingBudget = ref(null)
+const editBudgetAmount = ref(0)
+const budgetForm = ref({ category_id: null, amount: 0 })
+const currentMonth = dayjs().format('YYYY-MM')
+
+const BUDGET_COLORS = [
+  '#FF6B6B', '#4DABF7', '#9775FA', '#51CF66', '#FF922B',
+  '#22B8CF', '#F06595', '#845EF7', '#20C997', '#FD7E14',
+]
+
+const totalBudget = computed(() => budgets.value.reduce((sum, b) => sum + b.amount, 0))
+const totalSpent = computed(() => budgets.value.reduce((sum, b) => sum + b.spent, 0))
+const budgetUsagePercent = computed(() => {
+  if (totalBudget.value === 0) return 0
+  return (totalSpent.value / totalBudget.value) * 100
+})
+
+const enrichedBudgets = computed(() => {
+  return budgets.value.map(b => {
+    const cat = categories.value.find(c => c.id === b.category_id)
+    return { ...b, icon: cat?.icon || 'mdi-cash' }
+  })
+})
+
+const availableBudgetCategories = computed(() => {
+  const budgetCategoryIds = budgets.value.map(b => b.category_id)
+  return categories.value.filter(c => c.type === 'expense' && !budgetCategoryIds.includes(c.id))
+})
+
+// Quick template state
+const quickTemplates = ref([])
+const showQuickTemplateDialog = ref(false)
+const savingQuickTemplate = ref(false)
+const quickTemplateForm = ref({ tag_id: null, amount: 0 })
+
 // 账号状态
 const isLoggedIn = computed(() => !!localStorage.getItem('token'))
 const username = computed(() => localStorage.getItem('username') || '')
@@ -318,6 +589,21 @@ function handleLogoutInSettings() {
 // Delete tag
 const showDeleteTagDialog = ref(false)
 const deletingTag = ref(null)
+
+async function moveCategory(cat, direction) {
+  const list = cat.type === 'expense' ? expenseCategories.value : incomeCategories.value
+  const idx = list.indexOf(cat)
+  const target = list[idx + direction]
+  if (!target) return
+  try {
+    const tempOrder = cat.sort_order
+    await categoriesStore.editCategory(cat.id, { sort_order: target.sort_order })
+    await categoriesStore.editCategory(target.id, { sort_order: tempOrder })
+    await loadCategories()
+  } catch (e) {
+    // Toast shown by store
+  }
+}
 
 function editCategory(cat) {
   editingCategory.value = cat
@@ -387,12 +673,13 @@ async function handleDeleteCategory() {
 }
 
 async function saveTag() {
-  if (!tagForm.name.trim()) return
+  if (!tagForm.name.trim() || !tagForm.category_id) return
   savingTag.value = true
   try {
-    await categoriesStore.addTag({ name: tagForm.name.trim() })
+    await categoriesStore.addTag({ name: tagForm.name.trim(), category_id: tagForm.category_id })
     showTagDialog.value = false
     tagForm.name = ''
+    tagForm.category_id = null
     await loadTags()
   } catch (e) {
     // Toast shown by store
@@ -419,6 +706,108 @@ async function handleDeleteTag() {
   deletingTag.value = null
 }
 
+function getBudgetColor(index) {
+  return BUDGET_COLORS[index % BUDGET_COLORS.length]
+}
+
+async function loadBudgets() {
+  try {
+    budgets.value = await getBudgets({ month: currentMonth }) || []
+  } catch (e) {
+    console.error('Load budgets error:', e)
+    budgets.value = []
+  }
+}
+
+function startBudgetEdit(item) {
+  editingBudget.value = item.category_id
+  editBudgetAmount.value = item.amount
+}
+
+function cancelBudgetEdit() {
+  editingBudget.value = null
+  editBudgetAmount.value = 0
+}
+
+async function saveBudgetEdit(item) {
+  if (editBudgetAmount.value <= 0) return
+  savingBudget.value = true
+  try {
+    await batchSetBudgets({
+      month: currentMonth,
+      budgets: [{ category_id: item.category_id, amount: editBudgetAmount.value }],
+    })
+    editingBudget.value = null
+    await loadBudgets()
+  } catch (e) {
+    console.error('Save budget error:', e)
+  } finally {
+    savingBudget.value = false
+  }
+}
+
+function openBudgetAddDialog() {
+  budgetForm.value = { category_id: null, amount: 0 }
+  showBudgetAddDialog.value = true
+}
+
+async function saveBudget() {
+  if (!budgetForm.value.category_id || budgetForm.value.amount <= 0) return
+  savingBudget.value = true
+  try {
+    await batchSetBudgets({
+      month: currentMonth,
+      budgets: [{ category_id: budgetForm.value.category_id, amount: budgetForm.value.amount }],
+    })
+    showBudgetAddDialog.value = false
+    budgetForm.value = { category_id: null, amount: 0 }
+    await loadBudgets()
+  } catch (e) {
+    console.error('Save budget error:', e)
+  } finally {
+    savingBudget.value = false
+  }
+}
+
+async function loadQuickTemplates() {
+  try {
+    quickTemplates.value = await getQuickTemplates() || []
+  } catch (e) {
+    console.error('Load quick templates error:', e)
+    quickTemplates.value = []
+  }
+}
+
+async function removeQuickTemplate(tpl) {
+  try {
+    // Manual templates have an 'id' field, auto templates don't
+    if (tpl.id) {
+      await deleteQuickTemplate(tpl.id)
+    }
+    await loadQuickTemplates()
+  } catch (e) {
+    console.error('Remove quick template error:', e)
+  }
+}
+
+async function saveQuickTemplate() {
+  if (!quickTemplateForm.value.tag_id || quickTemplateForm.value.amount <= 0) return
+  savingQuickTemplate.value = true
+  try {
+    await addQuickTemplate({
+      tag_id: quickTemplateForm.value.tag_id,
+      amount: quickTemplateForm.value.amount,
+    })
+    showQuickTemplateDialog.value = false
+    quickTemplateForm.value = { tag_id: null, amount: 0 }
+    await loadQuickTemplates()
+  } catch (e) {
+    console.error('Save quick template error:', e)
+  } finally {
+    savingQuickTemplate.value = false
+  }
+}
+
 async function loadCategories() {
   try {
     await categoriesStore.fetchCategories()
@@ -437,7 +826,7 @@ async function loadTags() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadTags()])
+  await Promise.all([loadCategories(), loadTags(), loadBudgets(), loadQuickTemplates()])
 })
 </script>
 
@@ -455,12 +844,6 @@ onMounted(async () => {
   font-weight: 700;
   margin: 0;
   line-height: 1.2;
-}
-
-.page-subtitle {
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.45);
-  margin: 2px 0 0;
 }
 
 .settings-card {

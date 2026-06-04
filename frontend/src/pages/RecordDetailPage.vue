@@ -116,13 +116,14 @@
       </v-card>
 
       <!-- Action Buttons -->
-      <div class="d-flex ga-3">
+      <div class="d-flex justify-center ga-3 mt-4">
         <v-btn
           color="primary"
           variant="tonal"
           size="large"
-          block
           rounded="xl"
+          class="flex-grow-1"
+          style="max-width: 200px;"
           @click="goToEdit"
         >
           <v-icon start>mdi-pencil</v-icon>
@@ -132,8 +133,9 @@
           color="error"
           variant="tonal"
           size="large"
-          block
           rounded="xl"
+          class="flex-grow-1"
+          style="max-width: 200px;"
           @click="showDeleteConfirm = true"
         >
           <v-icon start>mdi-delete</v-icon>
@@ -215,12 +217,6 @@ onMounted(loadRecord)
   font-weight: 700;
   margin: 0;
   line-height: 1.2;
-}
-
-.page-subtitle {
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.45);
-  margin: 2px 0 0;
 }
 
 .amount-hero-card {

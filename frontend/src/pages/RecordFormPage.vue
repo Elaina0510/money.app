@@ -128,31 +128,34 @@
       </div>
       <v-divider class="mb-3" />
 
-      <!-- Tag Input (Free Text + Auto Suggest) -->
+      <!-- Tag Input (Search Autocomplete) -->
       <div class="mb-3">
         <div class="text-caption text-grey mb-1">标签</div>
-        <v-combobox
-          v-model="selectedTagName"
-          :items="tagSuggestions"
+        <v-autocomplete
+          v-model="selectedTagId"
+          v-model:search="tagSearchQuery"
+          :items="tagSearchResults"
           item-title="name"
-          item-value="name"
-          placeholder="输入标签"
+          item-value="id"
+          placeholder="输入标签名称搜索"
           hide-details
           variant="outlined"
           density="compact"
           clearable
-          class="tag-input"
           no-filter
-          @update:model-value="onTagInput"
+          :loading="tagSearching"
+          @update:search="onTagSearch"
+          @update:model-value="onTagSelected"
+          @keydown.enter="onCreateTagFromSearch"
         >
           <template v-slot:no-data>
-            <v-list-item>
+            <v-list-item v-if="tagSearchQuery && tagSearchQuery.length >= 1">
               <v-list-item-title class="text-caption text-grey">
-                按回车创建新标签
+                无匹配标签，按回车创建「{{ tagSearchQuery }}」
               </v-list-item-title>
             </v-list-item>
           </template>
-        </v-combobox>
+        </v-autocomplete>
       </div>
       <v-divider class="mb-3" />
 
@@ -195,7 +198,7 @@
               {{ tpl.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
             </v-icon>
           </v-avatar>
-          {{ tpl.tag?.name || tpl.category_name }} · ¥{{ tpl.amount }}
+          {{ tpl.tag_name || tpl.category_name }} · ¥{{ tpl.amount }}
         </v-chip>
       </div>
     </v-card>
@@ -222,7 +225,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { createRecord, updateRecord, getRecord, getQuickTemplates } from '@/api/records'
 import { getCategories } from '@/api/categories'
-import { getTags, createTag as createTagData } from '@/api/tags'
+import { getTags, searchTags, createTag as createTagData } from '@/api/tags'
 import { useAppStore } from '@/stores/useAppStore'
 import dayjs from 'dayjs'
 
@@ -237,56 +240,82 @@ const amount = ref('')
 const categoryId = ref(null)
 const consumeDate = ref(dayjs().format('YYYY-MM-DD'))
 const consumeTime = ref(dayjs().format('HH:mm'))
-const selectedTagName = ref(null)
 const selectedTagId = ref(null)
+const selectedTagName = ref('')
 const note = ref('')
 const submitting = ref(false)
 const categories = ref([])
-const tags = ref([])
 const templates = ref([])
 const recordId = ref(null)
-const autoMatchedCategory = ref('')
+
+// Tag search state
+const tagSearchQuery = ref('')
+const tagSearchResults = ref([])
+const tagSearching = ref(false)
+let searchDebounceTimer = null
 
 const currentCategories = computed(() =>
   categories.value.filter((c) => c.type === recordType.value)
 )
 
-const tagSuggestions = computed(() => {
-  const currentCatIds = currentCategories.value.map(c => c.id)
-  return tags.value.filter(t => !t.category_id || currentCatIds.includes(t.category_id))
-})
-
 const canSubmit = computed(() => {
   return parseFloat(amount.value) > 0 && categoryId.value !== null
 })
 
-function onTagInput(val) {
-  if (!val) {
-    selectedTagId.value = null
-    autoMatchedCategory.value = ''
+async function onTagSearch(query) {
+  if (!query || query.length < 1) {
+    tagSearchResults.value = []
     return
   }
-  // val could be string (typed) or object (selected from suggestions)
-  const tagName = typeof val === 'string' ? val : (val?.name || '')
-  selectedTagName.value = tagName
-
-  // Find matching tag in existing list
-  const match = tags.value.find(t => t.name === tagName)
-  if (match) {
-    selectedTagId.value = match.id
-    if (match.category_id) {
-      const cat = categories.value.find(c => c.id === match.category_id)
-      if (cat) {
-        categoryId.value = cat.id
-        autoMatchedCategory.value = cat.name
-      }
-    } else {
-      autoMatchedCategory.value = ''
+  clearTimeout(searchDebounceTimer)
+  searchDebounceTimer = setTimeout(async () => {
+    tagSearching.value = true
+    try {
+      const results = await searchTags(query)
+      tagSearchResults.value = results || []
+    } catch (e) {
+      console.error('Tag search error:', e)
+    } finally {
+      tagSearching.value = false
     }
-  } else {
-    // New tag - will create on submit
+  }, 200)
+}
+
+function onTagSelected(tagId) {
+  if (!tagId) {
     selectedTagId.value = null
-    autoMatchedCategory.value = ''
+    selectedTagName.value = ''
+    return
+  }
+  const tag = tagSearchResults.value.find(t => t.id === tagId)
+  if (tag) {
+    selectedTagName.value = tag.name
+    if (tag.category_id) {
+      categoryId.value = tag.category_id
+    }
+  }
+  selectedTagId.value = tagId
+}
+
+async function onCreateTagFromSearch() {
+  if (!tagSearchQuery.value || tagSearchQuery.value.length < 1) return
+  // Only create if no exact match found
+  const exactMatch = tagSearchResults.value.find(t => t.name === tagSearchQuery.value)
+  if (exactMatch) {
+    selectedTagId.value = exactMatch.id
+    selectedTagName.value = exactMatch.name
+    if (exactMatch.category_id) {
+      categoryId.value = exactMatch.category_id
+    }
+    return
+  }
+  try {
+    const newTag = await createTagData({ name: tagSearchQuery.value.trim(), category_id: categoryId.value })
+    selectedTagId.value = newTag.id
+    selectedTagName.value = newTag.name
+    tagSearchResults.value = [newTag]
+  } catch (e) {
+    console.error('Create tag error:', e)
   }
 }
 
@@ -294,18 +323,12 @@ function fillTemplate(tpl) {
   recordType.value = tpl.type
   amount.value = String(tpl.amount)
   categoryId.value = tpl.category_id
-  // 时间重置为当前时间
   consumeDate.value = dayjs().format('YYYY-MM-DD')
   consumeTime.value = dayjs().format('HH:mm')
-  if (tpl.tag) {
-    selectedTagId.value = tpl.tag.id
-    selectedTagName.value = tpl.tag.name
-    onTagInput(tpl.tag.name)
-  } else {
-    selectedTagId.value = null
-    selectedTagName.value = null
-  }
-  note.value = tpl.note || ''
+  selectedTagId.value = tpl.tag_id || tpl.tag?.id || null
+  selectedTagName.value = tpl.tag_name || tpl.tag?.name || ''
+  tagSearchQuery.value = selectedTagName.value
+  note.value = ''
 }
 
 async function submit() {
@@ -351,13 +374,11 @@ watch(recordType, () => {
 
 onMounted(async () => {
   try {
-    const [cats, tgs, tpls] = await Promise.all([
+    const [cats, tpls] = await Promise.all([
       getCategories(),
-      getTags(),
       getQuickTemplates(),
     ])
     categories.value = cats
-    tags.value = tgs || []
     templates.value = tpls || []
 
     const expenseCats = cats.filter((c) => c.type === 'expense')
@@ -379,7 +400,7 @@ onMounted(async () => {
         if (record.tag) {
           selectedTagId.value = record.tag.id
           selectedTagName.value = record.tag.name
-          onTagInput(record.tag.name)
+          tagSearchQuery.value = record.tag.name
         }
         note.value = record.note || ''
       }
@@ -404,12 +425,6 @@ onMounted(async () => {
   font-weight: 700;
   margin: 0;
   line-height: 1.2;
-}
-
-.page-subtitle {
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.45);
-  margin: 2px 0 0;
 }
 
 .type-btn {

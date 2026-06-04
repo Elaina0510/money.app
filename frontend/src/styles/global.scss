@@ -147,25 +147,48 @@ body {
   background: rgba(255, 255, 255, 0.3);
 }
 
-/* Dark mode text colors */
+/* Dark mode text colors - enhanced */
 .v-theme--dark {
-  color: #E0E0E0;
+  color: #E6E1E5;
 }
 
-.v-theme--dark .text-body-1,
-.v-theme--dark .text-body-2,
-.v-theme--dark .text-caption {
-  color: #E0E0E0 !important;
-}
-
-.v-theme--dark .text-grey {
-  color: #B0B0B0 !important;
-}
-
+/* 主标题：纯白 */
 .v-theme--dark .text-h5,
 .v-theme--dark .text-h6,
 .v-theme--dark .text-subtitle-1,
 .v-theme--dark .text-subtitle-2,
 .v-theme--dark .font-weight-bold {
   color: #FFFFFF !important;
+}
+
+/* 正文：浅灰 */
+.v-theme--dark .text-body-1,
+.v-theme--dark .text-body-2 {
+  color: #E6E1E5 !important;
+}
+
+/* 副标题/说明文字：中灰（提高对比度） */
+.v-theme--dark .text-caption {
+  color: #C8C3CE !important;
+}
+
+/* 辅助文字：灰色 */
+.v-theme--dark .text-grey {
+  color: #C8C3CE !important;
+}
+
+/* 浅灰色文字（如"未设置标签"） */
+.v-theme--dark .text-grey-lighten-1 {
+  color: #A0A0A0 !important;
+}
+
+/* 页面副标题全局样式 */
+.page-subtitle {
+  font-size: 13px;
+  color: rgba(0, 0, 0, 0.45);
+  margin: 2px 0 0;
+}
+
+.v-theme--dark .page-subtitle {
+  color: #C8C3CE !important;
 }

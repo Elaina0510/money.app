@@ -26,3 +26,5 @@ class Tag(SQLModel, table=True):
         default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         nullable=False,
     )
+    # v1.2.2 新增：软删除标记
+    deleted_at: str | None = Field(default=None, nullable=True)

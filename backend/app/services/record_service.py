@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.attachment import Attachment
 from app.models.category import Category
+from app.models.quick_template import QuickTemplate
 from app.models.record import Record
 from app.models.tag import Tag
 from app.models.user import User
@@ -217,19 +218,123 @@ async def batch_delete_records(
 async def get_quick_templates(
     db: AsyncSession, limit: int = 10, current_user: User | None = None
 ) -> list[dict[str, Any]]:
-    """Get recent records as quick-accounting templates."""
-    query = select(Record).order_by(Record.updated_at.desc())
-    if current_user:
-        query = query.where(Record.user_id == current_user.id)
-    else:
-        query = query.where(Record.user_id.is_(None))
-    query = query.limit(limit)
-    result = await db.exec(query)
-    records = list(result.all())
-    items = []
-    for record in records:
-        items.append(await _enrich_record(db, record))
-    return items
+    """Get quick-accounting templates: auto (from records with count >= 2) + manual."""
+    user_filter = Record.user_id == current_user.id if current_user else Record.user_id.is_(None)
+    qt_user_filter = QuickTemplate.user_id == current_user.id if current_user else QuickTemplate.user_id.is_(None)
+
+    # Auto templates: group by (tag_id, type, amount), filter count >= 2
+    auto_query = (
+        select(
+            Record.tag_id,
+            Record.type,
+            Record.amount,
+            func.count(Record.id).label("count"),
+            func.max(Record.updated_at).label("last_used"),
+        )
+        .where(user_filter)
+        .where(Record.tag_id.isnot(None))
+        .group_by(Record.tag_id, Record.type, Record.amount)
+        .having(func.count(Record.id) >= 2)
+        .order_by(func.max(Record.updated_at).desc())
+        .limit(limit)
+    )
+    auto_result = await db.exec(auto_query)
+    auto_rows = auto_result.all()
+
+    templates = []
+    seen_keys = set()
+    for row in auto_rows:
+        tag = await db.get(Tag, row.tag_id)
+        if not tag or tag.deleted_at:
+            continue
+        category = await db.get(Category, tag.category_id) if tag.category_id else None
+        key = (row.tag_id, row.type, row.amount)
+        seen_keys.add(key)
+        templates.append({
+            "tag_id": row.tag_id,
+            "tag_name": tag.name,
+            "type": row.type,
+            "amount": row.amount,
+            "category_id": tag.category_id,
+            "category_name": category.name if category else "",
+            "category_icon": category.icon if category else "mdi-circle",
+            "count": row.count,
+            "source": "auto",
+        })
+
+    # Manual templates
+    manual_query = (
+        select(QuickTemplate)
+        .where(qt_user_filter)
+        .order_by(QuickTemplate.created_at.desc())
+        .limit(limit)
+    )
+    manual_result = await db.exec(manual_query)
+    manual_rows = manual_result.all()
+
+    for qt in manual_rows:
+        key = (qt.tag_id, qt.type, qt.amount)
+        if key in seen_keys:
+            continue
+        seen_keys.add(key)
+        tag = await db.get(Tag, qt.tag_id) if qt.tag_id else None
+        if tag and tag.deleted_at:
+            continue
+        category = await db.get(Category, qt.category_id) if qt.category_id else None
+        templates.append({
+            "id": qt.id,
+            "tag_id": qt.tag_id,
+            "tag_name": tag.name if tag else "",
+            "type": qt.type,
+            "amount": qt.amount,
+            "category_id": qt.category_id,
+            "category_name": category.name if category else "",
+            "category_icon": category.icon if category else "mdi-circle",
+            "count": 0,
+            "source": "manual",
+        })
+
+    return templates[:limit]
+
+
+async def add_quick_template(
+    db: AsyncSession, tag_id: int, amount: float, current_user: User | None = None
+) -> QuickTemplate | None:
+    """Manually add a quick template."""
+    tag = await db.get(Tag, tag_id)
+    if not tag:
+        return None
+    # Derive type from tag's category
+    template_type = "expense"
+    if tag.category_id:
+        category = await db.get(Category, tag.category_id)
+        if category:
+            template_type = category.type
+    qt = QuickTemplate(
+        user_id=current_user.id if current_user else None,
+        tag_id=tag_id,
+        category_id=tag.category_id,
+        type=template_type,
+        amount=amount,
+    )
+    db.add(qt)
+    await db.commit()
+    await db.refresh(qt)
+    return qt
+
+
+async def delete_quick_template(
+    db: AsyncSession, template_id: int, current_user: User | None = None
+) -> bool:
+    """Delete a manual quick template."""
+    qt = await db.get(QuickTemplate, template_id)
+    if not qt:
+        return False
+    if qt.user_id is not None and (current_user is None or qt.user_id != current_user.id):
+        return False
+    await db.delete(qt)
+    await db.commit()
+    return True
 
 
 async def _enrich_record(db: AsyncSession, record: Record) -> dict[str, Any]:

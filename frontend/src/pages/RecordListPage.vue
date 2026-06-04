@@ -52,9 +52,6 @@
           clearable
           class="flex-grow-1"
         />
-        <v-btn color="primary" variant="tonal" size="small" @click="search" class="search-btn">
-          <v-icon>mdi-magnify</v-icon>
-        </v-btn>
       </div>
     </v-card>
 
@@ -183,7 +180,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import dayjs from 'dayjs'
 import { getRecords } from '@/api/records'
@@ -264,6 +261,16 @@ async function loadMore() {
   await search()
 }
 
+// 筛选条件变化时自动触发搜索（防抖 300ms）
+let searchDebounceTimer = null
+watch(
+  () => [filters.type, filters.category_id],
+  () => {
+    clearTimeout(searchDebounceTimer)
+    searchDebounceTimer = setTimeout(() => { search() }, 300)
+  }
+)
+
 async function handleBatchDelete() {
   try {
     await recordsStore.batchDelete(selected.value)
@@ -301,19 +308,8 @@ onMounted(async () => {
   line-height: 1.2;
 }
 
-.page-subtitle {
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.45);
-  margin: 2px 0 0;
-}
-
 .filter-card {
   border: 1px solid rgba(0, 0, 0, 0.06);
-}
-
-.search-btn {
-  min-width: 40px !important;
-  height: 40px !important;
 }
 
 .record-card {

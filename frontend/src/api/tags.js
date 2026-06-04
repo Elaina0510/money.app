@@ -4,6 +4,10 @@ export function getTags() {
   return request.get('/tags')
 }
 
+export function searchTags(q) {
+  return request.get('/tags', { params: { q } })
+}
+
 export function createTag(data) {
   return request.post('/tags', data)
 }
