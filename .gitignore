@@ -65,5 +65,4 @@ __pycache__/
 *.egg
 
 doc/bug/
-doc/*.md
 doc/*.pdf
