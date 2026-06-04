@@ -485,6 +485,7 @@
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { storeToRefs } from 'pinia'
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { getRecords, getQuickTemplates, addQuickTemplate, deleteQuickTemplate } from '@/api/records'
@@ -498,7 +499,7 @@ const router = useRouter()
 const categoriesStore = useCategoriesStore()
 const appStore = useAppStore()
 
-const categories = categoriesStore.categories
+const { categories } = storeToRefs(categoriesStore)
 const tags = ref([])
 
 const expenseCategories = computed(() => categories.value.filter(c => c.type === 'expense'))
