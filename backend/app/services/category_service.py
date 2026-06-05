@@ -15,13 +15,37 @@ from app.schemas.category import CategoryCreate, CategoryUpdate
 async def get_categories(
     db: AsyncSession, type_filter: str | None = None, current_user: User | None = None
 ) -> list[Category]:
-    """Get all categories visible to the user: presets + own custom ones."""
+    """Get all categories visible to the user: presets + own custom ones.
+
+    Presets that have a user-specific copy (same name+type) are excluded
+    to avoid duplicates — the user copy takes precedence.
+    """
     query = select(Category).order_by(Category.sort_order, Category.id)
     if type_filter:
         query = query.where(Category.type == type_filter)
-    # Filter by user_id: preset categories visible to all, custom only to owner
     if current_user:
-        query = query.where((Category.is_preset == 1) | (Category.user_id == current_user.id))
+        # Subquery: (name, type) pairs of user's custom categories
+        user_custom = (
+            select(Category.name, Category.type)
+            .where(
+                Category.user_id == current_user.id,
+                Category.is_preset == 0,
+            )
+            .subquery()
+        )
+        # Include: user's own categories + presets NOT overridden by user
+        not_overridden = (
+            select(user_custom.c.name)
+            .where(
+                user_custom.c.name == Category.name,
+                user_custom.c.type == Category.type,
+            )
+            .exists()
+        )
+        query = query.where(
+            (Category.user_id == current_user.id)
+            | ((Category.is_preset == 1) & ~not_overridden)
+        )
     else:
         query = query.where(Category.user_id.is_(None))
     result = await db.exec(query)
@@ -63,19 +87,57 @@ async def update_category(
     data: CategoryUpdate,
     current_user: User | None = None,
 ) -> Category | None:
-    """Update an existing category."""
+    """Update an existing category.
+
+    For preset categories, implements copy-on-write: instead of modifying
+    the global preset, creates (or updates) a user-specific copy.
+    """
     category = await db.get(Category, category_id)
     if not category:
         return None
-    # Ownership check: preset categories editable by all, custom only by creator
+
+    user_id = current_user.id if current_user else None
+    update_data = data.model_dump(exclude_unset=True)
+
+    # Copy-on-Write: modifying a preset → create/update user copy
+    if category.is_preset == 1 and user_id is not None:
+        # Check if user already has a custom copy with same name+type
+        dup_stmt = select(Category).where(
+            Category.name == category.name,
+            Category.type == category.type,
+            Category.user_id == user_id,
+            Category.is_preset == 0,
+        )
+        existing = (await db.exec(dup_stmt)).first()
+
+        if existing:
+            for key, value in update_data.items():
+                setattr(existing, key, value)
+            await db.commit()
+            await db.refresh(existing)
+            return existing
+        else:
+            copy = Category(
+                name=category.name,
+                type=category.type,
+                icon=update_data.get("icon", category.icon),
+                sort_order=update_data.get("sort_order", category.sort_order),
+                is_preset=0,
+                user_id=user_id,
+            )
+            db.add(copy)
+            await db.commit()
+            await db.refresh(copy)
+            return copy
+
+    # Non-preset: ownership check
     if category.is_preset == 0:
         if current_user is None:
-            # Anonymous user: only allowed to modify anonymous data (user_id=None)
             if category.user_id is not None:
                 raise PermissionError("无权修改此分类")
         elif category.user_id != current_user.id:
             raise PermissionError("无权修改此分类")
-    update_data = data.model_dump(exclude_unset=True)
+
     for key, value in update_data.items():
         setattr(category, key, value)
     await db.commit()
@@ -95,7 +157,11 @@ async def delete_category(
     if not category:
         return None
 
-    # Ownership check: preset categories deletable by all, custom only by creator
+    # Preset categories cannot be deleted
+    if category.is_preset == 1:
+        raise PermissionError("预设分类不可删除")
+
+    # Ownership check: custom categories only deletable by creator
     if category.is_preset == 0:
         if current_user is None:
             # Anonymous user: only allowed to delete anonymous data (user_id=None)
