@@ -265,7 +265,7 @@ async function loadMore() {
 // 筛选条件变化时自动触发搜索（防抖 300ms）
 let searchDebounceTimer = null
 watch(
-  () => [filters.type, filters.category_id],
+  () => [filters.start_date, filters.end_date, filters.type, filters.category_id],
   () => {
     clearTimeout(searchDebounceTimer)
     searchDebounceTimer = setTimeout(() => { search() }, 300)
