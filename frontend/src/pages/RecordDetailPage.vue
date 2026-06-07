@@ -3,7 +3,7 @@
     <!-- Page Header -->
     <div class="page-header mb-3">
       <div class="d-flex align-center">
-        <v-btn icon variant="text" class="mr-2" @click="router.back()">
+        <v-btn icon variant="text" class="mr-2" @click="handleBack()">
           <v-icon>mdi-arrow-left</v-icon>
         </v-btn>
         <div>
@@ -27,19 +27,14 @@
     <template v-else>
       <!-- Amount Hero -->
       <v-card class="pa-6 mb-4 amount-hero-card text-center" rounded="xl">
-        <v-avatar
-          :color="record.type === 'expense' ? '#FFE8E8' : '#E8FFF3'"
-          size="64"
-          class="mb-3"
-        >
-          <v-icon
-            :color="record.type === 'expense' ? '#FF6B6B' : '#20C997'"
-            size="32"
-          >
+        <v-avatar :color="record.type === 'expense' ? '#FFE8E8' : '#E8FFF3'" size="64" class="mb-3">
+          <v-icon :color="record.type === 'expense' ? '#FF6B6B' : '#20C997'" size="32">
             {{ record.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
           </v-icon>
         </v-avatar>
-        <div class="text-caption text-grey mb-1">{{ record.type === 'expense' ? '支出' : '收入' }}</div>
+        <div class="text-caption text-grey mb-1">
+          {{ record.type === 'expense' ? '支出' : '收入' }}
+        </div>
         <div
           class="amount-display font-weight-bold"
           :style="{ color: record.type === 'expense' ? '#FF6B6B' : '#20C997' }"
@@ -59,7 +54,9 @@
             <v-list-item-title class="text-caption text-grey">分类</v-list-item-title>
             <v-list-item-subtitle class="d-flex align-center mt-1">
               <v-avatar size="28" color="rgba(139, 126, 116, 0.15)" class="mr-2">
-                <v-icon size="16" color="#8B7E74">{{ record.category_icon || 'mdi-circle' }}</v-icon>
+                <v-icon size="16" color="#8B7E74">{{
+                  record.category_icon || 'mdi-circle'
+                }}</v-icon>
               </v-avatar>
               {{ record.category_name || '未分类' }}
             </v-list-item-subtitle>
@@ -123,7 +120,7 @@
           size="large"
           rounded="xl"
           class="flex-grow-1"
-          style="max-width: 200px;"
+          style="max-width: 200px"
           @click="goToEdit"
         >
           <v-icon start>mdi-pencil</v-icon>
@@ -135,7 +132,7 @@
           size="large"
           rounded="xl"
           class="flex-grow-1"
-          style="max-width: 200px;"
+          style="max-width: 200px"
           @click="showDeleteConfirm = true"
         >
           <v-icon start>mdi-delete</v-icon>
@@ -190,12 +187,17 @@ function goToEdit() {
   }
 }
 
+function handleBack() {
+  appStore.setTransitionOrigin(null)
+  router.back()
+}
+
 async function handleDelete() {
   try {
     await deleteRecord(record.value.id)
     appStore.showToast('账单已删除')
     router.push('/records')
-  } catch (e) {
+  } catch {
     // Toast handled by store
   }
 }

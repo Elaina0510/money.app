@@ -17,12 +17,13 @@
         <v-avatar color="primary" size="28" class="mr-1 flex-shrink-0">
           <v-icon color="white" size="16">mdi-wallet</v-icon>
         </v-avatar>
-        <div class="sidebar-header-text" style="min-width:0" v-show="isDesktop">
-          <div class="text-subtitle-2 font-weight-bold text-truncate" style="line-height: 1.2">Money App</div>
+        <div class="sidebar-header-text" style="min-width: 0" v-show="isDesktop">
+          <div class="text-subtitle-2 font-weight-bold text-truncate" style="line-height: 1.2">
+            Money App
+          </div>
           <div class="text-caption text-truncate page-subtitle">个人记账</div>
         </div>
       </div>
-
 
       <v-divider class="mx-2" />
 
@@ -41,7 +42,10 @@
           <template v-slot:prepend>
             <v-icon :icon="item.icon" size="24" />
           </template>
-          <v-list-item-title class="text-body-2 font-weight-medium" :class="{ 'd-none': !isDesktop }">
+          <v-list-item-title
+            class="text-body-2 font-weight-medium"
+            :class="{ 'd-none': !isDesktop }"
+          >
             {{ item.title }}
           </v-list-item-title>
         </v-list-item>
@@ -60,7 +64,10 @@
             <template v-slot:prepend>
               <v-icon icon="mdi-cog-outline" size="24" />
             </template>
-            <v-list-item-title class="text-body-2 font-weight-medium" :class="{ 'd-none': !isDesktop }">
+            <v-list-item-title
+              class="text-body-2 font-weight-medium"
+              :class="{ 'd-none': !isDesktop }"
+            >
               设置
             </v-list-item-title>
           </v-list-item>
@@ -71,7 +78,9 @@
             <v-divider class="mb-2" />
             <div class="d-flex align-center pa-1">
               <v-avatar size="28" color="primary" class="mr-2">
-                <span class="text-caption text-white font-weight-bold">{{ username.charAt(0) }}</span>
+                <span class="text-caption text-white font-weight-bold">{{
+                  username.charAt(0)
+                }}</span>
               </v-avatar>
               <div class="flex-grow-1 text-truncate">
                 <div class="text-caption font-weight-medium text-truncate">{{ username }}</div>
@@ -106,13 +115,7 @@
       <div class="app-top-bar pa-4 pb-0">
         <div class="d-flex align-center">
           <!-- Hamburger button - Desktop only -->
-          <v-btn
-            v-if="isDesktop"
-            icon
-            variant="text"
-            class="mr-2"
-            @click="toggleNav()"
-          >
+          <v-btn v-if="isDesktop" icon variant="text" class="mr-2" @click="toggleNav()">
             <v-icon>{{ rail ? 'mdi-menu' : 'mdi-close' }}</v-icon>
           </v-btn>
           <div>
@@ -120,12 +123,7 @@
             <div class="text-caption d-none d-md-block page-subtitle">{{ currentSubtitle }}</div>
           </div>
           <v-spacer />
-          <v-btn
-            icon
-            variant="text"
-            size="small"
-            @click="appStore.toggleDarkMode()"
-          >
+          <v-btn icon variant="text" size="small" @click="appStore.toggleDarkMode()">
             <v-icon>{{ appStore.darkMode ? 'mdi-weather-night' : 'mdi-weather-sunny' }}</v-icon>
           </v-btn>
         </div>
@@ -133,33 +131,33 @@
 
       <!-- Page Content -->
       <div class="content-wrapper">
-        <router-view v-slot="{ Component }">
-          <transition name="page" mode="out-in">
-            <component :is="Component" />
+        <router-view v-slot="{ Component, route }">
+          <!-- Expand transition for detail page -->
+          <transition
+            v-if="route.path.startsWith('/detail') && appStore.transitionOrigin"
+            name="expand"
+            mode="out-in"
+            @before-enter="onBeforeEnter"
+            @enter="onEnter"
+            @leave="onLeave"
+          >
+            <component :is="Component" :key="route.path" />
+          </transition>
+          <!-- Normal page transition -->
+          <transition v-else name="page" mode="out-in">
+            <component :is="Component" :key="route.path" />
           </transition>
         </router-view>
       </div>
     </v-main>
 
     <!-- Floating Action Button (FAB) - 右下角常驻加号 -->
-    <v-btn
-      class="fab-add"
-      color="primary"
-      size="large"
-      icon
-      elevation="4"
-      @click="goToAddRecord"
-    >
+    <v-btn class="fab-add" color="primary" size="large" icon elevation="4" @click="goToAddRecord">
       <v-icon size="28">mdi-plus</v-icon>
     </v-btn>
 
     <!-- Bottom Navigation Bar - Mobile only -->
-    <v-bottom-navigation
-      v-if="!isDesktop"
-      v-model="currentRoute"
-      grow
-      class="bottom-nav"
-    >
+    <v-bottom-navigation v-if="!isDesktop" v-model="currentRoute" grow class="bottom-nav">
       <v-btn value="/" to="/">
         <v-icon>mdi-view-dashboard-outline</v-icon>
         <span>主页</span>
@@ -191,7 +189,7 @@ import ToastNotification from '../common/ToastNotification.vue'
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
-const rail = ref(true)  // 默认折叠
+const rail = ref(true) // 默认折叠
 const drawer = ref(false)
 
 // 响应式屏幕宽度检测（960px 为桌面/移动端分界线）
@@ -299,6 +297,55 @@ function goToAddRecord() {
   router.push('/add')
 }
 
+// Transition helpers for expand animation
+function onBeforeEnter(el) {
+  if (appStore.transitionOrigin) {
+    const origin = appStore.transitionOrigin
+    el.style.transformOrigin = `${origin.x}px ${origin.y}px`
+    el.style.transform = 'scale(0)'
+    el.style.opacity = '0'
+  }
+}
+
+function onEnter(el, done) {
+  if (appStore.transitionOrigin) {
+    // Force reflow
+    el.offsetHeight
+    el.style.transition = 'transform 250ms ease, opacity 250ms ease'
+    el.style.transform = 'scale(1)'
+    el.style.opacity = '1'
+    el.addEventListener('transitionend', done, { once: true })
+  } else {
+    // For normal transitions, clear any inline styles and let CSS handle it
+    el.style.transform = ''
+    el.style.opacity = ''
+    el.style.transition = ''
+    done()
+  }
+}
+
+function onLeave(el, done) {
+  if (appStore.transitionOrigin) {
+    el.style.transition = 'transform 250ms ease, opacity 250ms ease'
+    el.style.transform = 'scale(0.9)'
+    el.style.opacity = '0'
+    el.addEventListener(
+      'transitionend',
+      () => {
+        appStore.setTransitionOrigin(null)
+        done()
+      },
+      { once: true }
+    )
+  } else {
+    // For normal transitions, clear any inline styles and let CSS handle it
+    el.style.transform = ''
+    el.style.opacity = ''
+    el.style.transition = ''
+    done()
+  }
+}
+
 onMounted(() => {
   // Default to light mode regardless of system preference
   appStore.setDarkMode(false)
@@ -314,7 +361,6 @@ onMounted(() => {
 .sidebar-header {
   min-height: 64px;
 }
-
 
 .nav-item {
   transition: all 0.15s ease;
@@ -342,6 +388,21 @@ onMounted(() => {
   max-width: 640px;
   margin: 0 auto;
   padding: 24px 20px 100px;
+  position: relative;
+}
+
+/* Bottom blur gradient */
+.content-wrapper::after {
+  content: '';
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, 640px);
+  height: 40px;
+  background: linear-gradient(to bottom, transparent, rgb(var(--v-theme-background)));
+  pointer-events: none;
+  z-index: 50;
 }
 
 /* FAB - Floating Action Button */
@@ -374,6 +435,21 @@ onMounted(() => {
   padding-bottom: 12px;
 }
 
+/* Top bar blur gradient */
+.app-top-bar::after {
+  content: '';
+  position: absolute;
+  bottom: -24px;
+  left: 0;
+  right: 0;
+  height: 24px;
+  background: rgb(var(--v-theme-background));
+  mask-image: linear-gradient(to bottom, black, transparent);
+  -webkit-mask-image: linear-gradient(to bottom, black, transparent);
+  pointer-events: none;
+  z-index: 99;
+}
+
 /* Bottom navigation bar */
 .bottom-nav {
   border-top: 1px solid rgba(0, 0, 0, 0.06) !important;
@@ -398,6 +474,19 @@ onMounted(() => {
     display: none !important;
     transform: translateX(-100%) !important;
     visibility: hidden !important;
+  }
+}
+
+/* Wide screen 110% scaling */
+@media (min-width: 960px) {
+  .main-content {
+    overflow-x: hidden;
+  }
+
+  .content-wrapper {
+    transform: scale(1.1);
+    transform-origin: top center;
+    padding-bottom: calc(100px * 1.1);
   }
 }
 </style>

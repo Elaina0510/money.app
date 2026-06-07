@@ -9,25 +9,9 @@
     <!-- Filter Bar -->
     <v-card class="pa-3 mb-3 filter-card" rounded="xl">
       <div class="d-flex align-center ga-2">
-        <v-text-field
-          v-model="filters.start_date"
-          type="date"
-          label="开始"
-          hide-details
-          density="compact"
-          variant="outlined"
-          class="flex-grow-1"
-        />
+        <DatePickerPopover v-model="filters.start_date" label="开始日期" class="flex-grow-1" />
         <span class="text-grey">-</span>
-        <v-text-field
-          v-model="filters.end_date"
-          type="date"
-          label="结束"
-          hide-details
-          density="compact"
-          variant="outlined"
-          class="flex-grow-1"
-        />
+        <DatePickerPopover v-model="filters.end_date" label="结束日期" class="flex-grow-1" />
       </div>
       <div class="d-flex align-center ga-2 mt-2">
         <v-select
@@ -58,26 +42,44 @@
     <!-- Month Switcher -->
     <v-card class="pa-2 mb-3" rounded="xl">
       <div class="d-flex align-center">
-        <v-btn v-if="selectedYear !== currentYear - 5" icon variant="text" size="x-small"
-          class="d-none d-md-flex" @click="prevYear">
+        <v-btn
+          v-if="selectedYear !== currentYear - 5"
+          icon
+          variant="text"
+          size="x-small"
+          class="d-none d-md-flex"
+          @click="prevYear"
+        >
           <v-icon size="small">mdi-chevron-left</v-icon>
         </v-btn>
-        <div class="d-flex ga-1 overflow-x-auto flex-grow-1 pb-1" style="scrollbar-width: none;">
-          <div v-for="m in 12" :key="m" class="text-center flex-shrink-0" style="min-width: 48px;">
+        <div class="d-flex ga-1 overflow-x-auto flex-grow-1 pb-1" style="scrollbar-width: none">
+          <div v-for="m in 12" :key="m" class="text-center flex-shrink-0" style="min-width: 48px">
             <v-chip
               :color="selectedMonth === m && selectedYear === currentYear ? 'primary' : ''"
               :variant="selectedMonth === m ? 'flat' : 'text'"
-              size="small" rounded="xl" @click="selectMonth(m)">
+              size="small"
+              rounded="xl"
+              @click="selectMonth(m)"
+            >
               {{ m }}月
             </v-chip>
-            <div v-if="selectedYear !== currentYear"
-              class="text-caption text-grey" style="font-size: 10px; line-height: 1; margin-top: 2px;">
+            <div
+              v-if="selectedYear !== currentYear"
+              class="text-caption text-grey"
+              style="font-size: 10px; line-height: 1; margin-top: 2px"
+            >
               {{ selectedYear }}
             </div>
           </div>
         </div>
-        <v-btn v-if="selectedYear < currentYear" icon variant="text" size="x-small"
-          class="d-none d-md-flex" @click="nextYear">
+        <v-btn
+          v-if="selectedYear < currentYear"
+          icon
+          variant="text"
+          size="x-small"
+          class="d-none d-md-flex"
+          @click="nextYear"
+        >
           <v-icon size="small">mdi-chevron-right</v-icon>
         </v-btn>
       </div>
@@ -87,17 +89,13 @@
     <div v-if="selected.length > 0" class="batch-bar mb-3">
       <v-card rounded="xl" class="pa-2">
         <div class="d-flex align-center justify-space-between px-2">
-          <v-chip color="primary" size="small" class="mr-2">
-            已选 {{ selected.length }}
-          </v-chip>
+          <v-chip color="primary" size="small" class="mr-2"> 已选 {{ selected.length }} </v-chip>
           <div class="d-flex ga-1">
             <v-btn color="error" variant="tonal" size="small" @click="showDeleteDialog = true">
               <v-icon start size="small">mdi-delete</v-icon>
               删除
             </v-btn>
-            <v-btn variant="text" size="small" @click="selected = []">
-              取消
-            </v-btn>
+            <v-btn variant="text" size="small" @click="selected = []"> 取消 </v-btn>
           </div>
         </div>
       </v-card>
@@ -120,22 +118,19 @@
     <div v-else>
       <div v-for="record in records" :key="record.id" class="mb-2">
         <v-card rounded="xl" class="record-card">
-          <v-list-item @click="goToDetail(record.id)">
+          <v-list-item @click="goToDetail($event, record.id)">
             <template v-slot:prepend>
               <v-avatar
                 :color="record.type === 'expense' ? '#FFE8E8' : '#E8FFF3'"
                 size="40"
                 class="mr-2"
               >
-                <v-icon :color="record.type === 'expense' ? '#FF6B6B' : '#20C997'" size="18">
-                  {{ record.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
+                <v-icon :color="record.type === 'expense' ? '#FF6B6B' : '#20C997'" size="20">
+                  {{ record.category_icon || 'mdi-circle' }}
                 </v-icon>
               </v-avatar>
             </template>
             <v-list-item-title class="text-body-2 font-weight-medium">
-              <v-avatar size="24" color="rgba(139, 126, 116, 0.12)" class="mr-1">
-                <v-icon size="14" color="#8B7E74">{{ record.category_icon || 'mdi-circle' }}</v-icon>
-              </v-avatar>
               {{ record.tag?.name || record.category_name || '未分类' }}
             </v-list-item-title>
             <v-list-item-subtitle class="d-flex align-center text-caption mt-1">
@@ -182,14 +177,16 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import dayjs from 'dayjs'
 import { getRecords } from '@/api/records'
 import { getCategories } from '@/api/categories'
 import { useRecordsStore } from '@/stores/useRecordsStore'
+import { useAppStore } from '@/stores/useAppStore'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import DatePickerPopover from '@/components/common/DatePickerPopover.vue'
 
 const router = useRouter()
 const recordsStore = useRecordsStore()
+const appStore = useAppStore()
 
 const records = ref([])
 const categories = ref([])
@@ -212,7 +209,7 @@ const categoryOptions = computed(() => {
   const list = [{ name: '全部分类', id: null }]
   if (filters.type) {
     // Filter categories by selected type
-    const filtered = categories.value.filter(c => c.type === filters.type)
+    const filtered = categories.value.filter((c) => c.type === filters.type)
     return list.concat(filtered)
   }
   return list.concat(categories.value)
@@ -232,10 +229,19 @@ function selectMonth(month) {
   search()
 }
 
-function prevYear() { selectedYear.value-- }
-function nextYear() { if (selectedYear.value < currentYear) selectedYear.value++ }
+function prevYear() {
+  selectedYear.value--
+}
+function nextYear() {
+  if (selectedYear.value < currentYear) selectedYear.value++
+}
 
-function goToDetail(id) {
+function goToDetail(event, id) {
+  // Get the click position for expand animation
+  const rect = event.currentTarget.getBoundingClientRect()
+  const x = rect.left + rect.width / 2
+  const y = rect.top + rect.height / 2
+  appStore.setTransitionOrigin({ x, y })
   router.push(`/detail/${id}`)
 }
 
@@ -268,7 +274,9 @@ watch(
   () => [filters.start_date, filters.end_date, filters.type, filters.category_id],
   () => {
     clearTimeout(searchDebounceTimer)
-    searchDebounceTimer = setTimeout(() => { search() }, 300)
+    searchDebounceTimer = setTimeout(() => {
+      search()
+    }, 300)
   }
 )
 
@@ -286,7 +294,7 @@ async function handleBatchDelete() {
     selected.value = []
     showDeleteDialog.value = false
     await search()
-  } catch (e) {
+  } catch {
     // Toast shown by store
   }
 }

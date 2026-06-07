@@ -32,7 +32,6 @@ export const useRecordsStore = defineStore('records', () => {
   const hasMore = computed(() => page.value < totalPages.value)
 
   async function fetchRecords(params = {}) {
-    const app = useAppStore()
     loading.value = true
     try {
       const query = {

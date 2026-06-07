@@ -5,6 +5,7 @@ export const useAppStore = defineStore('app', () => {
   const darkMode = ref(false)
   const loading = ref(false)
   const toast = ref({ show: false, message: '', color: 'success' })
+  const transitionOrigin = ref(null)
 
   function toggleDarkMode() {
     darkMode.value = !darkMode.value
@@ -26,14 +27,20 @@ export const useAppStore = defineStore('app', () => {
     toast.value.show = false
   }
 
+  function setTransitionOrigin(origin) {
+    transitionOrigin.value = origin
+  }
+
   return {
     darkMode,
     loading,
     toast,
+    transitionOrigin,
     toggleDarkMode,
     setDarkMode,
     setLoading,
     showToast,
     hideToast,
+    setTransitionOrigin,
   }
 })

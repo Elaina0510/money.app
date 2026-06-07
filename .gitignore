@@ -65,5 +65,6 @@ __pycache__/
 *.egg
 
 doc/bug/
-doc/*.pdf.claude/
+doc/*.pdf
+.claude/
 *.lnk

@@ -35,7 +35,12 @@
       <div class="mb-2">
         <div class="text-caption text-grey font-weight-medium mb-1">支出分类</div>
         <v-list v-if="expenseCategories.length" density="compact" class="bg-transparent pa-0">
-          <v-list-item v-for="cat in expenseCategories" :key="cat.id" class="category-list-item" rounded="lg">
+          <v-list-item
+            v-for="cat in expenseCategories"
+            :key="cat.id"
+            class="category-list-item"
+            rounded="lg"
+          >
             <template v-slot:prepend>
               <v-avatar size="32" color="#FFE8E8" class="mr-2">
                 <v-icon size="16" color="#FF6B6B">{{ cat.icon || 'mdi-circle' }}</v-icon>
@@ -51,14 +56,18 @@
               <div class="d-flex ga-1">
                 <v-btn
                   v-if="expenseCategories.indexOf(cat) > 0"
-                  icon variant="text" size="x-small"
+                  icon
+                  variant="text"
+                  size="x-small"
                   @click="moveCategory(cat, -1)"
                 >
                   <v-icon size="small" color="grey">mdi-chevron-up</v-icon>
                 </v-btn>
                 <v-btn
                   v-if="expenseCategories.indexOf(cat) < expenseCategories.length - 1"
-                  icon variant="text" size="x-small"
+                  icon
+                  variant="text"
+                  size="x-small"
                   @click="moveCategory(cat, 1)"
                 >
                   <v-icon size="small" color="grey">mdi-chevron-down</v-icon>
@@ -66,12 +75,7 @@
                 <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
                   <v-icon size="small" color="grey">mdi-pencil</v-icon>
                 </v-btn>
-                <v-btn
-                  icon
-                  variant="text"
-                  size="x-small"
-                  @click="confirmDeleteCategory(cat)"
-                >
+                <v-btn icon variant="text" size="x-small" @click="confirmDeleteCategory(cat)">
                   <v-icon size="small" color="error">mdi-delete</v-icon>
                 </v-btn>
               </div>
@@ -84,7 +88,12 @@
       <div>
         <div class="text-caption text-grey font-weight-medium mb-1">收入分类</div>
         <v-list v-if="incomeCategories.length" density="compact" class="bg-transparent pa-0">
-          <v-list-item v-for="cat in incomeCategories" :key="cat.id" class="category-list-item" rounded="lg">
+          <v-list-item
+            v-for="cat in incomeCategories"
+            :key="cat.id"
+            class="category-list-item"
+            rounded="lg"
+          >
             <template v-slot:prepend>
               <v-avatar size="32" color="#E8FFF3" class="mr-2">
                 <v-icon size="16" color="#20C997">{{ cat.icon || 'mdi-circle' }}</v-icon>
@@ -100,14 +109,18 @@
               <div class="d-flex ga-1">
                 <v-btn
                   v-if="incomeCategories.indexOf(cat) > 0"
-                  icon variant="text" size="x-small"
+                  icon
+                  variant="text"
+                  size="x-small"
                   @click="moveCategory(cat, -1)"
                 >
                   <v-icon size="small" color="grey">mdi-chevron-up</v-icon>
                 </v-btn>
                 <v-btn
                   v-if="incomeCategories.indexOf(cat) < incomeCategories.length - 1"
-                  icon variant="text" size="x-small"
+                  icon
+                  variant="text"
+                  size="x-small"
                   @click="moveCategory(cat, 1)"
                 >
                   <v-icon size="small" color="grey">mdi-chevron-down</v-icon>
@@ -115,12 +128,7 @@
                 <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
                   <v-icon size="small" color="grey">mdi-pencil</v-icon>
                 </v-btn>
-                <v-btn
-                  icon
-                  variant="text"
-                  size="x-small"
-                  @click="confirmDeleteCategory(cat)"
-                >
+                <v-btn icon variant="text" size="x-small" @click="confirmDeleteCategory(cat)">
                   <v-icon size="small" color="error">mdi-delete</v-icon>
                 </v-btn>
               </div>
@@ -190,12 +198,8 @@
       <v-card class="pa-4" rounded="xl">
         <v-card-title class="text-h6 pa-0 mb-2">恢复默认分类</v-card-title>
         <v-card-text class="pa-0 mb-4">
-          <v-alert type="warning" variant="tonal" class="mb-3">
-            此操作不可撤销！
-          </v-alert>
-          <p class="text-body-2">
-            恢复默认分类将：
-          </p>
+          <v-alert type="warning" variant="tonal" class="mb-3"> 此操作不可撤销！ </v-alert>
+          <p class="text-body-2">恢复默认分类将：</p>
           <ul class="text-body-2 text-medium-emphasis">
             <li>删除所有自定义分类</li>
             <li>自定义分类下的账单记录将被保留，但失去分类关联</li>
@@ -226,18 +230,10 @@
         </v-btn>
       </div>
 
-      <div v-if="tags.length === 0" class="text-center pa-4 text-grey text-caption">
-        暂无标签
-      </div>
+      <div v-if="tags.length === 0" class="text-center pa-4 text-grey text-caption">暂无标签</div>
 
       <div v-else class="d-flex flex-wrap ga-1">
-        <v-chip
-          v-for="tag in tags"
-          :key="tag.id"
-          size="small"
-          variant="tonal"
-          class="mb-1"
-        >
+        <v-chip v-for="tag in tags" :key="tag.id" size="small" variant="tonal" class="mb-1">
           <v-icon start size="x-small">mdi-tag</v-icon>
           {{ tag.name }}
           <template v-slot:append>
@@ -267,7 +263,7 @@
           item-title="name"
           item-value="id"
           label="所属分类 *"
-          :rules="[v => !!v || '请选择分类']"
+          :rules="[(v) => !!v || '请选择分类']"
           hide-details="auto"
           class="mb-3"
           variant="outlined"
@@ -309,7 +305,9 @@
         <div class="text-h5 font-weight-bold mb-2">¥{{ formatAmount(totalBudget) }}</div>
         <v-progress-linear
           :model-value="budgetUsagePercent"
-          :color="budgetUsagePercent > 80 ? 'error' : budgetUsagePercent > 50 ? 'warning' : 'success'"
+          :color="
+            budgetUsagePercent > 80 ? 'error' : budgetUsagePercent > 50 ? 'warning' : 'success'
+          "
           height="8"
           rounded
           class="mb-2"
@@ -325,7 +323,11 @@
         暂无预算设置，点击上方按钮添加分类预算
       </div>
 
-      <div v-for="(item, index) in enrichedBudgets" :key="item.category_id" class="budget-item mb-3">
+      <div
+        v-for="(item, index) in enrichedBudgets"
+        :key="item.category_id"
+        class="budget-item mb-3"
+      >
         <div class="d-flex justify-space-between align-center mb-1">
           <div class="d-flex align-center">
             <v-avatar size="32" :color="getBudgetColor(index) + '20'" class="mr-2">
@@ -348,7 +350,14 @@
                 @keyup.enter="saveBudgetEdit(item)"
                 @keyup.escape="cancelBudgetEdit"
               />
-              <v-btn icon size="x-small" variant="text" color="primary" @click="saveBudgetEdit(item)" :loading="savingBudget">
+              <v-btn
+                icon
+                size="x-small"
+                variant="text"
+                color="primary"
+                @click="saveBudgetEdit(item)"
+                :loading="savingBudget"
+              >
                 <v-icon size="small">mdi-check</v-icon>
               </v-btn>
               <v-btn icon size="x-small" variant="text" @click="cancelBudgetEdit">
@@ -366,7 +375,13 @@
         </div>
         <v-progress-linear
           :model-value="item.amount > 0 ? (item.spent / item.amount) * 100 : 0"
-          :color="item.amount > 0 && (item.spent / item.amount) > 0.8 ? 'error' : item.amount > 0 && (item.spent / item.amount) > 0.5 ? 'warning' : 'primary'"
+          :color="
+            item.amount > 0 && item.spent / item.amount > 0.8
+              ? 'error'
+              : item.amount > 0 && item.spent / item.amount > 0.5
+                ? 'warning'
+                : 'primary'
+          "
           height="6"
           rounded
         />
@@ -423,9 +438,17 @@
       </div>
 
       <v-list v-else density="compact" class="bg-transparent pa-0">
-        <v-list-item v-for="tpl in quickTemplates" :key="(tpl.tag_id || '') + '-' + tpl.amount + '-' + tpl.source" class="quick-template-item">
+        <v-list-item
+          v-for="tpl in quickTemplates"
+          :key="(tpl.tag_id || '') + '-' + tpl.amount + '-' + tpl.source"
+          class="quick-template-item"
+        >
           <template v-slot:prepend>
-            <v-avatar size="32" :color="tpl.type === 'expense' ? '#FFE8E8' : '#E8FFF3'" class="mr-2">
+            <v-avatar
+              size="32"
+              :color="tpl.type === 'expense' ? '#FFE8E8' : '#E8FFF3'"
+              class="mr-2"
+            >
               <v-icon size="16" :color="tpl.type === 'expense' ? '#FF6B6B' : '#20C997'">
                 {{ tpl.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
               </v-icon>
@@ -456,7 +479,7 @@
           item-title="name"
           item-value="id"
           label="选择标签 *"
-          :rules="[v => !!v || '请选择标签']"
+          :rules="[(v) => !!v || '请选择标签']"
           hide-details="auto"
           class="mb-3"
           variant="outlined"
@@ -466,14 +489,16 @@
           label="金额 *"
           type="number"
           prefix="¥"
-          :rules="[v => v > 0 || '请输入金额']"
+          :rules="[(v) => v > 0 || '请输入金额']"
           hide-details="auto"
           class="mb-3"
           variant="outlined"
         />
         <div class="d-flex justify-end ga-2">
           <v-btn variant="text" @click="showQuickTemplateDialog = false">取消</v-btn>
-          <v-btn color="primary" :loading="savingQuickTemplate" @click="saveQuickTemplate">保存</v-btn>
+          <v-btn color="primary" :loading="savingQuickTemplate" @click="saveQuickTemplate"
+            >保存</v-btn
+          >
         </div>
       </v-card>
     </v-dialog>
@@ -534,8 +559,8 @@ const appStore = useAppStore()
 const { categories } = storeToRefs(categoriesStore)
 const tags = ref([])
 
-const expenseCategories = computed(() => categories.value.filter(c => c.type === 'expense'))
-const incomeCategories = computed(() => categories.value.filter(c => c.type === 'income'))
+const expenseCategories = computed(() => categories.value.filter((c) => c.type === 'expense'))
+const incomeCategories = computed(() => categories.value.filter((c) => c.type === 'income'))
 
 // Category CRUD
 const showCategoryDialog = ref(false)
@@ -577,8 +602,16 @@ const budgetForm = ref({ category_id: null, amount: 0 })
 const currentMonth = dayjs().format('YYYY-MM')
 
 const BUDGET_COLORS = [
-  '#FF6B6B', '#4DABF7', '#9775FA', '#51CF66', '#FF922B',
-  '#22B8CF', '#F06595', '#845EF7', '#20C997', '#FD7E14',
+  '#FF6B6B',
+  '#4DABF7',
+  '#9775FA',
+  '#51CF66',
+  '#FF922B',
+  '#22B8CF',
+  '#F06595',
+  '#845EF7',
+  '#20C997',
+  '#FD7E14',
 ]
 
 const totalBudget = computed(() => budgets.value.reduce((sum, b) => sum + b.amount, 0))
@@ -589,15 +622,15 @@ const budgetUsagePercent = computed(() => {
 })
 
 const enrichedBudgets = computed(() => {
-  return budgets.value.map(b => {
-    const cat = categories.value.find(c => c.id === b.category_id)
+  return budgets.value.map((b) => {
+    const cat = categories.value.find((c) => c.id === b.category_id)
     return { ...b, icon: cat?.icon || 'mdi-cash' }
   })
 })
 
 const availableBudgetCategories = computed(() => {
-  const budgetCategoryIds = budgets.value.map(b => b.category_id)
-  return categories.value.filter(c => c.type === 'expense' && !budgetCategoryIds.includes(c.id))
+  const budgetCategoryIds = budgets.value.map((b) => b.category_id)
+  return categories.value.filter((c) => c.type === 'expense' && !budgetCategoryIds.includes(c.id))
 })
 
 // Quick template state
@@ -637,7 +670,7 @@ async function moveCategory(cat, direction) {
     await categoriesStore.editCategory(cat.id, { sort_order: target.sort_order })
     await categoriesStore.editCategory(target.id, { sort_order: tempOrder })
     await loadCategories()
-  } catch (e) {
+  } catch {
     // Toast shown by store
   }
 }
@@ -666,7 +699,7 @@ async function saveCategory() {
     editingCategory.value = null
     resetCategoryForm()
     await loadCategories()
-  } catch (e) {
+  } catch {
     // Toast shown by store
   } finally {
     savingCategory.value = false
@@ -701,7 +734,7 @@ async function handleDeleteCategory() {
     try {
       await categoriesStore.removeCategory(deletingCategory.value.id)
       await loadCategories()
-    } catch (e) {
+    } catch {
       // Toast shown by store
     }
   }
@@ -731,7 +764,7 @@ async function saveTag() {
     tagForm.name = ''
     tagForm.category_id = null
     await loadTags()
-  } catch (e) {
+  } catch {
     // Toast shown by store
   } finally {
     savingTag.value = false
@@ -748,7 +781,7 @@ async function handleDeleteTag() {
     try {
       await categoriesStore.removeTag(deletingTag.value.id)
       await loadTags()
-    } catch (e) {
+    } catch {
       // Toast shown by store
     }
   }
@@ -762,7 +795,7 @@ function getBudgetColor(index) {
 
 async function loadBudgets() {
   try {
-    budgets.value = await getBudgets({ month: currentMonth }) || []
+    budgets.value = (await getBudgets({ month: currentMonth })) || []
   } catch (e) {
     console.error('Load budgets error:', e)
     budgets.value = []
@@ -821,7 +854,7 @@ async function saveBudget() {
 
 async function loadQuickTemplates() {
   try {
-    quickTemplates.value = await getQuickTemplates() || []
+    quickTemplates.value = (await getQuickTemplates()) || []
   } catch (e) {
     console.error('Load quick templates error:', e)
     quickTemplates.value = []

@@ -6,7 +6,14 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "lint": "eslint src --ext .js,.vue",
+    "lint:fix": "eslint src --ext .js,.vue --fix",
+    "format": "prettier --check src",
+    "format:fix": "prettier --write src"
   },
   "dependencies": {
     "@mdi/font": "^7.4.47",
@@ -22,7 +29,14 @@
     "vuetify": "^3.12.6"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@vitejs/plugin-vue": "^6.0.7",
-    "vite": "^8.0.12"
+    "@vue/test-utils": "^2.4.11",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-vue": "^10.9.2",
+    "jsdom": "^29.1.1",
+    "prettier": "^3.8.3",
+    "vite": "^8.0.12",
+    "vitest": "^4.1.8"
   }
 }

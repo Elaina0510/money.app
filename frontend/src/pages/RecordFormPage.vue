@@ -1,9 +1,20 @@
 <template>
   <div class="form-page">
+    <!-- Leave Confirmation Dialog -->
+    <ConfirmDialog
+      v-model="showLeaveDialog"
+      title="未保存的更改"
+      message="您有未保存的更改，确定要离开吗？"
+      confirm-text="确定放弃"
+      confirm-color="error"
+      @confirm="confirmLeave"
+      @cancel="cancelLeave"
+    />
+
     <!-- Page Header -->
     <div class="page-header mb-3">
       <div class="d-flex align-center">
-        <v-btn icon variant="text" class="mr-2" @click="router.back()">
+        <v-btn icon variant="text" class="mr-2" @click="handleBack()">
           <v-icon>mdi-arrow-left</v-icon>
         </v-btn>
         <div>
@@ -61,14 +72,9 @@
     <v-card class="pa-4 mb-4" rounded="xl">
       <div class="text-subtitle-2 font-weight-bold mb-3">选择分类</div>
       <v-row dense>
-        <v-col
-          v-for="cat in currentCategories"
-          :key="cat.id"
-          cols="3"
-          class="text-center"
-        >
+        <v-col v-for="cat in currentCategories" :key="cat.id" cols="3" class="text-center">
           <v-btn
-            :color="categoryId === cat.id ? recordType === 'expense' ? '#FF6B6B' : '#20C997' : ''"
+            :color="categoryId === cat.id ? (recordType === 'expense' ? '#FF6B6B' : '#20C997') : ''"
             :variant="categoryId === cat.id ? 'flat' : 'text'"
             size="small"
             class="category-chip"
@@ -83,7 +89,13 @@
                 class="mb-1"
               >
                 <v-icon
-                  :color="categoryId === cat.id ? recordType === 'expense' ? '#FF6B6B' : '#20C997' : 'rgba(0,0,0,0.5)'"
+                  :color="
+                    categoryId === cat.id
+                      ? recordType === 'expense'
+                        ? '#FF6B6B'
+                        : '#20C997'
+                      : 'rgba(0,0,0,0.5)'
+                  "
                   size="20"
                 >
                   {{ cat.icon || 'mdi-circle' }}
@@ -107,22 +119,12 @@
       <div class="mb-3">
         <div class="text-caption text-grey mb-1">消费时间</div>
         <div class="d-flex ga-2">
-          <v-text-field
+          <DatePickerPopover
             v-model="consumeDate"
-            type="date"
-            hide-details
-            variant="outlined"
-            density="compact"
+            v-model:model-value-time="consumeTime"
+            :show-time="true"
+            label="消费日期"
             class="flex-grow-1"
-          />
-          <v-text-field
-            v-model="consumeTime"
-            type="time"
-            hide-details
-            variant="outlined"
-            density="compact"
-            class="flex-shrink-0"
-            style="max-width: 140px;"
           />
         </div>
       </div>
@@ -186,15 +188,8 @@
           @click="fillTemplate(tpl)"
           class="template-chip"
         >
-          <v-avatar
-            :color="tpl.type === 'expense' ? '#FFE8E8' : '#E8FFF3'"
-            size="20"
-            class="mr-1"
-          >
-            <v-icon
-              size="12"
-              :color="tpl.type === 'expense' ? '#FF6B6B' : '#20C997'"
-            >
+          <v-avatar :color="tpl.type === 'expense' ? '#FFE8E8' : '#E8FFF3'" size="20" class="mr-1">
+            <v-icon size="12" :color="tpl.type === 'expense' ? '#FF6B6B' : '#20C997'">
               {{ tpl.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
             </v-icon>
           </v-avatar>
@@ -222,16 +217,24 @@
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router'
 import { createRecord, updateRecord, getRecord, getQuickTemplates } from '@/api/records'
 import { getCategories } from '@/api/categories'
-import { getTags, searchTags, createTag as createTagData } from '@/api/tags'
+import { searchTags, createTag as createTagData } from '@/api/tags'
 import { useAppStore } from '@/stores/useAppStore'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import DatePickerPopover from '@/components/common/DatePickerPopover.vue'
 import dayjs from 'dayjs'
 
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
+
+// Leave guard state
+const isDirty = ref(false)
+const showLeaveDialog = ref(false)
+const pendingNavigation = ref(null)
+let initialSnapshot = ''
 
 const isEdit = computed(() => !!route.params.id)
 
@@ -262,11 +265,62 @@ const canSubmit = computed(() => {
   return parseFloat(amount.value) > 0 && categoryId.value !== null
 })
 
+// Leave guard functions
+function takeSnapshot() {
+  return JSON.stringify({
+    recordType: recordType.value,
+    amount: amount.value,
+    categoryId: categoryId.value,
+    consumeDate: consumeDate.value,
+    consumeTime: consumeTime.value,
+    selectedTagId: selectedTagId.value,
+    selectedTagName: selectedTagName.value,
+    note: note.value,
+  })
+}
+
+function handleBack() {
+  if (isDirty.value) {
+    showLeaveDialog.value = true
+  } else {
+    router.back()
+  }
+}
+
+function confirmLeave() {
+  isDirty.value = false
+  showLeaveDialog.value = false
+  if (pendingNavigation.value) {
+    pendingNavigation.value()
+  } else {
+    router.back()
+  }
+}
+
+function cancelLeave() {
+  showLeaveDialog.value = false
+  pendingNavigation.value = null
+}
+
+// Leave guard - intercept navigation when form is dirty
+try {
+  onBeforeRouteLeave((to, from, next) => {
+    if (isDirty.value) {
+      showLeaveDialog.value = true
+      pendingNavigation.value = () => next()
+    } else {
+      next()
+    }
+  })
+} catch {
+  // Ignore if not in router context (e.g., during tests)
+}
+
 async function onTagSearch(query) {
   if (!query || query.length < 1) {
     // When search clears, retain the currently selected tag so v-autocomplete displays its name
     if (selectedTagId.value) {
-      const currentItem = tagSearchResults.value.find(t => t.id === selectedTagId.value)
+      const currentItem = tagSearchResults.value.find((t) => t.id === selectedTagId.value)
       tagSearchResults.value = currentItem ? [currentItem] : []
     } else {
       tagSearchResults.value = []
@@ -293,7 +347,7 @@ function onTagSelected(tagId) {
     selectedTagName.value = ''
     return
   }
-  const tag = tagSearchResults.value.find(t => t.id === tagId)
+  const tag = tagSearchResults.value.find((t) => t.id === tagId)
   if (tag) {
     selectedTagName.value = tag.name
     if (tag.category_id) {
@@ -306,7 +360,7 @@ function onTagSelected(tagId) {
 async function onCreateTagFromSearch() {
   if (!tagSearchQuery.value || tagSearchQuery.value.length < 1) return
   // Only select if exact match found
-  const exactMatch = tagSearchResults.value.find(t => t.name === tagSearchQuery.value)
+  const exactMatch = tagSearchResults.value.find((t) => t.name === tagSearchQuery.value)
   if (exactMatch) {
     selectedTagId.value = exactMatch.id
     selectedTagName.value = exactMatch.name
@@ -319,7 +373,7 @@ async function onCreateTagFromSearch() {
   selectedTagName.value = tagSearchQuery.value.trim()
   // Add as temp item so v-autocomplete can display the name
   const tempTag = {
-    id: -1,  // temp ID, not saved
+    id: -1, // temp ID, not saved
     name: selectedTagName.value,
     category_id: categoryId.value,
   }
@@ -350,7 +404,10 @@ async function submit() {
     // If tag name is entered but no matching tag exists (or temp ID), create it first
     let tagId = selectedTagId.value
     if (selectedTagName.value && (!tagId || tagId === -1)) {
-      const newTag = await createTagData({ name: selectedTagName.value.trim(), category_id: categoryId.value })
+      const newTag = await createTagData({
+        name: selectedTagName.value.trim(),
+        category_id: categoryId.value,
+      })
       tagId = newTag.id
     }
 
@@ -369,8 +426,9 @@ async function submit() {
       await createRecord(data)
       appStore.showToast('记账成功')
     }
+    isDirty.value = false
     router.push('/')
-  } catch (e) {
+  } catch {
     // Toast already shown by store
   } finally {
     submitting.value = false
@@ -384,12 +442,20 @@ watch(recordType, () => {
   }
 })
 
+// Watch form fields for dirty state
+watch(
+  [recordType, amount, categoryId, consumeDate, consumeTime, selectedTagId, selectedTagName, note],
+  () => {
+    if (initialSnapshot) {
+      isDirty.value = takeSnapshot() !== initialSnapshot
+    }
+  },
+  { deep: true }
+)
+
 onMounted(async () => {
   try {
-    const [cats, tpls] = await Promise.all([
-      getCategories(),
-      getQuickTemplates(),
-    ])
+    const [cats, tpls] = await Promise.all([getCategories(), getQuickTemplates()])
     categories.value = cats
     templates.value = tpls || []
 
@@ -419,6 +485,8 @@ onMounted(async () => {
         note.value = record.note || ''
       }
     }
+    // Save initial snapshot for dirty tracking
+    initialSnapshot = takeSnapshot()
   } catch (e) {
     console.error('Form load error:', e)
   }
@@ -479,7 +547,7 @@ onMounted(async () => {
 }
 
 .active-category {
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 .template-chip {
