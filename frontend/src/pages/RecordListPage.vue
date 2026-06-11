@@ -1,9 +1,8 @@
 <template>
   <div class="records-page">
-    <!-- Page Header -->
-    <div class="page-header mb-3">
-      <h1 class="page-title">账单</h1>
-      <p class="page-subtitle">共 {{ totalCount }} 条记录</p>
+    <!-- Page Info -->
+    <div class="page-info mb-3">
+      <p class="text-caption text-grey">共 {{ totalCount }} 条记录</p>
     </div>
 
     <!-- Filter Bar -->
@@ -321,17 +320,6 @@ onMounted(async () => {
 <style scoped>
 .records-page {
   padding-bottom: 20px;
-}
-
-.page-header {
-  padding: 0;
-}
-
-.page-title {
-  font-size: 28px;
-  font-weight: 700;
-  margin: 0;
-  line-height: 1.2;
 }
 
 .record-card {

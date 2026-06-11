@@ -1,9 +1,8 @@
 <template>
   <div class="settings-page">
-    <!-- Page Header -->
-    <div class="page-header mb-3">
-      <h1 class="page-title">设置</h1>
-      <p class="page-subtitle">管理分类、标签和数据</p>
+    <!-- Page Info -->
+    <div class="page-info mb-3">
+      <p class="text-caption text-grey">管理分类、标签和数据</p>
     </div>
 
     <!-- Theme Mode Setting -->
@@ -949,17 +948,6 @@ onMounted(async () => {
 <style scoped>
 .settings-page {
   padding-bottom: 20px;
-}
-
-.page-header {
-  padding: 0;
-}
-
-.page-title {
-  font-size: 28px;
-  font-weight: 700;
-  margin: 0;
-  line-height: 1.2;
 }
 
 .category-list-item {

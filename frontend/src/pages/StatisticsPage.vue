@@ -1,9 +1,8 @@
 <template>
   <div class="statistics-page">
-    <!-- Page Header -->
-    <div class="page-header mb-3">
-      <h1 class="page-title">统计</h1>
-      <p class="page-subtitle">收支数据一目了然</p>
+    <!-- Page Info -->
+    <div class="page-info mb-3">
+      <p class="text-caption text-grey">收支数据一目了然</p>
     </div>
 
     <!-- Period Selector -->
@@ -331,23 +330,6 @@ onMounted(loadData)
 <style scoped>
 .statistics-page {
   padding-bottom: 20px;
-}
-
-.page-header {
-  padding: 0;
-}
-
-.page-title {
-  font-size: 28px;
-  font-weight: 700;
-  margin: 0;
-  line-height: 1.2;
-}
-
-.page-subtitle {
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.45);
-  margin: 2px 0 0;
 }
 
 .period-selector {
