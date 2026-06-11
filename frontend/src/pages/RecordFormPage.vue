@@ -11,17 +11,11 @@
       @cancel="cancelLeave"
     />
 
-    <!-- Page Header -->
-    <div class="page-header mb-3">
-      <div class="d-flex align-center">
-        <v-btn icon variant="text" class="mr-2" @click="handleBack()">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-        <div>
-          <h1 class="page-title">{{ isEdit ? '编辑账单' : '记一笔' }}</h1>
-          <p class="page-subtitle">{{ isEdit ? '修改账单信息' : '记录你的每一笔收支' }}</p>
-        </div>
-      </div>
+    <!-- Back Button -->
+    <div class="mb-3">
+      <v-btn icon variant="text" @click="handleBack()">
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
     </div>
 
     <!-- Type Toggle -->
@@ -496,17 +490,6 @@ onMounted(async () => {
 <style scoped>
 .form-page {
   padding-bottom: 20px;
-}
-
-.page-header {
-  padding: 0;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0;
-  line-height: 1.2;
 }
 
 .type-btn {

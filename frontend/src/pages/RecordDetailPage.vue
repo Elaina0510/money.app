@@ -1,16 +1,10 @@
 <template>
   <div class="detail-page">
-    <!-- Page Header -->
-    <div class="page-header mb-3">
-      <div class="d-flex align-center">
-        <v-btn icon variant="text" class="mr-2" @click="handleBack()">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-        <div>
-          <h1 class="page-title">账单详情</h1>
-          <p class="page-subtitle">查看完整账单信息</p>
-        </div>
-      </div>
+    <!-- Back Button -->
+    <div class="mb-3">
+      <v-btn icon variant="text" @click="handleBack()">
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
     </div>
 
     <!-- Loading -->
@@ -208,17 +202,6 @@ onMounted(loadRecord)
 <style scoped>
 .detail-page {
   padding-bottom: 20px;
-}
-
-.page-header {
-  padding: 0;
-}
-
-.page-title {
-  font-size: 24px;
-  font-weight: 700;
-  margin: 0;
-  line-height: 1.2;
 }
 
 .amount-hero-card {
