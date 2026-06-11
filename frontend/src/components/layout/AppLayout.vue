@@ -109,7 +109,7 @@
 
     <!-- Main Content Area -->
     <v-main class="main-content">
-      <!-- Top Bar -->
+      <!-- Top Bar - sticky, must stay outside overflow container -->
       <div class="app-top-bar pa-4 pb-0">
         <div class="d-flex align-center">
           <!-- Hamburger button - Desktop only -->
@@ -127,25 +127,27 @@
         </div>
       </div>
 
-      <!-- Page Content -->
-      <div class="content-wrapper">
-        <router-view v-slot="{ Component, route }">
-          <!-- Expand transition for detail page -->
-          <transition
-            v-if="route.path.startsWith('/detail') && appStore.transitionOrigin"
-            name="expand"
-            mode="out-in"
-            @before-enter="onBeforeEnter"
-            @enter="onEnter"
-            @leave="onLeave"
-          >
-            <component :is="Component" :key="route.path" />
-          </transition>
-          <!-- Normal page transition -->
-          <transition v-else name="page" mode="out-in">
-            <component :is="Component" :key="route.path" />
-          </transition>
-        </router-view>
+      <!-- Page Content - overflow-x:hidden clips scale(1.1) without affecting sticky top bar -->
+      <div class="content-overflow">
+        <div class="content-wrapper">
+          <router-view v-slot="{ Component, route }">
+            <!-- Expand transition for detail page -->
+            <transition
+              v-if="route.path.startsWith('/detail') && appStore.transitionOrigin"
+              name="expand"
+              mode="out-in"
+              @before-enter="onBeforeEnter"
+              @enter="onEnter"
+              @leave="onLeave"
+            >
+              <component :is="Component" :key="route.path" />
+            </transition>
+            <!-- Normal page transition -->
+            <transition v-else name="page" mode="out-in">
+              <component :is="Component" :key="route.path" />
+            </transition>
+          </router-view>
+        </div>
       </div>
     </v-main>
 
@@ -392,6 +394,11 @@ onMounted(() => {
   position: relative;
 }
 
+/* Overflow container: clips horizontal overflow from scale(1.1) on wide screens */
+.content-overflow {
+  overflow-x: hidden;
+}
+
 /* Bottom blur gradient */
 .content-wrapper::after {
   content: '';
@@ -480,10 +487,6 @@ onMounted(() => {
 
 /* Wide screen 110% scaling */
 @media (min-width: 960px) {
-  .main-content {
-    overflow-x: hidden;
-  }
-
   .content-wrapper {
     transform: scale(1.1);
     transform-origin: top center;
