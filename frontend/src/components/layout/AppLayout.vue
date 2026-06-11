@@ -37,7 +37,6 @@
           :class="{ 'active-nav-item': route.path === item.to }"
           rounded="xl"
           class="nav-item mb-1"
-          :ripple="false"
         >
           <template v-slot:prepend>
             <v-icon :icon="item.icon" size="24" />
@@ -59,7 +58,6 @@
             :class="{ 'active-nav-item': route.path === '/settings' }"
             rounded="xl"
             class="nav-item mb-1"
-            :ripple="false"
           >
             <template v-slot:prepend>
               <v-icon icon="mdi-cog-outline" size="24" />
@@ -301,9 +299,13 @@ function goToAddRecord() {
 function onBeforeEnter(el) {
   if (appStore.transitionOrigin) {
     const origin = appStore.transitionOrigin
-    el.style.transformOrigin = `${origin.x}px ${origin.y}px`
-    el.style.transform = 'scale(0)'
+    const rect = el.getBoundingClientRect()
+    const x = ((origin.x - rect.left) / rect.width) * 100
+    const y = ((origin.y - rect.top) / rect.height) * 100
+    el.style.transformOrigin = `${x}% ${y}%`
+    el.style.transform = 'scale(0.1)'
     el.style.opacity = '0'
+    el.style.transition = 'none'
   }
 }
 
@@ -311,7 +313,7 @@ function onEnter(el, done) {
   if (appStore.transitionOrigin) {
     // Force reflow
     el.offsetHeight
-    el.style.transition = 'transform 250ms ease, opacity 250ms ease'
+    el.style.transition = 'transform 250ms cubic-bezier(0.4, 0, 0.2, 1), opacity 250ms ease'
     el.style.transform = 'scale(1)'
     el.style.opacity = '1'
     el.addEventListener('transitionend', done, { once: true })
@@ -326,8 +328,8 @@ function onEnter(el, done) {
 
 function onLeave(el, done) {
   if (appStore.transitionOrigin) {
-    el.style.transition = 'transform 250ms ease, opacity 250ms ease'
-    el.style.transform = 'scale(0.9)'
+    el.style.transition = 'transform 200ms ease, opacity 200ms ease'
+    el.style.transform = 'scale(0.95)'
     el.style.opacity = '0'
     el.addEventListener(
       'transitionend',
@@ -347,8 +349,7 @@ function onLeave(el, done) {
 }
 
 onMounted(() => {
-  // Default to light mode regardless of system preference
-  appStore.setDarkMode(false)
+  appStore.initThemeListener()
 })
 </script>
 

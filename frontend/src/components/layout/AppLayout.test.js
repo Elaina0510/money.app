@@ -17,8 +17,11 @@ vi.mock('vue-router', () => ({
 vi.mock('@/stores/useAppStore', () => ({
   useAppStore: () => ({
     darkMode: false,
+    themeMode: 'auto',
     toggleDarkMode: vi.fn(),
     setDarkMode: vi.fn(),
+    setThemeMode: vi.fn(),
+    initThemeListener: vi.fn(),
     showToast: vi.fn(),
   }),
 }))

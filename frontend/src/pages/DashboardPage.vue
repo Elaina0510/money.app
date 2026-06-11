@@ -1,15 +1,5 @@
 <template>
   <div class="dashboard-page">
-    <!-- Page Header -->
-    <div class="page-header mb-4">
-      <div class="d-flex align-center justify-space-between">
-        <div class="d-none d-md-block">
-          <h1 class="page-title">首页</h1>
-          <p class="page-subtitle">{{ currentDateStr }}</p>
-        </div>
-      </div>
-    </div>
-
     <!-- Monthly Hero Card - 本月总消费 -->
     <v-card class="monthly-overview-card mb-4" color="primary" rounded="xl">
       <div class="overview-content pa-5">
@@ -176,12 +166,6 @@ const categoryStats = ref([])
 
 const currentMonthLabel = computed(() => dayjs().format('YYYY年MM月'))
 
-const currentDateStr = computed(() => {
-  const now = new Date()
-  const weekdays = ['星期日', '星期一', '星期二', '星期三', '星期四', '星期五', '星期六']
-  return `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 ${weekdays[now.getDay()]}`
-})
-
 const totalMonthExpense = computed(() => {
   const val = summary.value?.total_expense || 0
   return val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
@@ -219,23 +203,6 @@ onMounted(async () => {
 <style scoped>
 .dashboard-page {
   padding-bottom: 20px;
-}
-
-.page-header {
-  padding: 0;
-}
-
-.page-title {
-  font-size: 28px;
-  font-weight: 700;
-  margin: 0;
-  line-height: 1.2;
-}
-
-.page-subtitle {
-  font-size: 13px;
-  color: rgba(0, 0, 0, 0.45);
-  margin: 2px 0 0;
 }
 
 .monthly-overview-card {

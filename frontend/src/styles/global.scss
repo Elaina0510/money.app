@@ -2,6 +2,10 @@
 
 :root {
   --app-max-width: 640px;
+  --shadow-level-1: 0 1px 3px rgba(0, 0, 0, 0.08);
+  --shadow-level-2: 0 2px 6px rgba(0, 0, 0, 0.1);
+  --shadow-level-3: 0 8px 24px rgba(0, 0, 0, 0.15);
+  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.12);
 }
 
 html {
@@ -27,14 +31,34 @@ body {
 /* Rounder corners - Material You style */
 .v-card {
   border-radius: 16px !important;
+  box-shadow: var(--shadow-level-1) !important;
 }
 
 .v-card:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06) !important;
+  box-shadow: var(--shadow-hover) !important;
 }
 
 .v-dialog > .v-card {
   border-radius: 20px !important;
+  box-shadow: var(--shadow-level-3) !important;
+}
+
+/* Interactive element shadows */
+.v-btn:not(.v-btn--icon) {
+  box-shadow: var(--shadow-level-2) !important;
+}
+
+.v-chip {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+}
+
+/* Floating layer shadows */
+.v-menu > .v-overlay__content {
+  box-shadow: var(--shadow-level-3) !important;
+}
+
+.v-bottom-navigation {
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.1) !important;
 }
 
 /* Sidebar navigation drawer */
@@ -135,6 +159,13 @@ body {
 }
 
 /* Dark mode adjustments */
+.v-theme--dark {
+  --shadow-level-1: 0 1px 3px rgba(0, 0, 0, 0.3);
+  --shadow-level-2: 0 2px 6px rgba(0, 0, 0, 0.35);
+  --shadow-level-3: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
 .v-theme--dark .v-card {
   border-color: rgba(255, 255, 255, 0.06) !important;
 }

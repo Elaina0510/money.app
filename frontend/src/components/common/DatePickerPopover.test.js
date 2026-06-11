@@ -69,9 +69,14 @@ describe('DatePickerPopover', () => {
     expect(typeof wrapper.vm.onDateSelected).toBe('function')
   })
 
-  it('should have onTimeSelected method', () => {
+  it('should have openTimePicker method', () => {
     const wrapper = mount(DatePickerPopover)
-    expect(typeof wrapper.vm.onTimeSelected).toBe('function')
+    expect(typeof wrapper.vm.openTimePicker).toBe('function')
+  })
+
+  it('should have confirmTime method', () => {
+    const wrapper = mount(DatePickerPopover)
+    expect(typeof wrapper.vm.confirmTime).toBe('function')
   })
 
   it('should emit update:modelValue on date selection', async () => {
@@ -84,43 +89,28 @@ describe('DatePickerPopover', () => {
     expect(wrapper.emitted('update:modelValue')[0]).toEqual(['2026-06-06'])
   })
 
-  it('should emit update:modelValueTime on time selection', async () => {
+  it('should emit update:modelValueTime on time confirm', async () => {
     const wrapper = mount(DatePickerPopover, {
       props: {
         showTime: true,
       },
     })
 
-    wrapper.vm.onTimeSelected('14:30')
+    wrapper.vm.pendingTime = '14:30'
+    wrapper.vm.confirmTime()
     await nextTick()
 
     expect(wrapper.emitted('update:modelValueTime')).toBeTruthy()
     expect(wrapper.emitted('update:modelValueTime')[0]).toEqual(['14:30'])
   })
 
-  it('should close picker after date selection when showTime is false', async () => {
+  it('should close picker after date selection', async () => {
     const wrapper = mount(DatePickerPopover)
 
     wrapper.vm.onDateSelected('2026-06-06')
     await nextTick()
 
     expect(wrapper.vm.showPicker).toBe(false)
-  })
-
-  it('should not close picker after date selection when showTime is true', async () => {
-    const wrapper = mount(DatePickerPopover, {
-      props: {
-        showTime: true,
-      },
-    })
-
-    wrapper.vm.showPicker = true
-    await nextTick()
-
-    wrapper.vm.onDateSelected('2026-06-06')
-    await nextTick()
-
-    expect(wrapper.vm.showPicker).toBe(true)
   })
 
   it('should have displayValue computed', () => {

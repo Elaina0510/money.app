@@ -6,6 +6,39 @@
       <p class="page-subtitle">管理分类、标签和数据</p>
     </div>
 
+    <!-- Theme Mode Setting -->
+    <v-card class="pa-4 mb-3 settings-card" rounded="xl">
+      <div class="d-flex align-center mb-3">
+        <v-avatar size="36" color="rgba(139, 126, 116, 0.1)" class="mr-2">
+          <v-icon color="primary" size="20">mdi-brightness-6</v-icon>
+        </v-avatar>
+        <span class="text-subtitle-2 font-weight-bold">外观设置</span>
+      </div>
+
+      <v-btn-toggle
+        :model-value="appStore.themeMode"
+        mandatory
+        rounded="xl"
+        density="compact"
+        color="primary"
+        class="w-100"
+        @update:model-value="appStore.setThemeMode"
+      >
+        <v-btn value="auto" class="flex-grow-1">
+          <v-icon start>mdi-brightness-auto</v-icon>
+          自动
+        </v-btn>
+        <v-btn value="light" class="flex-grow-1">
+          <v-icon start>mdi-weather-sunny</v-icon>
+          浅色
+        </v-btn>
+        <v-btn value="dark" class="flex-grow-1">
+          <v-icon start>mdi-weather-night</v-icon>
+          深色
+        </v-btn>
+      </v-btn-toggle>
+    </v-card>
+
     <!-- Category Management -->
     <v-card class="pa-4 mb-3 settings-card" rounded="xl">
       <div class="d-flex justify-space-between align-center mb-3">
@@ -927,10 +960,6 @@ onMounted(async () => {
   font-weight: 700;
   margin: 0;
   line-height: 1.2;
-}
-
-.settings-card {
-  border: 1px solid rgba(0, 0, 0, 0.04);
 }
 
 .category-list-item {

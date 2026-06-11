@@ -7,36 +7,45 @@
     </div>
 
     <!-- Filter Bar -->
-    <v-card class="pa-3 mb-3 filter-card" rounded="xl">
-      <div class="d-flex align-center ga-2">
-        <DatePickerPopover v-model="filters.start_date" label="开始日期" class="flex-grow-1" />
-        <span class="text-grey">-</span>
-        <DatePickerPopover v-model="filters.end_date" label="结束日期" class="flex-grow-1" />
-      </div>
-      <div class="d-flex align-center ga-2 mt-2">
-        <v-select
-          v-model="filters.type"
-          :items="typeOptions"
-          label="类型"
-          hide-details
-          density="compact"
-          variant="outlined"
-          clearable
-          class="flex-grow-1"
-        />
-        <v-select
-          v-model="filters.category_id"
-          :items="categoryOptions"
-          item-title="name"
-          item-value="id"
-          label="分类"
-          hide-details
-          density="compact"
-          variant="outlined"
-          clearable
-          class="flex-grow-1"
-        />
-      </div>
+    <v-card class="pa-4 mb-3 filter-card" rounded="xl">
+      <v-row dense>
+        <v-col cols="6" sm="3">
+          <DatePickerPopover v-model="filters.start_date" label="开始日期" />
+        </v-col>
+        <v-col cols="6" sm="3">
+          <DatePickerPopover v-model="filters.end_date" label="结束日期" />
+        </v-col>
+        <v-col cols="6" sm="3">
+          <v-select
+            v-model="filters.type"
+            :items="typeOptions"
+            label="类型"
+            hide-details
+            density="compact"
+            variant="outlined"
+            clearable
+            rounded="lg"
+            bg-color="surface"
+            prepend-inner-icon="mdi-swap-vertical"
+          />
+        </v-col>
+        <v-col cols="6" sm="3">
+          <v-select
+            v-model="filters.category_id"
+            :items="categoryOptions"
+            item-title="name"
+            item-value="id"
+            label="分类"
+            hide-details
+            density="compact"
+            variant="outlined"
+            clearable
+            rounded="lg"
+            bg-color="surface"
+            prepend-inner-icon="mdi-shape-outline"
+          />
+        </v-col>
+      </v-row>
     </v-card>
 
     <!-- Month Switcher -->
@@ -323,10 +332,6 @@ onMounted(async () => {
   font-weight: 700;
   margin: 0;
   line-height: 1.2;
-}
-
-.filter-card {
-  border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .record-card {
