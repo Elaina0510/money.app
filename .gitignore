@@ -68,3 +68,4 @@ doc/bug/
 doc/*.pdf
 .claude/
 *.lnk
+example/

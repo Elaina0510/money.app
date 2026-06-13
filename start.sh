@@ -85,4 +85,20 @@ echo ""
 # 启动后端
 cd backend
 source venv/Scripts/activate 2>/dev/null || venv/Scripts/activate
+
+# 检查端口是否被占用
+if netstat -ano 2>/dev/null | grep -q ":8000 .*LISTENING"; then
+    echo -e "\033[31m[错误] 端口 8000 已被占用，请先关闭占用该端口的程序\033[0m"
+    echo ""
+    netstat -ano 2>/dev/null | grep ":8000 .*LISTENING"
+    echo ""
+    read -p "按回车键退出..."
+    exit 1
+fi
+
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+# 如果 uvicorn 异常退出，显示错误信息
+echo ""
+echo -e "\033[31m[错误] 后端服务已停止\033[0m"
+read -p "按回车键退出..."

@@ -13,6 +13,7 @@ from app.models.record import Record
 from app.models.tag import Tag
 from app.models.user import User
 from app.schemas.record import RecordCreate, RecordUpdate
+from app.utils.history import create_history_entry, record_to_dict
 
 
 async def create_record(
@@ -45,6 +46,22 @@ async def create_record(
         updated_at=now,
     )
     db.add(record)
+    await db.flush()
+
+    # Write history entry
+    user_id = current_user.id if current_user else None
+    amount_str = f"¥{record.amount:.2f}"
+    tag_name = ""
+    if record.tag_id:
+        tag_obj = await db.get(Tag, record.tag_id)
+        if tag_obj:
+            tag_name = f" - {tag_obj.name}"
+    await create_history_entry(
+        db, user_id, "create",
+        f"新增账单 {amount_str}{tag_name}",
+        snapshot_after=[record_to_dict(record)],
+    )
+
     await db.commit()
     await db.refresh(record)
     return record
@@ -163,6 +180,9 @@ async def update_record(
     if record.user_id is not None and (current_user is None or record.user_id != current_user.id):
         raise PermissionError("无权操作")
 
+    # Save snapshot before update
+    old_dict = record_to_dict(record)
+
     update_data = data.model_dump(exclude_unset=True)
 
     # Validate tag exists if tag_id is provided
@@ -175,6 +195,24 @@ async def update_record(
         setattr(record, key, value)
 
     record.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    await db.flush()
+
+    # Write history entry
+    new_dict = record_to_dict(record)
+    user_id = current_user.id if current_user else None
+    old_amount = f"¥{old_dict['amount']:.2f}"
+    new_amount = f"¥{new_dict['amount']:.2f}"
+    tag_name = ""
+    if record.tag_id:
+        tag_obj = await db.get(Tag, record.tag_id)
+        if tag_obj:
+            tag_name = f" - {tag_obj.name}"
+    await create_history_entry(
+        db, user_id, "update",
+        f"修改账单 {old_amount} → {new_amount}{tag_name}",
+        snapshot_before=[old_dict],
+        snapshot_after=[new_dict],
+    )
 
     await db.commit()
     await db.refresh(record)
@@ -191,6 +229,21 @@ async def delete_record(db: AsyncSession, record_id: int, current_user: User | N
     if record.user_id is not None and (current_user is None or record.user_id != current_user.id):
         raise PermissionError("无权操作")
 
+    # Save snapshot before delete
+    deleted_dict = record_to_dict(record)
+    user_id = current_user.id if current_user else None
+    amount_str = f"¥{record.amount:.2f}"
+    tag_name = ""
+    if record.tag_id:
+        tag_obj = await db.get(Tag, record.tag_id)
+        if tag_obj:
+            tag_name = f" - {tag_obj.name}"
+    await create_history_entry(
+        db, user_id, "delete",
+        f"删除账单 {amount_str}{tag_name}",
+        snapshot_before=[deleted_dict],
+    )
+
     await db.delete(record)
     await db.commit()
     return True
@@ -200,7 +253,7 @@ async def batch_delete_records(
     db: AsyncSession, ids: list[int], current_user: User | None = None
 ) -> int:
     """Delete multiple records. Returns the number deleted."""
-    count = 0
+    deleted_records = []
     for rid in ids:
         record = await db.get(Record, rid)
         if record:
@@ -209,10 +262,22 @@ async def batch_delete_records(
                 current_user is None or record.user_id != current_user.id
             ):
                 raise PermissionError("无权操作")
-            await db.delete(record)
-            count += 1
+            deleted_records.append(record)
+
+    # Write history entry before deleting
+    if deleted_records:
+        user_id = current_user.id if current_user else None
+        snapshots = [record_to_dict(r) for r in deleted_records]
+        await create_history_entry(
+            db, user_id, "batch_delete",
+            f"批量删除 {len(deleted_records)} 条账单",
+            snapshot_before=snapshots,
+        )
+
+    for record in deleted_records:
+        await db.delete(record)
     await db.commit()
-    return count
+    return len(deleted_records)
 
 
 async def get_quick_templates(

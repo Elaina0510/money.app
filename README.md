@@ -23,6 +23,13 @@
 - **快速记账** — 基于历史记录的智能模板，相同账单记录 2 次后自动纳入
 - **多用户数据隔离** — JWT 认证，每个用户独立管理自己的数据
 
+### 数据导入导出 (v1.4)
+
+- **CSV 导入导出** — 支持本系统格式和 Cashew 格式，分类/标签映射，UTF-8 BOM 编码
+- **SQL 导入导出** — 支持文本 SQL 和 SQLite 二进制格式，Cashew SQLite 自动识别
+- **数据回溯** — 操作历史记录，支持单条回溯（创建/修改/删除/批量删除/导入）
+- **自动清理** — 每用户最多保留 30 条历史记录
+
 ### UI/UX 特性 (v1.3)
 
 - **未保存提醒** — 记账页修改后返回时弹出确认对话框，防止数据丢失
@@ -105,6 +112,7 @@ money.app/
 │   │   │   ├── tag.py           # 标签（支持软删除）
 │   │   │   ├── quick_template.py # 快速记账模板
 │   │   │   ├── attachment.py    # 附件
+│   │   │   ├── operation_history.py # 操作历史
 │   │   │   └── user.py          # 用户
 │   │   ├── schemas/             # Pydantic 请求/响应模型
 │   │   ├── routers/             # API 路由
@@ -114,10 +122,13 @@ money.app/
 │   │   │   ├── tags.py          # 标签 CRUD（支持搜索）
 │   │   │   ├── budgets.py       # 预算 CRUD
 │   │   │   ├── statistics.py    # 统计数据
-│   │   │   └── attachments.py   # 附件上传
+│   │   │   ├── attachments.py   # 附件上传
+│   │   │   ├── export.py        # CSV/SQL 导出
+│   │   │   ├── import_.py       # CSV/SQL 导入
+│   │   │   └── history.py       # 操作历史与回溯
 │   │   ├── services/            # 业务逻辑层
-│   │   └── utils/               # 工具（auth, response）
-│   └── tests/                   # pytest 测试（78 个用例）
+│   │   └── utils/               # 工具（auth, response, history, cache）
+│   └── tests/                   # pytest 测试（130 个用例）
 ├── frontend/
 │   └── src/
 │       ├── pages/               # 页面组件
@@ -125,7 +136,8 @@ money.app/
 │       │   ├── common/
 │       │   │   ├── ExpandTransition.vue    # 展开动画过渡组件
 │       │   │   ├── DatePickerPopover.vue   # 日历弹出选择器
-│       │   │   └── ConfirmDialog.vue       # 确认对话框
+│       │   │   ├── ConfirmDialog.vue       # 确认对话框
+│       │   │   └── CsvMappingDialog.vue    # CSV 导入映射弹窗
 │       │   └── layout/
 │       │       └── AppLayout.vue # 主布局（响应式侧边栏/底部导航）
 │       ├── stores/              # Pinia 状态管理
@@ -145,6 +157,7 @@ money.app/
 | POST | `/api/auth/login` | 用户登录 |
 | GET | `/api/records` | 账单列表（支持筛选/分页） |
 | POST | `/api/records` | 创建账单 |
+| POST | `/api/records/batch-delete` | 批量删除账单 |
 | GET | `/api/records/quick-templates` | 快速记账模板（自动+手动） |
 | POST | `/api/records/quick-templates` | 手动添加快速模板 |
 | DELETE | `/api/records/quick-templates/{id}` | 删除快速模板 |
@@ -160,6 +173,15 @@ money.app/
 | GET | `/api/statistics/category-stats` | 分类统计 |
 | GET | `/api/statistics/trend` | 月度趋势 |
 | GET | `/api/statistics/budget-overview` | 预算概览 |
+| GET | `/api/export/csv` | 导出 CSV |
+| GET | `/api/export/sql` | 导出 SQL |
+| POST | `/api/import/csv/preview` | CSV 导入预览 |
+| POST | `/api/import/csv` | CSV 导入确认 |
+| POST | `/api/import/sql/preview` | SQL 导入预览 |
+| POST | `/api/import/sql` | SQL 导入确认 |
+| GET | `/api/history` | 操作历史列表 |
+| GET | `/api/history/{id}` | 历史详情 |
+| POST | `/api/history/{id}/rollback` | 执行回溯 |
 
 ## Testing & Code Quality
 
@@ -191,6 +213,7 @@ npm run build
 
 | Version | Highlights |
 |---------|------------|
+| v1.4 | CSV/SQL 导入导出、数据回溯、Cashew 格式支持、分类标签映射 |
 | v1.3 | UI/UX 优化：未保存提醒、日历动画、详情展开动画、分类图标、模糊渐变、宽屏适配 |
 | v1.2.2 | 移动端底部导航栏、设置页一体化管理、标签搜索联想、标签软删除、账单筛选自动触发、深色模式优化 |
 | v1.2.1 | 数据隔离安全加固、分类级联删除、统计柱状图、预算编辑、月份切换横条、深色模式修复 |
@@ -200,7 +223,6 @@ npm run build
 
 ## Roadmap
 
-- v1.4: CSV 导入导出、数据备份恢复、统计图表增强、超支提醒
 - v2.0: 移动端应用、云端同步
 
 ## License

@@ -78,14 +78,14 @@
                 <v-icon size="16" color="#FF6B6B">{{ cat.icon || 'mdi-circle' }}</v-icon>
               </v-avatar>
             </template>
-            <v-list-item-title class="text-body-2">
-              {{ cat.name }}
-              <v-chip v-if="cat.is_preset" size="x-small" color="grey" variant="tonal" class="ml-1">
+            <v-list-item-title class="text-body-2 category-title">
+              <span>{{ cat.name }}</span>
+              <v-chip v-if="cat.is_preset" size="x-small" color="grey" variant="tonal" class="preset-chip">
                 预设
               </v-chip>
             </v-list-item-title>
             <template v-slot:append>
-              <div class="d-flex ga-1">
+              <div class="d-flex action-btns">
                 <v-btn
                   v-if="expenseCategories.indexOf(cat) > 0"
                   icon
@@ -131,14 +131,14 @@
                 <v-icon size="16" color="#20C997">{{ cat.icon || 'mdi-circle' }}</v-icon>
               </v-avatar>
             </template>
-            <v-list-item-title class="text-body-2">
-              {{ cat.name }}
-              <v-chip v-if="cat.is_preset" size="x-small" color="grey" variant="tonal" class="ml-1">
+            <v-list-item-title class="text-body-2 category-title">
+              <span>{{ cat.name }}</span>
+              <v-chip v-if="cat.is_preset" size="x-small" color="grey" variant="tonal" class="preset-chip">
                 预设
               </v-chip>
             </v-list-item-title>
             <template v-slot:append>
-              <div class="d-flex ga-1">
+              <div class="d-flex action-btns">
                 <v-btn
                   v-if="incomeCategories.indexOf(cat) > 0"
                   icon
@@ -535,6 +535,130 @@
       </v-card>
     </v-dialog>
 
+    <!-- Import/Export Section -->
+    <v-card class="pa-4 mb-3 settings-card" rounded="xl">
+      <div class="d-flex align-center mb-3">
+        <v-avatar size="36" color="rgba(33, 150, 243, 0.1)" class="mr-2">
+          <v-icon color="blue" size="20">mdi-swap-vertical</v-icon>
+        </v-avatar>
+        <span class="text-subtitle-2 font-weight-bold">导入导出</span>
+      </div>
+
+      <v-list density="compact" class="bg-transparent pa-0">
+        <v-list-item @click="handleExportCsv" :disabled="exporting">
+          <template v-slot:prepend>
+            <v-icon size="20" class="mr-3">mdi-file-delimited-outline</v-icon>
+          </template>
+          <v-list-item-title class="text-body-2">导出 CSV</v-list-item-title>
+          <v-list-item-subtitle class="text-caption">导出账单为 CSV 文件</v-list-item-subtitle>
+        </v-list-item>
+
+        <v-list-item @click="triggerCsvImport">
+          <template v-slot:prepend>
+            <v-icon size="20" class="mr-3">mdi-file-import-outline</v-icon>
+          </template>
+          <v-list-item-title class="text-body-2">导入 CSV</v-list-item-title>
+          <v-list-item-subtitle class="text-caption">从 CSV 文件导入账单</v-list-item-subtitle>
+        </v-list-item>
+
+        <v-divider class="my-1" />
+
+        <v-list-item @click="handleExportSql" :disabled="exporting">
+          <template v-slot:prepend>
+            <v-icon size="20" class="mr-3">mdi-database-export-outline</v-icon>
+          </template>
+          <v-list-item-title class="text-body-2">导出 SQL</v-list-item-title>
+          <v-list-item-subtitle class="text-caption">导出全量数据为 SQL 备份</v-list-item-subtitle>
+        </v-list-item>
+
+        <v-list-item @click="triggerSqlImport">
+          <template v-slot:prepend>
+            <v-icon size="20" class="mr-3">mdi-database-import-outline</v-icon>
+          </template>
+          <v-list-item-title class="text-body-2">导入 SQL</v-list-item-title>
+          <v-list-item-subtitle class="text-caption">从 SQL/SQLite 文件导入数据</v-list-item-subtitle>
+        </v-list-item>
+      </v-list>
+    </v-card>
+
+    <!-- Data History Entry -->
+    <v-card class="pa-4 mb-3 settings-card" rounded="xl">
+      <v-list class="bg-transparent pa-0">
+        <v-list-item @click="$router.push('/history')">
+          <template v-slot:prepend>
+            <v-avatar size="36" color="rgba(255, 152, 0, 0.1)" class="mr-2">
+              <v-icon color="orange" size="20">mdi-history</v-icon>
+            </v-avatar>
+          </template>
+          <v-list-item-title class="text-body-2 font-weight-medium">数据回溯</v-list-item-title>
+          <v-list-item-subtitle class="text-caption">查看操作历史，支持撤销</v-list-item-subtitle>
+          <template v-slot:append>
+            <v-icon size="20" color="grey">mdi-chevron-right</v-icon>
+          </template>
+        </v-list-item>
+      </v-list>
+    </v-card>
+
+    <!-- Hidden file inputs -->
+    <input
+      type="file"
+      ref="csvFileInput"
+      accept=".csv"
+      style="display: none"
+      @change="handleCsvFileSelect"
+    />
+    <input
+      type="file"
+      ref="sqlFileInput"
+      accept=".sql,.db"
+      style="display: none"
+      @change="handleSqlFileSelect"
+    />
+
+    <!-- CSV Mapping Dialog -->
+    <CsvMappingDialog
+      v-model="showCsvMapping"
+      :preview-data="csvPreviewData"
+      :categories="categories"
+      @confirm="handleCsvImport"
+    />
+
+    <!-- SQL Import Preview Dialog -->
+    <v-dialog v-model="showSqlConfirm" max-width="400">
+      <v-card class="pa-4" rounded="xl">
+        <v-card-title class="text-h6 pa-0 mb-2">确认导入 SQL</v-card-title>
+        <v-card-text class="pa-0 mb-4">
+          <div class="text-body-2 mb-1">
+            文件格式：{{ sqlPreviewData?.format === 'sqlite_binary' ? 'SQLite 数据库' : '文本 SQL' }}
+          </div>
+          <div class="text-body-2 mb-3">
+            数据来源：{{ sqlPreviewData?.is_third_party ? 'Cashew（第三方）' : '本系统' }}
+          </div>
+          <v-divider class="mb-3" />
+          <div class="text-caption text-grey mb-2">数据预览：</div>
+          <div v-for="(info, table) in (sqlPreviewData?.tables || {})" :key="table" class="text-body-2">
+            {{ table }}：{{ info.count }} 条
+          </div>
+          <v-divider class="mt-3 mb-2" />
+          <div class="text-caption text-grey">
+            导入模式：合并（放弃原始 ID，重新分配）
+          </div>
+        </v-card-text>
+        <div class="d-flex justify-end ga-2">
+          <v-btn variant="text" @click="showSqlConfirm = false">取消</v-btn>
+          <v-btn color="primary" :loading="importing" @click="handleSqlNext">下一步</v-btn>
+        </div>
+      </v-card>
+    </v-dialog>
+
+    <!-- SQL Mapping Dialog (reuse CsvMappingDialog) -->
+    <CsvMappingDialog
+      v-model="showSqlMapping"
+      :preview-data="sqlPreviewData"
+      :categories="categories"
+      @confirm="handleSqlImport"
+    />
+
     <!-- Account Section -->
     <v-card class="pa-4 mb-3 settings-card" rounded="xl">
       <div class="d-flex align-center mb-2">
@@ -582,6 +706,15 @@ import { getBudgets, batchSetBudgets } from '@/api/budgets'
 import { formatAmount } from '@/utils/format'
 import dayjs from 'dayjs'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import CsvMappingDialog from '@/components/common/CsvMappingDialog.vue'
+import {
+  exportCsv,
+  exportSql,
+  previewCsvImport,
+  importCsv,
+  previewSqlImport,
+  importSql,
+} from '@/api/export'
 
 const router = useRouter()
 
@@ -670,6 +803,19 @@ const quickTemplates = ref([])
 const showQuickTemplateDialog = ref(false)
 const savingQuickTemplate = ref(false)
 const quickTemplateForm = ref({ tag_id: null, amount: 0 })
+
+// Import/Export state
+const exporting = ref(false)
+const importing = ref(false)
+const csvFileInput = ref(null)
+const sqlFileInput = ref(null)
+const showCsvMapping = ref(false)
+const csvPreviewData = ref(null)
+const showSqlConfirm = ref(false)
+const showSqlMapping = ref(false)
+const sqlPreviewData = ref(null)
+const sqlCacheId = ref(null)
+const sqlFormat = ref(null)
 
 // 账号状态
 const isLoggedIn = computed(() => !!localStorage.getItem('token'))
@@ -943,6 +1089,137 @@ async function loadTags() {
 onMounted(async () => {
   await Promise.all([loadCategories(), loadTags(), loadBudgets(), loadQuickTemplates()])
 })
+
+// ── Import/Export ──────────────────────────────────────────────────
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+async function handleExportCsv() {
+  exporting.value = true
+  try {
+    const blob = await exportCsv()
+    const filename = `money_export_${dayjs().format('YYYYMMDD')}.csv`
+    downloadBlob(blob, filename)
+    appStore.showToast('CSV 导出成功')
+  } catch (e) {
+    appStore.showToast(e.message || '导出失败', 'error')
+  } finally {
+    exporting.value = false
+  }
+}
+
+async function handleExportSql() {
+  exporting.value = true
+  try {
+    const blob = await exportSql()
+    const filename = `money_backup_${dayjs().format('YYYYMMDD')}.sql`
+    downloadBlob(blob, filename)
+    appStore.showToast('SQL 导出成功')
+  } catch (e) {
+    appStore.showToast(e.message || '导出失败', 'error')
+  } finally {
+    exporting.value = false
+  }
+}
+
+function triggerCsvImport() {
+  csvFileInput.value?.click()
+}
+
+async function handleCsvFileSelect(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  event.target.value = '' // Reset input
+
+  try {
+    csvPreviewData.value = await previewCsvImport(file)
+    showCsvMapping.value = true
+  } catch (e) {
+    appStore.showToast(e.message || '文件解析失败', 'error')
+  }
+}
+
+async function handleCsvImport(mapping) {
+  showCsvMapping.value = false
+  importing.value = true
+  try {
+    const result = await importCsv({
+      cache_id: csvPreviewData.value.cache_id,
+      format: csvPreviewData.value.format,
+      category_mapping: mapping.category_mapping,
+      tag_mapping: mapping.tag_mapping,
+    })
+    appStore.showToast(`成功导入 ${result.imported_count} 条记录`)
+  } catch (e) {
+    appStore.showToast(e.message || '导入失败', 'error')
+  } finally {
+    importing.value = false
+    csvPreviewData.value = null
+  }
+}
+
+function triggerSqlImport() {
+  sqlFileInput.value?.click()
+}
+
+async function handleSqlFileSelect(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  event.target.value = '' // Reset input
+
+  try {
+    sqlPreviewData.value = await previewSqlImport(file)
+    sqlCacheId.value = sqlPreviewData.value.cache_id
+    sqlFormat.value = sqlPreviewData.value.format
+    showSqlConfirm.value = true
+  } catch (e) {
+    appStore.showToast(e.message || '文件解析失败', 'error')
+  }
+}
+
+function handleSqlNext() {
+  showSqlConfirm.value = false
+  // Show mapping dialog if there are categories/tags to map
+  const hasMapping = (sqlPreviewData.value?.categories_in_file?.length > 0) ||
+    (sqlPreviewData.value?.tags_in_file?.length > 0)
+  if (hasMapping) {
+    showSqlMapping.value = true
+  } else {
+    // No mapping needed, import directly
+    handleSqlImport({})
+  }
+}
+
+async function handleSqlImport(mapping) {
+  showSqlMapping.value = false
+  importing.value = true
+  try {
+    const result = await importSql({
+      cache_id: sqlCacheId.value,
+      format: sqlFormat.value,
+      is_third_party: sqlPreviewData.value?.is_third_party || false,
+      category_mapping: mapping.category_mapping || null,
+      tag_mapping: mapping.tag_mapping || null,
+    })
+    appStore.showToast(`成功导入 ${result.records_imported} 条记录`)
+  } catch (e) {
+    appStore.showToast(e.message || '导入失败', 'error')
+  } finally {
+    importing.value = false
+    sqlPreviewData.value = null
+    sqlCacheId.value = null
+    sqlFormat.value = null
+  }
+}
 </script>
 
 <style scoped>
@@ -957,6 +1234,33 @@ onMounted(async () => {
 
 .category-list-item:hover {
   background: rgba(var(--v-theme-primary), 0.04);
+}
+
+.category-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.preset-chip {
+  flex-shrink: 0;
+  font-size: 10px !important;
+  height: 18px !important;
+}
+
+.category-list-item :deep(.v-list-item__append) {
+  margin-left: 8px;
+}
+
+.category-list-item :deep(.v-btn--icon.v-btn--size-x-small) {
+  width: 24px;
+  height: 24px;
+}
+
+.action-btns {
+  gap: 1px;
 }
 
 .tag-delete-icon {

@@ -53,6 +53,12 @@ const routes = [
     component: () => import('@/pages/SettingsPage.vue'),
     meta: { title: '设置', icon: 'mdi-cog-outline' },
   },
+  {
+    path: '/history',
+    name: 'History',
+    component: () => import('@/pages/HistoryPage.vue'),
+    meta: { title: '数据回溯' },
+  },
 ]
 
 const router = createRouter({

@@ -49,10 +49,8 @@ request.interceptors.response.use(
           localStorage.removeItem('userId')
           window.dispatchEvent(new CustomEvent('auth:logout'))
         }
-      } else if (status === 422) {
-        msg = (data && data.message) || '参数错误'
-      } else if (status === 500) {
-        msg = (data && data.message) || '服务器错误'
+      } else if (status === 400 || status === 422 || status === 500) {
+        msg = (data && data.message) || '请求失败'
       }
       return Promise.reject(new Error(msg))
     }

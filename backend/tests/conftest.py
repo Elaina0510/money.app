@@ -33,9 +33,11 @@ async def override_get_session() -> AsyncGenerator[AsyncSession, None]:
 
 PRESET_CATEGORIES = [
     {"name": "餐饮", "type": "expense", "icon": "mdi-food", "sort_order": 1},
-    {"name": "交通", "type": "expense", "icon": "mdi-bus", "sort_order": 2},
+    {"name": "出行", "type": "expense", "icon": "mdi-bus", "sort_order": 2},
     {"name": "购物", "type": "expense", "icon": "mdi-cart", "sort_order": 3},
-    {"name": "工资", "type": "income", "icon": "mdi-cash", "sort_order": 1},
+    {"name": "旅行", "type": "expense", "icon": "mdi-airplane", "sort_order": 4},
+    {"name": "账单与费用", "type": "expense", "icon": "mdi-receipt-text", "sort_order": 5},
+    {"name": "工资", "type": "income", "icon": "mdi-wallet", "sort_order": 1},
     {"name": "其他收入", "type": "income", "icon": "mdi-cash-plus", "sort_order": 2},
 ]
 

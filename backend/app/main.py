@@ -10,7 +10,19 @@ from fastapi.staticfiles import StaticFiles
 from app.config import UPLOAD_DIR
 from app.database import create_all_tables, engine
 from app.models.category import Category
-from app.routers import attachments, auth, budgets, categories, records, statistics, tags
+from app.models.operation_history import OperationHistory  # noqa: F401
+from app.routers import (
+    attachments,
+    auth,
+    budgets,
+    categories,
+    export,
+    history,
+    import_,
+    records,
+    statistics,
+    tags,
+)
 from app.utils.file_utils import ensure_upload_dir
 
 # Determine frontend dist directory
@@ -23,7 +35,7 @@ ensure_upload_dir()
 PRESET_CATEGORIES = [
     # Expense categories
     {"name": "餐饮", "type": "expense", "icon": "mdi-food", "sort_order": 1, "is_preset": 1},
-    {"name": "交通", "type": "expense", "icon": "mdi-bus", "sort_order": 2, "is_preset": 1},
+    {"name": "出行", "type": "expense", "icon": "mdi-bus", "sort_order": 2, "is_preset": 1},
     {"name": "购物", "type": "expense", "icon": "mdi-cart", "sort_order": 3, "is_preset": 1},
     {"name": "娱乐", "type": "expense", "icon": "mdi-gamepad", "sort_order": 4, "is_preset": 1},
     {
@@ -35,7 +47,9 @@ PRESET_CATEGORIES = [
     },
     {"name": "居住", "type": "expense", "icon": "mdi-home", "sort_order": 6, "is_preset": 1},
     {"name": "通讯", "type": "expense", "icon": "mdi-cellphone", "sort_order": 7, "is_preset": 1},
-    {"name": "教育", "type": "expense", "icon": "mdi-school", "sort_order": 8, "is_preset": 1},
+    {"name": "工作", "type": "expense", "icon": "mdi-briefcase", "sort_order": 8, "is_preset": 1},
+    {"name": "旅行", "type": "expense", "icon": "mdi-bag-suitcase", "sort_order": 9, "is_preset": 1},
+    {"name": "账单与费用", "type": "expense", "icon": "mdi-receipt-text", "sort_order": 10, "is_preset": 1},
     {
         "name": "其他支出",
         "type": "expense",
@@ -45,9 +59,8 @@ PRESET_CATEGORIES = [
     },
     # Income categories
     {"name": "工资", "type": "income", "icon": "mdi-wallet", "sort_order": 1, "is_preset": 1},
-    {"name": "兼职", "type": "income", "icon": "mdi-briefcase", "sort_order": 2, "is_preset": 1},
-    {"name": "红包", "type": "income", "icon": "mdi-gift", "sort_order": 3, "is_preset": 1},
-    {"name": "理财", "type": "income", "icon": "mdi-finance", "sort_order": 4, "is_preset": 1},
+    {"name": "红包", "type": "income", "icon": "mdi-gift", "sort_order": 2, "is_preset": 1},
+    {"name": "理财", "type": "income", "icon": "mdi-finance", "sort_order": 3, "is_preset": 1},
     {
         "name": "其他收入",
         "type": "income",
@@ -119,6 +132,9 @@ app.include_router(records.router)
 app.include_router(attachments.router)
 app.include_router(statistics.router)
 app.include_router(budgets.router)
+app.include_router(history.router)
+app.include_router(export.router)
+app.include_router(import_.router)
 
 
 @app.get("/", response_model=None)
