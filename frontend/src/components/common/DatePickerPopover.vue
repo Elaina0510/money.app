@@ -44,17 +44,17 @@
   </ExpandTransition>
 
   <!-- Independent time picker dialog -->
-  <v-dialog v-model="showTimePicker" max-width="320">
-    <v-card rounded="xl">
+  <v-dialog v-model="showTimePicker" max-width="340">
+    <v-card rounded="xl" class="time-picker-card">
       <v-card-title class="text-subtitle-1 font-weight-bold pa-4 pb-2">
         选择时间
       </v-card-title>
-      <v-card-text class="pa-4 pt-0">
+      <v-card-text class="pa-4 pt-0 d-flex justify-center">
         <v-time-picker
           v-model="pendingTime"
           color="primary"
           format="24hr"
-          width="100%"
+          width="280"
         />
       </v-card-text>
       <v-card-actions class="pa-4 pt-0">
@@ -139,5 +139,9 @@ function confirmTime() {
 
 .time-field {
   max-width: 140px;
+}
+
+.time-picker-card {
+  border: none !important;
 }
 </style>

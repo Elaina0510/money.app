@@ -239,9 +239,13 @@ function selectMonth(month) {
 
 function prevYear() {
   selectedYear.value--
+  selectedMonth.value = null
 }
 function nextYear() {
-  if (selectedYear.value < currentYear) selectedYear.value++
+  if (selectedYear.value < currentYear) {
+    selectedYear.value++
+    selectedMonth.value = null
+  }
 }
 
 function goToDetail(event, id) {

@@ -1,7 +1,18 @@
 <template>
   <div class="history-page">
-    <div class="page-info mb-3">
-      <p class="text-caption text-grey">最近 30 条操作记录</p>
+    <div class="d-flex align-center mb-3">
+      <v-btn
+        icon
+        variant="text"
+        size="small"
+        class="mr-2"
+        @click="$router.back()"
+      >
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
+      <div>
+        <p class="text-caption text-grey mb-0">最近 30 条操作记录</p>
+      </div>
     </div>
 
     <div v-if="loading" class="text-center pa-8">
