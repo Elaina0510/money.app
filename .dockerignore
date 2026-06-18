@@ -1,0 +1,36 @@
+# Git
+.git
+.gitignore
+
+# Python
+backend/venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/*.pyc
+backend/.pytest_cache/
+backend/.mypy_cache/
+backend/.ruff_cache/
+
+# Node
+frontend/node_modules/
+
+# Data (will be mounted as volumes)
+backend/uploads/
+backend/money.db
+backend/money.db-journal
+data/
+
+# IDE
+.vscode/
+.idea/
+
+# Docs
+doc/
+
+# Docker
+docker-compose.yml
+.dockerignore
+
+# OS
+.DS_Store
+Thumbs.db

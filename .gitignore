@@ -69,3 +69,6 @@ doc/*.pdf
 .claude/
 *.lnk
 example/
+
+# Docker volumes
+data/

@@ -1,3 +1,4 @@
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -25,8 +26,9 @@ from app.routers import (
 )
 from app.utils.file_utils import ensure_upload_dir
 
-# Determine frontend dist directory
-FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+# Determine frontend dist directory (supports FRONTEND_DIST env var for Docker)
+_default_frontend = Path(__file__).resolve().parent.parent.parent / "frontend" / "dist"
+FRONTEND_DIST = Path(os.getenv("FRONTEND_DIST", str(_default_frontend)))
 
 # Ensure upload directory exists at import time for StaticFiles mount
 ensure_upload_dir()

@@ -1,0 +1,16 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "80:8000"
+    volumes:
+      - ./data/db:/data/db
+      - ./data/uploads:/data/uploads
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///data/db/money.db
+      - UPLOAD_DIR=/data/uploads
+      - FRONTEND_DIST=/app/frontend/dist
+      - SECRET_KEY=${SECRET_KEY:-money-app-change-this-secret-key-in-production}
+    restart: unless-stopped
