@@ -1,0 +1,1 @@
+import{t as e}from"./request-Bb_jhUrO.js";function t(){return e.get(`/tags`)}function n(t){return e.get(`/tags`,{params:{q:t}})}function r(t){return e.post(`/tags`,t)}function i(t){return e.delete(`/tags/${t}`)}export{n as i,i as n,t as r,r as t};

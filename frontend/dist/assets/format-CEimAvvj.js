@@ -1,0 +1,1 @@
+import{W as e}from"./index-B9PQAWI2.js";import{t}from"./dayjs.min-YL3yD8b_.js";var n=e(t(),1);function r(e){return e==null?`¥0.00`:`¥${Number(e).toLocaleString(`zh-CN`,{minimumFractionDigits:2,maximumFractionDigits:2})}`}function i(){let e=(0,n.default)();return{startDate:e.startOf(`month`).format(`YYYY-MM-DD`),endDate:e.endOf(`month`).format(`YYYY-MM-DD`)}}export{i as n,r as t};

@@ -4,8 +4,8 @@
 *.pyo
 *.pyd
 *.egg-info/
-dist/
-build/
+/dist/
+/build/
 *.egg
 
 # Virtual environment
@@ -42,9 +42,6 @@ backend/files/
 # Node
 node_modules/
 frontend/node_modules/
-
-# Build output
-frontend/dist/
 
 # Design docs / temp assets
 v1.1/

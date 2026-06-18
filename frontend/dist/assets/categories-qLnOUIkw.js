@@ -1,0 +1,1 @@
+import{t as e}from"./request-Bb_jhUrO.js";function t(t={}){return e.get(`/categories`,{params:t})}function n(t){return e.post(`/categories`,t)}function r(t,n){return e.put(`/categories/${t}`,n)}function i(t){return e.delete(`/categories/${t}`)}function a(){return e.post(`/categories/restore-defaults`)}export{r as a,a as i,i as n,t as r,n as t};
