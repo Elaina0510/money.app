@@ -69,3 +69,12 @@ example/
 
 # Docker volumes
 data/
+
+# Archives (may contain sensitive data like .env, money.db)
+*.tar.gz
+*.zip
+
+# Accidental pip output files
+backend/=*
+
+money-app.tar.gz

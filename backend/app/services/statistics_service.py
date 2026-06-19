@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlmodel import func, select, text
+from sqlmodel import case, func, select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.category import Category
@@ -32,12 +32,16 @@ async def get_summary(
     end_filter = end_date + " 23:59" if len(end_date) <= 10 else end_date
 
     query = select(
-        func.coalesce(func.sum(Record.amount).filter(Record.type == "income"), 0.0).label(
-            "total_income"
-        ),
-        func.coalesce(func.sum(Record.amount).filter(Record.type == "expense"), 0.0).label(
-            "total_expense"
-        ),
+        func.coalesce(
+            func.sum(
+                case((Record.type == "income", Record.amount), else_=0)
+            ), 0.0
+        ).label("total_income"),
+        func.coalesce(
+            func.sum(
+                case((Record.type == "expense", Record.amount), else_=0)
+            ), 0.0
+        ).label("total_expense"),
         func.count(Record.id).label("transaction_count"),
     ).where(Record.consume_time >= start_date, Record.consume_time <= end_filter)
     query = _apply_user_filter(query, current_user)
@@ -185,12 +189,16 @@ async def get_trend(
     stmt = (
         select(
             func.strftime(date_format, Record.consume_time).label("period"),
-            func.coalesce(func.sum(Record.amount).filter(Record.type == "income"), 0.0).label(
-                "income"
-            ),
-            func.coalesce(func.sum(Record.amount).filter(Record.type == "expense"), 0.0).label(
-                "expense"
-            ),
+            func.coalesce(
+                func.sum(
+                    case((Record.type == "income", Record.amount), else_=0)
+                ), 0.0
+            ).label("income"),
+            func.coalesce(
+                func.sum(
+                    case((Record.type == "expense", Record.amount), else_=0)
+                ), 0.0
+            ).label("expense"),
         )
         .where(Record.consume_time >= start_date, Record.consume_time <= end_filter)
         .group_by(text("period"))
