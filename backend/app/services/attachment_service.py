@@ -6,6 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import MAX_FILE_SIZE
 from app.models.attachment import Attachment
+from app.models.user import User
 from app.utils.file_utils import (
     delete_file,
     ensure_upload_dir,
@@ -22,6 +23,7 @@ from app.utils.response import Code
 async def upload_attachment(
     db: AsyncSession,
     file: UploadFile,
+    current_user: User,
     record_id: int | None = None,
 ) -> Attachment | dict:
     """Upload an attachment file.
@@ -77,6 +79,7 @@ async def upload_attachment(
 
     # Create database record
     attachment = Attachment(
+        user_id=current_user.id,
         record_id=record_id,
         filename=file.filename,
         stored_path=str(relative_path),
@@ -89,16 +92,30 @@ async def upload_attachment(
     return attachment
 
 
-async def get_attachment(db: AsyncSession, attachment_id: int) -> Attachment | None:
-    """Get attachment by ID."""
-    return await db.get(Attachment, attachment_id)
+async def get_attachment(
+    db: AsyncSession, attachment_id: int, current_user: User
+) -> Attachment | None:
+    """Get attachment by ID. Returns None if not found or not owned by user."""
+    attachment = await db.get(Attachment, attachment_id)
+    if not attachment:
+        return None
+    # IDOR 防护:非归属者视为不存在(404,避免泄露存在性)
+    if attachment.user_id is not None and attachment.user_id != current_user.id:
+        return None
+    return attachment
 
 
-async def delete_attachment(db: AsyncSession, attachment_id: int) -> dict | None:
+async def delete_attachment(
+    db: AsyncSession, attachment_id: int, current_user: User
+) -> dict | None:
     """Delete an attachment (file + DB record). Returns None on success."""
     attachment = await db.get(Attachment, attachment_id)
     if not attachment:
         return {"code": Code.NOT_FOUND, "message": "附件不存在"}
+
+    # IDOR 防护:仅归属者可删
+    if attachment.user_id is not None and attachment.user_id != current_user.id:
+        return {"code": Code.FORBIDDEN, "message": "无权操作此附件"}
 
     # Delete physical file
     delete_file(attachment.stored_path)

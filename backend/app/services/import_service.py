@@ -2,6 +2,7 @@
 
 import csv
 import io
+import logging
 import re
 import sqlite3
 import tempfile
@@ -17,8 +18,11 @@ from app.models.category import Category
 from app.models.quick_template import QuickTemplate
 from app.models.record import Record
 from app.models.tag import Tag
-from app.utils.cache import delete_cache, read_from_cache
+from app.utils.cache import delete_cache, read_from_cache, save_to_cache
 from app.utils.history import create_history_entry
+from app.utils.money import round_money
+
+logger = logging.getLogger(__name__)
 
 # ── CSV Import ─────────────────────────────────────────────────────
 
@@ -68,9 +72,9 @@ def convert_cashew_type(value: str) -> str:
 
 
 def convert_cashew_amount(value: str) -> float:
-    """Convert Cashew amount: take absolute value."""
+    """Convert Cashew amount: take absolute value, round to 2 decimals."""
     try:
-        return abs(float(value))
+        return round_money(abs(float(value)))
     except (ValueError, TypeError):
         return 0.0
 
@@ -123,8 +127,6 @@ async def preview_csv(
             tags_in_file.add(tag_name)
 
     # Cache the file
-    from app.utils.cache import save_to_cache
-
     cache_id = save_to_cache(file_bytes, ".csv")
 
     return {
@@ -173,7 +175,7 @@ async def import_csv_data(
 
         # Validate required fields
         try:
-            amount = float(amount_str)
+            amount = round_money(float(amount_str))
         except (ValueError, TypeError):
             skipped_count += 1
             continue
@@ -262,6 +264,10 @@ async def import_csv_data(
 
     await db.commit()
     delete_cache(cache_id, ".csv")
+
+    logger.info(
+        "csv_import done user=%s imported=%d skipped=%d", user_id, imported_count, skipped_count
+    )
 
     return {
         "imported_count": imported_count,
@@ -519,8 +525,6 @@ async def preview_sql(
         tags_in_file = parsed.get("tags_in_file", [])
 
     # Cache the file
-    from app.utils.cache import save_to_cache
-
     suffix = ".sql" if format_type == "text_sql" else ".db"
     cache_id = save_to_cache(file_bytes, suffix)
 
@@ -548,6 +552,10 @@ async def import_sql_data(
     file_bytes = read_from_cache(cache_id, suffix)
 
     try:
+        logger.info(
+            "sql_import start user=%s format=%s third_party=%s",
+            user_id, format_type, is_third_party,
+        )
         if format_type == "text_sql":
             result = await _import_text_sql(
                 db, user_id, file_bytes, category_mapping, tag_mapping
@@ -567,9 +575,14 @@ async def import_sql_data(
 
         await db.commit()
         delete_cache(cache_id, suffix)
+        logger.info(
+            "sql_import done user=%s records=%d",
+            user_id, result.get("records_imported", 0),
+        )
         return result
     except Exception:
         await db.rollback()
+        logger.exception("sql_import failed user=%s", user_id)
         raise
 
 
@@ -950,7 +963,7 @@ async def _import_sqlite_binary(
                     continue
 
                 record = Record(
-                    amount=amount,
+                    amount=round_money(amount),
                     type=rec_type,
                     category_id=category_id,
                     tag_id=tag_id,
@@ -984,7 +997,7 @@ async def _import_sqlite_binary(
                 budget = Budget(
                     user_id=user_id,
                     category_id=row["category_id"] if "category_id" in row.keys() else None,
-                    amount=row["amount"],
+                    amount=round_money(row["amount"]),
                     period=row["period"],
                 )
                 db.add(budget)
@@ -1001,7 +1014,7 @@ async def _import_sqlite_binary(
                     tag_id=row["tag_id"] if "tag_id" in row.keys() else None,
                     category_id=row["category_id"] if "category_id" in row.keys() else None,
                     type=row["type"],
-                    amount=row["amount"],
+                    amount=round_money(row["amount"]),
                 )
                 db.add(qt)
                 await db.flush()
@@ -1044,7 +1057,7 @@ async def _import_cashew_sqlite(
     rows = conn.execute("SELECT * FROM transactions").fetchall()
     for row in rows:
         # Map fields
-        amount = abs(float(row["amount"])) if row["amount"] else 0
+        amount = round_money(abs(float(row["amount"]))) if row["amount"] else 0
         rec_type = "income" if row["income"] == 1 else "expense"
         tag_name = row["name"] if row["name"] else ""
         note = row["note"] if row["note"] else ""
@@ -1222,6 +1235,6 @@ def _parse_float(value: str | None) -> float | None:
     if not value or value.upper() == "NULL":
         return None
     try:
-        return float(value)
+        return round_money(float(value))
     except (ValueError, TypeError):
         return None

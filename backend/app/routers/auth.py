@@ -8,6 +8,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.config import ACCESS_TOKEN_EXPIRE_MINUTES
 from app.database import get_session
+from app.models.attachment import Attachment
 from app.models.budget import Budget
 from app.models.category import Category
 from app.models.record import Record
@@ -20,20 +21,25 @@ from app.utils.auth import (
     get_password_hash,
     verify_password,
 )
+from app.utils.ratelimit import rate_limit
 from app.utils.response import Code, error_response, success_response
 
 router = APIRouter(prefix="/api/auth", tags=["用户认证"])
 
 
 async def _migrate_orphan_data(db: AsyncSession, user_id: int):
-    """Assign orphan data (user_id IS NULL) to the first registered user."""
-    tables: list[type[SQLModel]] = [Record, Budget, Category, Tag]
+    """Assign orphan data (user_id IS NULL) to the first registered user.
+
+    历史遗留:在 require_auth 全面生效前可能存在 user_id IS NULL 的数据
+    (匿名共享池),首个注册用户接管这些数据。v1.4 起 Attachment 也纳入迁移。
+    """
+    tables: list[type[SQLModel]] = [Record, Budget, Category, Tag, Attachment]
     for table in tables:
         stmt = select(table).where(table.user_id.is_(None))  # type: ignore[attr-defined]
         result = await db.exec(stmt)
         orphans = list(result.all())
         for row in orphans:
-            row.user_id = user_id
+            row.user_id = user_id  # type: ignore[attr-defined]
     await db.commit()
 
 
@@ -41,6 +47,7 @@ async def _migrate_orphan_data(db: AsyncSession, user_id: int):
 async def register(
     data: UserRegister,
     db: AsyncSession = Depends(get_session),
+    _: None = Depends(rate_limit("register", limit=5, window=60)),
 ):
     """Register a new user."""
     # Check if username already exists
@@ -91,6 +98,7 @@ async def register(
 async def login(
     data: UserLogin,
     db: AsyncSession = Depends(get_session),
+    _: None = Depends(rate_limit("login", limit=5, window=60)),
 ):
     """Login and get access token."""
     stmt = select(User).where(User.username == data.username)

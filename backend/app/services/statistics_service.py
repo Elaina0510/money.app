@@ -9,6 +9,7 @@ from app.models.category import Category
 from app.models.record import Record
 from app.models.tag import Tag
 from app.models.user import User
+from app.utils.money import round_money
 
 
 def _apply_user_filter(query: Any, current_user: User | None) -> Any:
@@ -53,9 +54,9 @@ async def get_summary(
     transaction_count = row[2] or 0
 
     return {
-        "total_income": total_income,
-        "total_expense": total_expense,
-        "balance": total_income - total_expense,
+        "total_income": round_money(total_income),
+        "total_expense": round_money(total_expense),
+        "balance": round_money(total_income - total_expense),
         "transaction_count": transaction_count,
         "period": period,
         "start_date": start_date,
@@ -117,13 +118,13 @@ async def get_category_stats(
                 "category_name": category_name,
                 "icon": icon,
                 "type": type_filter,
-                "total": total_val,
+                "total": round_money(total_val),
                 "percentage": percentage,
                 "count": count_val,
             }
         )
 
-    return {"items": items, "total_expense": total_amount}
+    return {"items": items, "total_expense": round_money(total_amount)}
 
 
 async def get_tag_stats(
@@ -157,7 +158,7 @@ async def get_tag_stats(
     items = [
         {
             "tag_name": tag_name,
-            "total": float(total or 0),
+            "total": round_money(total),
             "count": count or 0,
         }
         for tag_name, total, count in rows
@@ -211,9 +212,9 @@ async def get_trend(
     items = [
         {
             "period": period,
-            "income": float(income or 0),
-            "expense": float(expense or 0),
-            "balance": float(income or 0) - float(expense or 0),
+            "income": round_money(income),
+            "expense": round_money(expense),
+            "balance": round_money(float(income or 0) - float(expense or 0)),
         }
         for period, income, expense in rows
     ]

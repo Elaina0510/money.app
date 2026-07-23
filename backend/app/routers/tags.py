@@ -8,7 +8,7 @@ from app.database import get_session
 from app.models.user import User
 from app.schemas.tag import TagCreate, TagResponse, TagUpdate
 from app.services import tag_service
-from app.utils.auth import get_current_user
+from app.utils.auth import require_auth
 from app.utils.response import Code, error_response, success_response
 
 router = APIRouter(prefix="/api/tags", tags=["标签管理"])
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/tags", tags=["标签管理"])
 async def list_tags(
     q: str | None = Query(None, description="搜索关键词"),
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Get all tags, optionally filtered by search keyword."""
     tags = await tag_service.get_tags(db, current_user, search=q)
@@ -31,9 +31,10 @@ async def list_tags(
 async def get_tag(
     tag_id: int,
     db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Get a single tag with its associated category."""
-    tag = await tag_service.get_tag(db, tag_id)
+    tag = await tag_service.get_tag(db, tag_id, current_user)
     if not tag:
         return error_response(Code.NOT_FOUND, "标签不存在")
     return success_response(data=tag)
@@ -43,7 +44,7 @@ async def get_tag(
 async def create_tag(
     data: TagCreate,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Create a new tag."""
     try:
@@ -61,7 +62,7 @@ async def update_tag(
     tag_id: int,
     data: TagUpdate,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Update a tag."""
     try:
@@ -82,7 +83,7 @@ async def update_tag(
 async def delete_tag(
     tag_id: int,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Delete a tag."""
     result = await tag_service.delete_tag(db, tag_id, current_user)

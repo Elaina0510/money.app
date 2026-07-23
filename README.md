@@ -1,16 +1,16 @@
-# Money App 💰 — 个人记账程序
+Money App 💰 — 个人记账程序
 
 一个基于 **Vue 3 + FastAPI** 的全栈个人记账应用，支持收支记录管理、分类标签体系、预算监控、数据统计看板与多用户数据隔离。
 
 ## Tech Stack
 
-| 层级 | 技术 |
-|------|------|
+| 层级           | 技术                                                                |
+| -------------- | ------------------------------------------------------------------- |
 | **前端** | Vue 3 (Composition API) + Vuetify 3 + Pinia + Vue Router + Chart.js |
-| **后端** | Python 3.12 + FastAPI + SQLModel (async) + SQLite |
-| **认证** | JWT (python-jose) + bcrypt 密码哈希 |
-| **质量** | pytest + Vitest + mypy strict + Ruff + ESLint + Prettier |
-| **构建** | Vite + npm |
+| **后端** | Python 3.12 + FastAPI + SQLModel (async) + SQLite                   |
+| **认证** | JWT (python-jose) + bcrypt 密码哈希                                 |
+| **质量** | pytest + Vitest + mypy strict + Ruff + ESLint + Prettier            |
+| **构建** | Vite + npm                                                          |
 
 ## Features
 
@@ -38,8 +38,6 @@
 - **分类图标** — 账单列表显示各分类的专属图标，直观区分收支类型
 - **模糊渐变** — 顶部标题栏和页面底部的滑动模糊渐变效果
 - **宽屏适配** — 桌面端自动放大 110%，优化大屏阅读体验
-
-
 
 ## Screenshots
 
@@ -151,37 +149,37 @@ money.app/
 
 ## API Overview
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| POST | `/api/auth/register` | 用户注册 |
-| POST | `/api/auth/login` | 用户登录 |
-| GET | `/api/records` | 账单列表（支持筛选/分页） |
-| POST | `/api/records` | 创建账单 |
-| POST | `/api/records/batch-delete` | 批量删除账单 |
-| GET | `/api/records/quick-templates` | 快速记账模板（自动+手动） |
-| POST | `/api/records/quick-templates` | 手动添加快速模板 |
-| DELETE | `/api/records/quick-templates/{id}` | 删除快速模板 |
-| GET/PUT/DELETE | `/api/records/{id}` | 账单详情/编辑/删除 |
-| GET/POST | `/api/categories` | 分类列表/创建 |
-| PUT/DELETE | `/api/categories/{id}` | 分类编辑/删除（级联） |
-| GET | `/api/tags` | 标签列表（支持 `?q=` 搜索） |
-| POST | `/api/tags` | 标签创建（需关联分类） |
-| PUT/DELETE | `/api/tags/{id}` | 标签编辑/软删除 |
-| GET/POST/PUT | `/api/budgets` | 预算管理 |
-| POST | `/api/budgets/batch` | 批量设置预算 |
-| GET | `/api/statistics/summary` | 统计总览 |
-| GET | `/api/statistics/category-stats` | 分类统计 |
-| GET | `/api/statistics/trend` | 月度趋势 |
-| GET | `/api/statistics/budget-overview` | 预算概览 |
-| GET | `/api/export/csv` | 导出 CSV |
-| GET | `/api/export/sql` | 导出 SQL |
-| POST | `/api/import/csv/preview` | CSV 导入预览 |
-| POST | `/api/import/csv` | CSV 导入确认 |
-| POST | `/api/import/sql/preview` | SQL 导入预览 |
-| POST | `/api/import/sql` | SQL 导入确认 |
-| GET | `/api/history` | 操作历史列表 |
-| GET | `/api/history/{id}` | 历史详情 |
-| POST | `/api/history/{id}/rollback` | 执行回溯 |
+| Method         | Endpoint                              | Description                   |
+| -------------- | ------------------------------------- | ----------------------------- |
+| POST           | `/api/auth/register`                | 用户注册                      |
+| POST           | `/api/auth/login`                   | 用户登录                      |
+| GET            | `/api/records`                      | 账单列表（支持筛选/分页）     |
+| POST           | `/api/records`                      | 创建账单                      |
+| POST           | `/api/records/batch-delete`         | 批量删除账单                  |
+| GET            | `/api/records/quick-templates`      | 快速记账模板（自动+手动）     |
+| POST           | `/api/records/quick-templates`      | 手动添加快速模板              |
+| DELETE         | `/api/records/quick-templates/{id}` | 删除快速模板                  |
+| GET/PUT/DELETE | `/api/records/{id}`                 | 账单详情/编辑/删除            |
+| GET/POST       | `/api/categories`                   | 分类列表/创建                 |
+| PUT/DELETE     | `/api/categories/{id}`              | 分类编辑/删除（级联）         |
+| GET            | `/api/tags`                         | 标签列表（支持 `?q=` 搜索） |
+| POST           | `/api/tags`                         | 标签创建（需关联分类）        |
+| PUT/DELETE     | `/api/tags/{id}`                    | 标签编辑/软删除               |
+| GET/POST/PUT   | `/api/budgets`                      | 预算管理                      |
+| POST           | `/api/budgets/batch`                | 批量设置预算                  |
+| GET            | `/api/statistics/summary`           | 统计总览                      |
+| GET            | `/api/statistics/category-stats`    | 分类统计                      |
+| GET            | `/api/statistics/trend`             | 月度趋势                      |
+| GET            | `/api/statistics/budget-overview`   | 预算概览                      |
+| GET            | `/api/export/csv`                   | 导出 CSV                      |
+| GET            | `/api/export/sql`                   | 导出 SQL                      |
+| POST           | `/api/import/csv/preview`           | CSV 导入预览                  |
+| POST           | `/api/import/csv`                   | CSV 导入确认                  |
+| POST           | `/api/import/sql/preview`           | SQL 导入预览                  |
+| POST           | `/api/import/sql`                   | SQL 导入确认                  |
+| GET            | `/api/history`                      | 操作历史列表                  |
+| GET            | `/api/history/{id}`                 | 历史详情                      |
+| POST           | `/api/history/{id}/rollback`        | 执行回溯                      |
 
 ## Testing & Code Quality
 
@@ -211,15 +209,15 @@ npm run build
 
 ## Version History
 
-| Version | Highlights |
-|---------|------------|
-| v1.4 | CSV/SQL 导入导出、数据回溯、Cashew 格式支持、分类标签映射 |
-| v1.3 | UI/UX 优化：未保存提醒、日历动画、详情展开动画、分类图标、模糊渐变、宽屏适配 |
-| v1.2.2 | 移动端底部导航栏、设置页一体化管理、标签搜索联想、标签软删除、账单筛选自动触发、深色模式优化 |
-| v1.2.1 | 数据隔离安全加固、分类级联删除、统计柱状图、预算编辑、月份切换横条、深色模式修复 |
-| v1.2 | 数据隔离、预算编辑、统计柱状图、月份切换横条、快速记账标签化 |
-| v1.1 | Bug 修复、UI 改进、消费时间、账单详情、预算管理 |
-| v1.0 | MVP：基本记账功能、分类管理、统计图表 |
+| Version | Highlights                                                                                   |
+| ------- | -------------------------------------------------------------------------------------------- |
+| v1.4    | CSV/SQL 导入导出、数据回溯、Cashew 格式支持、分类标签映射                                    |
+| v1.3    | UI/UX 优化：未保存提醒、日历动画、详情展开动画、分类图标、模糊渐变、宽屏适配                 |
+| v1.2.2  | 移动端底部导航栏、设置页一体化管理、标签搜索联想、标签软删除、账单筛选自动触发、深色模式优化 |
+| v1.2.1  | 数据隔离安全加固、分类级联删除、统计柱状图、预算编辑、月份切换横条、深色模式修复             |
+| v1.2    | 数据隔离、预算编辑、统计柱状图、月份切换横条、快速记账标签化                                 |
+| v1.1    | Bug 修复、UI 改进、消费时间、账单详情、预算管理                                              |
+| v1.0    | MVP：基本记账功能、分类管理、统计图表                                                        |
 
 ## Roadmap
 

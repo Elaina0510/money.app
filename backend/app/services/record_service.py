@@ -14,6 +14,7 @@ from app.models.tag import Tag
 from app.models.user import User
 from app.schemas.record import RecordCreate, RecordUpdate
 from app.utils.history import create_history_entry, record_to_dict
+from app.utils.money import round_money
 
 
 async def create_record(
@@ -35,7 +36,7 @@ async def create_record(
     consume_time = data.consume_time or datetime.now().strftime("%Y-%m-%d %H:%M")
 
     record = Record(
-        amount=data.amount,
+        amount=round_money(data.amount),
         type=data.type,
         category_id=data.category_id,
         tag_id=data.tag_id,
@@ -157,11 +158,23 @@ async def get_records(
     }
 
 
-async def get_record(db: AsyncSession, record_id: int) -> dict[str, Any] | None:
-    """Get a single record with full details."""
+async def get_record(
+    db: AsyncSession, record_id: int, current_user: User | None = None
+) -> dict[str, Any] | None:
+    """Get a single record with full details.
+
+    IDOR 防护:非归属者视为不存在(返回 None → 404,避免泄露存在性)。
+    """
     record = await db.get(Record, record_id)
     if not record:
         return None
+    if current_user is not None and record.user_id != current_user.id:
+        return None
+    return await _enrich_record(db, record)
+
+
+async def enrich_record(db: AsyncSession, record: Record) -> dict[str, Any]:
+    """Public wrapper for _enrich_record (供 router 调用)。"""
     return await _enrich_record(db, record)
 
 
@@ -193,6 +206,9 @@ async def update_record(
 
     for key, value in update_data.items():
         setattr(record, key, value)
+    # 金额边界:统一两位小数,避免 float 尾差
+    if "amount" in update_data and record.amount is not None:
+        record.amount = round_money(record.amount)
 
     record.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     await db.flush()
@@ -284,8 +300,12 @@ async def get_quick_templates(
     db: AsyncSession, limit: int = 10, current_user: User | None = None
 ) -> list[dict[str, Any]]:
     """Get quick-accounting templates: auto (from records with count >= 2) + manual."""
-    user_filter = Record.user_id == current_user.id if current_user else Record.user_id.is_(None)
-    qt_user_filter = QuickTemplate.user_id == current_user.id if current_user else QuickTemplate.user_id.is_(None)
+    if current_user:
+        user_filter = Record.user_id == current_user.id
+        qt_user_filter = QuickTemplate.user_id == current_user.id
+    else:
+        user_filter = Record.user_id.is_(None)
+        qt_user_filter = QuickTemplate.user_id.is_(None)
 
     # Auto templates: group by (tag_id, type, amount), filter count >= 2
     auto_query = (
@@ -319,7 +339,7 @@ async def get_quick_templates(
             "tag_id": row.tag_id,
             "tag_name": tag.name,
             "type": row.type,
-            "amount": row.amount,
+            "amount": round_money(row.amount),
             "category_id": tag.category_id,
             "category_name": category.name if category else "",
             "category_icon": category.icon if category else "mdi-circle",
@@ -351,7 +371,7 @@ async def get_quick_templates(
             "tag_id": qt.tag_id,
             "tag_name": tag.name if tag else "",
             "type": qt.type,
-            "amount": qt.amount,
+            "amount": round_money(qt.amount),
             "category_id": qt.category_id,
             "category_name": category.name if category else "",
             "category_icon": category.icon if category else "mdi-circle",
@@ -380,7 +400,7 @@ async def add_quick_template(
         tag_id=tag_id,
         category_id=tag.category_id,
         type=template_type,
-        amount=amount,
+        amount=round_money(amount),
     )
     db.add(qt)
     await db.commit()
@@ -429,7 +449,7 @@ async def _enrich_record(db: AsyncSession, record: Record) -> dict[str, Any]:
 
     return {
         "id": record.id,
-        "amount": record.amount,
+        "amount": round_money(record.amount),
         "type": record.type,
         "category_id": record.category_id,
         "category_name": category_name,

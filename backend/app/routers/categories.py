@@ -8,7 +8,7 @@ from app.database import get_session
 from app.models.user import User
 from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
 from app.services import category_service
-from app.utils.auth import get_current_user
+from app.utils.auth import require_auth
 from app.utils.response import Code, error_response, success_response
 
 router = APIRouter(prefix="/api/categories", tags=["分类管理"])
@@ -18,7 +18,7 @@ router = APIRouter(prefix="/api/categories", tags=["分类管理"])
 async def list_categories(
     type: str | None = Query(None, description="筛选类型: income/expense"),
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Get all categories, optionally filtered by type."""
     categories = await category_service.get_categories(db, type, current_user)
@@ -32,7 +32,7 @@ async def list_categories(
 async def create_category(
     data: CategoryCreate,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Create a new custom category."""
     try:
@@ -54,7 +54,7 @@ async def update_category(
     category_id: int,
     data: CategoryUpdate,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Update an existing category."""
     try:
@@ -73,7 +73,7 @@ async def update_category(
 async def delete_category(
     category_id: int,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Delete a category and cascade-delete its records and budgets."""
     try:
@@ -94,11 +94,9 @@ async def delete_category(
 @router.post("/restore-defaults")
 async def restore_defaults(
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Restore default category settings."""
-    if current_user is None:
-        return error_response(Code.PARAM_ERROR, "请先登录", status_code=401)
     result = await category_service.restore_default_categories(db, current_user)
     return success_response(
         data=result,

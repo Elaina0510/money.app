@@ -1,31 +1,68 @@
-"""Tests for data isolation (v1.2 user_id filtering)."""
+"""Tests for data isolation (v1.2 user_id filtering) and v1.4 auth hardening."""
 
 import pytest
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.models.category import Category
+from app.models.record import Record
+from app.models.user import User
+from app.routers.auth import _migrate_orphan_data
+from app.utils.auth import get_password_hash
 
 
 @pytest.mark.asyncio
-async def test_anonymous_create_and_list(client):
-    """1. Unauthenticated user creates records → user_id is NULL, visible to anonymous queries."""
-    # Create an expense category first (unauthenticated)
-    resp = await client.post(
+async def test_unauthenticated_request_rejected(anon_client):
+    """1. v1.4: 所有业务端点要求登录,未带 token → 401。"""
+    # 创建分类
+    resp = await anon_client.post(
         "/api/categories",
-        json={"name": "匿名分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+        json={"name": "测试分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
     )
-    assert resp.status_code == 200
-    cat_id = resp.json()["data"]["id"]
+    assert resp.status_code == 401
 
-    # Create record as anonymous
-    resp = await client.post(
-        "/api/records",
-        json={"amount": 50.0, "type": "expense", "category_id": cat_id, "consume_time": "2026-06-01 12:00"},
+    # 列表
+    resp = await anon_client.get("/api/records")
+    assert resp.status_code == 401
+
+    # 附件
+    resp = await anon_client.get("/api/attachments/1")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_orphan_legacy_data_migrated_to_first_user(db_session: AsyncSession):
+    """2. v1.4: 历史遗留 user_id IS NULL 的数据,在首个用户注册时被接管。
+
+    直接验证 _migrate_orphan_data(通过 API register 触发的内部逻辑)。
+    """
+    # 取一个预设分类
+    cat = (await db_session.exec(select(Category).where(Category.is_preset == 1))).first()
+    assert cat is not None
+
+    # 插入一条历史遗留的 NULL-user 记录
+    legacy = Record(
+        amount=99.0,
+        type="expense",
+        category_id=cat.id,
+        consume_time="2025-01-01 12:00",
+        user_id=None,
     )
-    assert resp.status_code == 200
+    db_session.add(legacy)
+    await db_session.commit()
+    await db_session.refresh(legacy)
+    assert legacy.user_id is None
 
-    # Anonymous query should see the record
-    resp = await client.get("/api/records")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["data"]["total"] == 1
+    # 创建首个用户并迁移孤儿数据
+    user = User(username="firstuser", hashed_password=get_password_hash("pass"))
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    await _migrate_orphan_data(db_session, user.id)
+
+    await db_session.refresh(legacy)
+    assert legacy.user_id == user.id
 
 
 @pytest.mark.asyncio
@@ -93,31 +130,11 @@ async def test_data_separation_between_users(db_session, client, auth_client, au
 
 @pytest.mark.asyncio
 async def test_first_user_inherits_anonymous_data(client, auth_client, auth_user):
-    """4. First registered user inherits anonymous data (tested via auth migration)."""
-    # Note: In the test environment, auth_user is created first (in fixture)
-    # and there's no anonymous data before registration.
-    # The migration logic runs at registration time in auth.py register endpoint.
-    # This test verifies the service layer isolation works correctly.
-    # The T1.4 migration logic is tested separately via the API.
-
-    # Create a record as anonymous
-    resp = await client.post(
-        "/api/categories",
-        json={"name": "旧数据分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
-    )
-    cat_id = resp.json()["data"]["id"]
-    await client.post(
-        "/api/records",
-        json={"amount": 99.0, "type": "expense", "category_id": cat_id, "consume_time": "2026-06-01 12:00"},
-    )
-
-    # Simulate: anonymous data has user_id=NULL
-    # After first user registration, those records migrate to user_id=user.id
-    # Since our fixture already created a user, we verify anonymous data isolation instead
-
-    # Anonymous still sees anonymous data
+    """4. (历史行为)首个用户接管孤儿数据的迁移逻辑,现由 test_orphan_legacy_data_migrated_to_first_user 直接覆盖。"""
+    # v1.4 起 client 已认证,匿名共享池语义移除;保留本用例仅作占位,
+    # 真正的迁移回归见 test_orphan_legacy_data_migrated_to_first_user。
     resp = await client.get("/api/records")
-    assert resp.json()["data"]["total"] == 1
+    assert resp.status_code == 200
 
 
 @pytest.mark.asyncio

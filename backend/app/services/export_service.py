@@ -12,6 +12,7 @@ from app.models.category import Category
 from app.models.quick_template import QuickTemplate
 from app.models.record import Record
 from app.models.tag import Tag
+from app.utils.money import round_money
 
 
 async def export_csv(
@@ -55,7 +56,7 @@ async def export_csv(
         tag_name = tags.get(tag_id, "") if tag_id else ""
 
         writer.writerow([
-            amount,
+            round_money(amount),
             type_,
             category_name,
             tag_name,
@@ -160,7 +161,7 @@ async def export_sql(
             lines.append(
                 f"INSERT INTO records (user_id, amount, type, category_id, tag_id, "
                 f"consume_time, note, created_at, updated_at) "
-                f"VALUES ({rec.user_id}, {rec.amount}, '{rec.type}', "
+                f"VALUES ({rec.user_id}, {round_money(rec.amount)}, '{rec.type}', "
                 f"{rec.category_id}, {tag_val}, "
                 f"'{rec.consume_time}', {note_val}, "
                 f"'{rec.created_at}', '{rec.updated_at}');"
@@ -192,7 +193,7 @@ async def export_sql(
             lines.append(
                 "INSERT INTO budgets (user_id, category_id, amount, period, "
                 "created_at, updated_at) "
-                f"VALUES ({b.user_id}, {cat_val}, {b.amount}, '{b.period}', "
+                f"VALUES ({b.user_id}, {cat_val}, {round_money(b.amount)}, '{b.period}', "
                 f"{created}, {updated});"
             )
         lines.append("")
@@ -225,7 +226,7 @@ async def export_sql(
                 "INSERT INTO quick_templates (user_id, tag_id, category_id, "
                 "type, amount, created_at) "
                 f"VALUES ({qt.user_id}, {tag_val}, {cat_val}, '{qt.type}', "
-                f"{qt.amount}, {created});"
+                f"{round_money(qt.amount)}, {created});"
             )
         lines.append("")
 

@@ -18,6 +18,10 @@ async def create_all_tables() -> None:
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """Provide an async database session."""
-    async with AsyncSession(engine) as session:
+    """Provide an async database session.
+
+    expire_on_commit=False:async SQLAlchemy 推荐设置,避免 commit 后访问
+    ORM 对象属性时触发隐式 lazy-refresh(会抛 MissingGreenlet)。
+    """
+    async with AsyncSession(engine, expire_on_commit=False) as session:
         yield session

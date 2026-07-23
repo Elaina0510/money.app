@@ -27,7 +27,7 @@ pytestmark = pytest.mark.asyncio
 
 async def override_get_session() -> AsyncGenerator[AsyncSession, None]:
     """Override the database session dependency for tests."""
-    async with AsyncSession(test_engine) as session:
+    async with AsyncSession(test_engine, expire_on_commit=False) as session:
         yield session
 
 
@@ -59,6 +59,11 @@ async def seed_categories(db: AsyncSession):
 @pytest_asyncio.fixture(autouse=True)
 async def setup_database():
     """Create all tables before each test and seed preset data."""
+    # 重置进程内限流计数,避免跨用例污染
+    from app.utils import ratelimit
+
+    ratelimit._buckets.clear()
+
     async with test_engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
 
@@ -74,7 +79,34 @@ async def setup_database():
 
 @pytest_asyncio.fixture
 async def client() -> AsyncGenerator[AsyncClient, None]:
-    """Create an async test client."""
+    """Create an authenticated async test client (default test user).
+
+    v1.4 起所有业务端点要求登录,故默认 client 预置一个已认证用户,
+    使仅做"正常路径"测试无需每个用例都显式带 token。需要验证未认证
+    行为时使用 anon_client;需要验证跨用户隔离时使用 auth_client_a/b。
+    """
+    app.dependency_overrides[get_session] = override_get_session
+    async with AsyncSession(test_engine) as session:
+        user = User(
+            username="clientuser",
+            hashed_password=get_password_hash("clientpass"),
+        )
+        session.add(user)
+        await session.commit()
+        await session.refresh(user)
+        token = create_access_token(
+            data={"sub": str(user.id), "username": user.username}
+        )
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        ac.headers["Authorization"] = f"Bearer {token}"
+        yield ac
+    app.dependency_overrides.clear()
+
+
+@pytest_asyncio.fixture
+async def anon_client() -> AsyncGenerator[AsyncClient, None]:
+    """Create an unauthenticated async test client (no token)."""
     app.dependency_overrides[get_session] = override_get_session
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -125,7 +157,7 @@ async def auth_client(
 @pytest_asyncio.fixture
 async def db_session() -> AsyncGenerator[AsyncSession, None]:
     """Provide a test database session."""
-    async with AsyncSession(test_engine) as session:
+    async with AsyncSession(test_engine, expire_on_commit=False) as session:
         yield session
 
 

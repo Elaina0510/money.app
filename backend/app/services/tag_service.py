@@ -13,7 +13,9 @@ from app.schemas.tag import TagCreate, TagUpdate
 from app.utils.response import Code
 
 
-async def get_tags(db: AsyncSession, current_user: User | None = None, search: str | None = None) -> list[Tag]:
+async def get_tags(
+    db: AsyncSession, current_user: User | None = None, search: str | None = None
+) -> list[Tag]:
     """Get all tags visible to the user, excluding soft-deleted tags."""
     query = select(Tag).where(Tag.deleted_at.is_(None)).order_by(Tag.id)
     if current_user:
@@ -27,10 +29,17 @@ async def get_tags(db: AsyncSession, current_user: User | None = None, search: s
     return list(result.all())
 
 
-async def get_tag(db: AsyncSession, tag_id: int) -> dict[str, Any] | None:
-    """Get a single tag with its associated category."""
+async def get_tag(
+    db: AsyncSession, tag_id: int, current_user: User | None = None
+) -> dict[str, Any] | None:
+    """Get a single tag with its associated category.
+
+    IDOR 防护:非归属者视为不存在(返回 None → 404)。
+    """
     tag = await db.get(Tag, tag_id)
     if not tag:
+        return None
+    if current_user is not None and tag.user_id != current_user.id:
         return None
     category_name = None
     if tag.category_id:

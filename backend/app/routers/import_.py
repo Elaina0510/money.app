@@ -1,5 +1,7 @@
 """Import API router."""
 
+import logging
+
 from fastapi import APIRouter, Depends, File, UploadFile
 from fastapi.responses import JSONResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -8,8 +10,10 @@ from app.database import get_session
 from app.models.user import User
 from app.schemas.import_ import ImportCsvRequest, ImportSqlRequest
 from app.services import import_service
-from app.utils.auth import get_current_user
+from app.utils.auth import require_auth
 from app.utils.response import Code, error_response, success_response
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/import", tags=["导入导出"])
 
@@ -18,11 +22,9 @@ router = APIRouter(prefix="/api/import", tags=["导入导出"])
 async def preview_csv_import(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Preview CSV import: detect format, extract categories/tags."""
-    if not current_user:
-        return error_response(Code.FORBIDDEN, "请先登录", status_code=401)
     try:
         file_bytes = await file.read()
         if not file_bytes:
@@ -32,6 +34,7 @@ async def preview_csv_import(
     except ValueError as e:
         return error_response(Code.PARAM_ERROR, str(e))
     except Exception:
+        logger.exception("CSV 预览失败")
         return error_response(Code.SERVER_ERROR, "文件解析失败")
 
 
@@ -39,11 +42,9 @@ async def preview_csv_import(
 async def import_csv(
     data: ImportCsvRequest,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Confirm CSV import with mapping."""
-    if not current_user:
-        return error_response(Code.FORBIDDEN, "请先登录", status_code=401)
     try:
         # Convert Pydantic models to dicts
         cat_mapping = {
@@ -65,6 +66,7 @@ async def import_csv(
     except ValueError as e:
         return error_response(Code.PARAM_ERROR, str(e))
     except Exception:
+        logger.exception("CSV 导入失败")
         return error_response(Code.SERVER_ERROR, "导入失败")
 
 
@@ -72,11 +74,9 @@ async def import_csv(
 async def preview_sql_import(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Preview SQL import: detect format, show table info."""
-    if not current_user:
-        return error_response(Code.FORBIDDEN, "请先登录", status_code=401)
     try:
         file_bytes = await file.read()
         if not file_bytes:
@@ -86,6 +86,7 @@ async def preview_sql_import(
     except ValueError as e:
         return error_response(Code.PARAM_ERROR, str(e))
     except Exception:
+        logger.exception("SQL 预览失败")
         return error_response(Code.SERVER_ERROR, "文件解析失败")
 
 
@@ -93,11 +94,9 @@ async def preview_sql_import(
 async def import_sql(
     data: ImportSqlRequest,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Confirm SQL import."""
-    if not current_user:
-        return error_response(Code.FORBIDDEN, "请先登录", status_code=401)
     try:
         # Convert Pydantic models to dicts if present
         cat_mapping = None
@@ -125,4 +124,5 @@ async def import_sql(
     except ValueError as e:
         return error_response(Code.PARAM_ERROR, str(e))
     except Exception:
+        logger.exception("SQL 导入失败")
         return error_response(Code.SERVER_ERROR, "导入失败")

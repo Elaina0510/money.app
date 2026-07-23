@@ -131,7 +131,7 @@ async def test_preset_categories_exist(client):
     data = resp.json()
     names = [c["name"] for c in data["data"]]
     assert "餐饮" in names
-    assert "交通" in names
+    assert "出行" in names
     assert "工资" in names
     assert "其他收入" in names
 
@@ -240,16 +240,16 @@ async def test_delete_other_user_custom_category_forbidden(auth_client_a, auth_c
 
 @pytest.mark.asyncio
 async def test_delete_preset_category_any_user(client):
-    """Test that any user (including anonymous) can delete a preset category."""
+    """Preset categories are shared defaults and must not be deletable by any user."""
     # Get a preset category
     resp = await client.get("/api/categories")
     preset = next(c for c in resp.json()["data"] if c["is_preset"] == 1)
     cat_id = preset["id"]
 
     resp = await client.delete(f"/api/categories/{cat_id}")
-    assert resp.status_code == 200
+    assert resp.status_code == 403
     data = resp.json()
-    assert data["code"] == 0
+    assert data["code"] == 40005
 
 
 @pytest.mark.asyncio

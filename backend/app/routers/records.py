@@ -9,7 +9,7 @@ from app.database import get_session
 from app.models.user import User
 from app.schemas.record import BatchDeleteRequest, RecordCreate, RecordUpdate
 from app.services import record_service
-from app.utils.auth import get_current_user
+from app.utils.auth import require_auth
 from app.utils.response import Code, error_response, success_response
 
 router = APIRouter(prefix="/api/records", tags=["记账管理"])
@@ -19,13 +19,13 @@ router = APIRouter(prefix="/api/records", tags=["记账管理"])
 async def create_record(
     data: RecordCreate,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Create a new record."""
     try:
         record = await record_service.create_record(db, data, current_user)
         return success_response(
-            data=await record_service._enrich_record(db, record),
+            data=await record_service.enrich_record(db, record),
             message="记账成功",
         )
     except ValueError as e:
@@ -45,7 +45,7 @@ async def list_records(
     sort_by: str = Query("consume_time", description="排序字段: consume_time/amount"),
     sort_order: str = Query("desc", description="排序方向: asc/desc"),
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Get paginated records with filters."""
     result = await record_service.get_records(
@@ -74,7 +74,7 @@ class QuickTemplateCreate(BaseModel):
 @router.get("/quick-templates")
 async def quick_templates(
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Get quick-accounting templates (auto + manual)."""
     templates = await record_service.get_quick_templates(db, current_user=current_user)
@@ -85,7 +85,7 @@ async def quick_templates(
 async def add_quick_template(
     data: QuickTemplateCreate,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Manually add a quick template."""
     qt = await record_service.add_quick_template(db, data.tag_id, data.amount, current_user)
@@ -98,7 +98,7 @@ async def add_quick_template(
 async def delete_quick_template(
     template_id: int,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Delete a manual quick template."""
     deleted = await record_service.delete_quick_template(db, template_id, current_user)
@@ -111,9 +111,10 @@ async def delete_quick_template(
 async def get_record(
     record_id: int,
     db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Get a single record with full details."""
-    record = await record_service.get_record(db, record_id)
+    record = await record_service.get_record(db, record_id, current_user)
     if not record:
         return error_response(Code.NOT_FOUND, "记录不存在")
     return success_response(data=record)
@@ -124,7 +125,7 @@ async def update_record(
     record_id: int,
     data: RecordUpdate,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Update a record."""
     try:
@@ -142,7 +143,7 @@ async def update_record(
 async def delete_record(
     record_id: int,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Delete a record."""
     try:
@@ -158,7 +159,7 @@ async def delete_record(
 async def batch_delete_records(
     data: BatchDeleteRequest,
     db: AsyncSession = Depends(get_session),
-    current_user: User | None = Depends(get_current_user),
+    current_user: User = Depends(require_auth),
 ) -> JSONResponse:
     """Batch delete records."""
     try:

@@ -12,6 +12,7 @@ from app.models.category import Category
 from app.models.record import Record
 from app.models.user import User
 from app.schemas.budget import BatchBudgetRequest, BudgetCreate, BudgetUpdate
+from app.utils.money import round_money
 
 
 def _get_month_date_range(month: str) -> tuple[str, str]:
@@ -69,7 +70,7 @@ async def _enrich_budget(
     # in the same session.
     bid = budget.id
     cid = category_id if category_id is not None else budget.category_id
-    amt = budget_amount if budget_amount is not None else budget.amount
+    amt = round_money(budget_amount if budget_amount is not None else budget.amount)
     bmonth = budget.month
     bcreated = budget.created_at
     bupdated = budget.updated_at
@@ -90,9 +91,9 @@ async def _enrich_budget(
         Record.consume_time <= end_date,
     )
     spent_result = await db.exec(spent_stmt)
-    spent = float(spent_result.one() or 0)
+    spent = round_money(spent_result.one() or 0)
 
-    remaining = max(amt - spent, 0)
+    remaining = round_money(max(amt - spent, 0))
     percentage = round((spent / amt * 100), 1) if amt > 0 else 0
 
     return {
@@ -128,7 +129,7 @@ async def create_or_update_budget(
 
     if existing:
         budget_id = existing.id
-        existing.amount = data.amount
+        existing.amount = round_money(data.amount)
         existing.updated_at = now
         await db.commit()
         # Re-query to avoid expired attribute issues with async greenlet
@@ -139,7 +140,7 @@ async def create_or_update_budget(
     budget = Budget(
         category_id=data.category_id,
         month=data.month,
-        amount=data.amount,
+        amount=round_money(data.amount),
         user_id=user_id,
         created_at=now,
         updated_at=now,
@@ -154,15 +155,23 @@ async def create_or_update_budget(
     return fresh_result.first()
 
 
-async def update_budget(db: AsyncSession, budget_id: int, data: BudgetUpdate) -> Budget | None:
-    """Update an existing budget."""
+async def update_budget(
+    db: AsyncSession,
+    budget_id: int,
+    data: BudgetUpdate,
+    current_user: User | None = None,
+) -> Budget | None:
+    """Update an existing budget. Raises PermissionError if not owner."""
     budget_stmt = select(Budget).where(Budget.id == budget_id)
     result = await db.exec(budget_stmt)
     budget = result.first()
     if not budget:
         return None
+    # IDOR 防护:仅归属者可改
+    if current_user is not None and budget.user_id != current_user.id:
+        raise PermissionError("无权操作此预算")
 
-    budget.amount = data.amount
+    budget.amount = round_money(data.amount)
     budget.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     await db.commit()
     # Re-query to avoid expired attribute issues with async greenlet
@@ -171,16 +180,32 @@ async def update_budget(db: AsyncSession, budget_id: int, data: BudgetUpdate) ->
     return fresh_result.first()
 
 
-async def delete_budget(db: AsyncSession, budget_id: int) -> bool:
-    """Delete a budget. Returns True if deleted, False if not found."""
+async def delete_budget(
+    db: AsyncSession, budget_id: int, current_user: User | None = None
+) -> bool:
+    """Delete a budget. Raises PermissionError if not owner. Returns False if not found."""
     budget_stmt = select(Budget).where(Budget.id == budget_id)
     result = await db.exec(budget_stmt)
     budget = result.first()
     if not budget:
         return False
+    # IDOR 防护:仅归属者可删
+    if current_user is not None and budget.user_id != current_user.id:
+        raise PermissionError("无权操作此预算")
     await db.delete(budget)
     await db.commit()
     return True
+
+
+async def enrich_budget(
+    db: AsyncSession,
+    budget: Budget,
+    month: str,
+    category_id: int | None = None,
+    budget_amount: float | None = None,
+) -> dict[str, Any]:
+    """Public wrapper for _enrich_budget (供 router 调用)。"""
+    return await _enrich_budget(db, budget, month, category_id, budget_amount)
 
 
 async def batch_set_budgets(
@@ -243,10 +268,11 @@ async def get_budget_overview(
             Record.consume_time <= end_date,
         )
         spent_result = await db.exec(spent_stmt)
-        spent = float(spent_result.one() or 0)
+        spent = round_money(spent_result.one() or 0)
 
-        remaining = max(budget.amount - spent, 0)
-        percentage = round((spent / budget.amount * 100), 1) if budget.amount > 0 else 0
+        budget_amt = round_money(budget.amount)
+        remaining = round_money(max(budget_amt - spent, 0))
+        percentage = round((spent / budget_amt * 100), 1) if budget_amt > 0 else 0
 
         # Determine status
         if percentage > 100:
@@ -256,7 +282,7 @@ async def get_budget_overview(
         else:
             status = "normal"
 
-        total_budget += budget.amount
+        total_budget += budget_amt
         total_spent += spent
 
         categories_data.append(
@@ -264,7 +290,7 @@ async def get_budget_overview(
                 "category_id": budget.category_id,
                 "category_name": category_name,
                 "icon": icon,
-                "budget": budget.amount,
+                "budget": budget_amt,
                 "spent": spent,
                 "remaining": remaining,
                 "percentage": percentage,
@@ -272,13 +298,13 @@ async def get_budget_overview(
             }
         )
 
-    total_remaining = max(total_budget - total_spent, 0)
+    total_remaining = round_money(max(total_budget - total_spent, 0))
     overall_percentage = round((total_spent / total_budget * 100), 1) if total_budget > 0 else 0
 
     return {
         "month": month,
-        "total_budget": total_budget,
-        "total_spent": total_spent,
+        "total_budget": round_money(total_budget),
+        "total_spent": round_money(total_spent),
         "total_remaining": total_remaining,
         "overall_percentage": overall_percentage,
         "categories": categories_data,

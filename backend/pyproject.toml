@@ -18,5 +18,9 @@ line-length = 100
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "W", "UP"]
 
+[tool.ruff.lint.per-file-ignores]
+# 测试中存在历史遗留长行,放宽行长限制
+"tests/*" = ["E501"]
+
 [tool.ruff.format]
 quote-style = "double"

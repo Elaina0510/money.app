@@ -29,11 +29,19 @@ generate_secret() {
         echo "[INFO] 生成 .env 配置文件..."
         SECRET_KEY=$(openssl rand -base64 64 | tr -d '\n/')
         cat > .env << EOF
+APP_ENV=production
 SECRET_KEY=${SECRET_KEY}
+CORS_ORIGINS=
 EOF
         echo "[OK] .env 已生成"
+        echo "[提示] 请编辑 .env 设置 CORS_ORIGINS 为实际访问地址(如 http://你的IP)"
     else
         echo "[OK] .env 已存在"
+        # 若旧 .env 缺少 APP_ENV，补上生产标记
+        if ! grep -q "^APP_ENV=" .env; then
+            echo "APP_ENV=production" >> .env
+            echo "[OK] 已补充 APP_ENV=production"
+        fi
     fi
 }
 

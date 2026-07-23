@@ -11,6 +11,13 @@ class Attachment(SQLModel, table=True):
     __tablename__ = "attachments"
 
     id: int | None = Field(default=None, primary_key=True)
+    user_id: int | None = Field(
+        default=None,
+        nullable=True,
+        foreign_key="users.id",
+        ondelete="CASCADE",
+        index=True,
+    )
     record_id: int | None = Field(
         default=None,
         nullable=True,

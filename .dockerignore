@@ -20,6 +20,18 @@ backend/money.db
 backend/money.db-journal
 data/
 
+# Secrets — 绝不进镜像
+.env
+.env.*
+!.env.example
+
+# Build artifacts / archives
+*.tar.gz
+money-app.tar.gz
+screenshots/
+example/
+
+
 # IDE
 .vscode/
 .idea/
