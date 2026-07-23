@@ -30,6 +30,17 @@ Money App 💰 — 个人记账程序
 - **数据回溯** — 操作历史记录，支持单条回溯（创建/修改/删除/批量删除/导入）
 - **自动清理** — 每用户最多保留 30 条历史记录
 
+### 安全加固 (v1.4)
+
+- **强制鉴权** — 所有业务接口统一 `require_auth`，匿名访问一律 401
+- **越权防护 (IDOR)** — 记录/分类/预算/历史/附件均校验 `user_id` 归属，杜绝跨用户读写
+- **附件归属** — 附件表新增 `user_id`，上传/删除/列表全链路鉴权
+- **登录限流** — 滑动窗口限制登录/注册请求频率，防暴力破解
+- **生产密钥守卫** — `APP_ENV=production` 下使用默认/示例 SECRET_KEY 直接拒绝启动
+- **CORS 白名单** — 通过 `CORS_ORIGINS` 精确配置允许来源，不再开放 `*`
+- **金额精度** — `round_money` 统一收口四舍五入与边界，避免浮点误差
+- **健康检查** — `/health` 端点供探活，全局异常处理 + 结构化日志
+
 ### UI/UX 特性 (v1.3)
 
 - **未保存提醒** — 记账页修改后返回时弹出确认对话框，防止数据丢失
@@ -94,6 +105,37 @@ npm install
 npm run dev
 ```
 
+### Docker 部署
+
+```bash
+# 构建镜像
+docker build -t money-app .
+
+# 运行容器（挂载数据目录持久化）
+docker run -d --name money-app -p 8000:8000 \
+  -v $(pwd)/data:/data \
+  --env-file .env \
+  money-app
+```
+
+### 环境变量（生产部署必填）
+
+复制 `.env.example` 为 `.env` 并修改：
+
+| 变量 | 说明 |
+| --- | --- |
+| `APP_ENV` | 设为 `production` 启用安全守卫（强制自定义 SECRET_KEY、CORS 白名单） |
+| `SECRET_KEY` | 生产必须改为随机串：`python -c "import secrets;print(secrets.token_urlsafe(64))"` |
+| `CORS_ORIGINS` | 允许的前端来源，逗号分隔，如 `https://money.example.com` |
+| `DATABASE_URL` | SQLite 路径，容器内用 `/data/db/money.db` |
+| `UPLOAD_DIR` | 附件存储目录，容器内用 `/data/uploads` |
+
+存量库升级（v1.4 引入附件 user_id 等字段）：
+
+```bash
+cd backend && python migrate_to_v1.4.py
+```
+
 ## Project Structure
 
 ```
@@ -125,8 +167,10 @@ money.app/
 │   │   │   ├── import_.py       # CSV/SQL 导入
 │   │   │   └── history.py       # 操作历史与回溯
 │   │   ├── services/            # 业务逻辑层
-│   │   └── utils/               # 工具（auth, response, history, cache）
-│   └── tests/                   # pytest 测试（130 个用例）
+│   │   └── utils/               # 工具（auth 鉴权, ratelimit 限流, money 金额取整,
+│   │                                response 响应封装, history 操作历史, cache, file_utils）
+│   ├── migrate_to_v1.4.py       # 存量数据库迁移脚本
+│   └── tests/                   # pytest 测试（139 个用例，含 IDOR/限流安全回归）
 ├── frontend/
 │   └── src/
 │       ├── pages/               # 页面组件
@@ -144,16 +188,18 @@ money.app/
 │       ├── styles/              # SCSS 全局样式
 │       └── utils/               # 工具函数
 ├── doc/                         # 设计文档
+├── .github/workflows/ci.yml     # CI：ruff + pytest 自动化
 └── start.sh                     # 一键启动脚本
 ```
 
 ## API Overview
 
-| Method         | Endpoint                              | Description                   |
-| -------------- | ------------------------------------- | ----------------------------- |
-| POST           | `/api/auth/register`                | 用户注册                      |
-| POST           | `/api/auth/login`                   | 用户登录                      |
-| GET            | `/api/records`                      | 账单列表（支持筛选/分页）     |
+| Method | Endpoint | Description |
+| --- | --- | --- |
+| GET | `/health` | 健康检查（探活，免鉴权） |
+| POST | `/api/auth/register` | 用户注册 |
+| POST | `/api/auth/login` | 用户登录 |
+| GET | `/api/records` | 账单列表（支持筛选/分页） |
 | POST           | `/api/records`                      | 创建账单                      |
 | POST           | `/api/records/batch-delete`         | 批量删除账单                  |
 | GET            | `/api/records/quick-templates`      | 快速记账模板（自动+手动）     |
@@ -184,7 +230,7 @@ money.app/
 ## Testing & Code Quality
 
 ```bash
-# 后端测试（78 个用例）
+# 后端测试（139 个用例，含 IDOR/限流安全回归）
 cd backend
 pytest tests/ -v
 
@@ -211,7 +257,7 @@ npm run build
 
 | Version | Highlights                                                                                   |
 | ------- | -------------------------------------------------------------------------------------------- |
-| v1.4    | CSV/SQL 导入导出、数据回溯、Cashew 格式支持、分类标签映射                                    |
+| v1.4    | CSV/SQL 导入导出、数据回溯、安全加固（鉴权统一/IDOR 修复/限流/CORS 白名单/密钥守卫/健康检查）、Docker、CI |
 | v1.3    | UI/UX 优化：未保存提醒、日历动画、详情展开动画、分类图标、模糊渐变、宽屏适配                 |
 | v1.2.2  | 移动端底部导航栏、设置页一体化管理、标签搜索联想、标签软删除、账单筛选自动触发、深色模式优化 |
 | v1.2.1  | 数据隔离安全加固、分类级联删除、统计柱状图、预算编辑、月份切换横条、深色模式修复             |
