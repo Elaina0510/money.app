@@ -50,7 +50,7 @@ v1.0/
 *.jpg
 *.jpeg
 !design/prototype.png
-!screenshots/*.png
+!screenshots/**/*.png
 
 # Logs
 *.log

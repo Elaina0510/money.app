@@ -1,4 +1,4 @@
-Money App 💰 — 个人记账程序
+# Money App 💰 — 个人记账程序
 
 一个基于 **Vue 3 + FastAPI** 的全栈个人记账应用，支持收支记录管理、分类标签体系、预算监控、数据统计看板与多用户数据隔离。
 
@@ -53,18 +53,17 @@ Money App 💰 — 个人记账程序
 ## Screenshots
 
 <p align="center">
-  <img src="screenshots/首页（展开左侧边栏）.png" width="30%" alt="首页（展开左侧边栏）" />
-  <img src="screenshots/深色模式首页.png" width="30%" alt="深色模式首页" />
-  <img src="screenshots/登录页.png" width="30%" alt="登录页" />
+  <img src="screenshots/v1.4/首页.png" width="30%" alt="首页" />
+  <img src="screenshots/v1.4/账单.png" width="30%" alt="账单" />
+  <img src="screenshots/v1.4/账单详情.png" width="30%" alt="账单详情" />
 </p>
 <p align="center">
-  <img src="screenshots/记账页.png" width="30%" alt="记账页" />
-  <img src="screenshots/账单页.png" width="30%" alt="账单页" />
-  <img src="screenshots/账单详情页.png" width="30%" alt="账单详情页" />
+  <img src="screenshots/v1.4/统计页.png" width="30%" alt="统计页" />
+  <img src="screenshots/v1.4/快速记账.png" width="30%" alt="快速记账" />
+  <img src="screenshots/v1.4/设置页1.png" width="30%" alt="设置页1" />
 </p>
 <p align="center">
-  <img src="screenshots/预算页.png" width="30%" alt="预算页" />
-  <img src="screenshots/设置页.png" width="30%" alt="设置页" />
+  <img src="screenshots/v1.4/设置页2.png" width="30%" alt="设置页2" />
 </p>
 
 ## Quick Start
@@ -122,13 +121,13 @@ docker run -d --name money-app -p 8000:8000 \
 
 复制 `.env.example` 为 `.env` 并修改：
 
-| 变量 | 说明 |
-| --- | --- |
-| `APP_ENV` | 设为 `production` 启用安全守卫（强制自定义 SECRET_KEY、CORS 白名单） |
-| `SECRET_KEY` | 生产必须改为随机串：`python -c "import secrets;print(secrets.token_urlsafe(64))"` |
-| `CORS_ORIGINS` | 允许的前端来源，逗号分隔，如 `https://money.example.com` |
-| `DATABASE_URL` | SQLite 路径，容器内用 `/data/db/money.db` |
-| `UPLOAD_DIR` | 附件存储目录，容器内用 `/data/uploads` |
+| 变量             | 说明                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| `APP_ENV`      | 设为 `production` 启用安全守卫（强制自定义 SECRET_KEY、CORS 白名单）              |
+| `SECRET_KEY`   | 生产必须改为随机串：`python -c "import secrets;print(secrets.token_urlsafe(64))"` |
+| `CORS_ORIGINS` | 允许的前端来源，逗号分隔，如 `https://money.example.com`                          |
+| `DATABASE_URL` | SQLite 路径，容器内用 `/data/db/money.db`                                         |
+| `UPLOAD_DIR`   | 附件存储目录，容器内用 `/data/uploads`                                            |
 
 存量库升级（v1.4 引入附件 user_id 等字段）：
 
@@ -194,12 +193,12 @@ money.app/
 
 ## API Overview
 
-| Method | Endpoint | Description |
-| --- | --- | --- |
-| GET | `/health` | 健康检查（探活，免鉴权） |
-| POST | `/api/auth/register` | 用户注册 |
-| POST | `/api/auth/login` | 用户登录 |
-| GET | `/api/records` | 账单列表（支持筛选/分页） |
+| Method         | Endpoint                              | Description                   |
+| -------------- | ------------------------------------- | ----------------------------- |
+| GET            | `/health`                           | 健康检查（探活，免鉴权）      |
+| POST           | `/api/auth/register`                | 用户注册                      |
+| POST           | `/api/auth/login`                   | 用户登录                      |
+| GET            | `/api/records`                      | 账单列表（支持筛选/分页）     |
 | POST           | `/api/records`                      | 创建账单                      |
 | POST           | `/api/records/batch-delete`         | 批量删除账单                  |
 | GET            | `/api/records/quick-templates`      | 快速记账模板（自动+手动）     |
@@ -255,15 +254,15 @@ npm run build
 
 ## Version History
 
-| Version | Highlights                                                                                   |
-| ------- | -------------------------------------------------------------------------------------------- |
+| Version | Highlights                                                                                                |
+| ------- | --------------------------------------------------------------------------------------------------------- |
 | v1.4    | CSV/SQL 导入导出、数据回溯、安全加固（鉴权统一/IDOR 修复/限流/CORS 白名单/密钥守卫/健康检查）、Docker、CI |
-| v1.3    | UI/UX 优化：未保存提醒、日历动画、详情展开动画、分类图标、模糊渐变、宽屏适配                 |
-| v1.2.2  | 移动端底部导航栏、设置页一体化管理、标签搜索联想、标签软删除、账单筛选自动触发、深色模式优化 |
-| v1.2.1  | 数据隔离安全加固、分类级联删除、统计柱状图、预算编辑、月份切换横条、深色模式修复             |
-| v1.2    | 数据隔离、预算编辑、统计柱状图、月份切换横条、快速记账标签化                                 |
-| v1.1    | Bug 修复、UI 改进、消费时间、账单详情、预算管理                                              |
-| v1.0    | MVP：基本记账功能、分类管理、统计图表                                                        |
+| v1.3    | UI/UX 优化：未保存提醒、日历动画、详情展开动画、分类图标、模糊渐变、宽屏适配                              |
+| v1.2.2  | 移动端底部导航栏、设置页一体化管理、标签搜索联想、标签软删除、账单筛选自动触发、深色模式优化              |
+| v1.2.1  | 数据隔离安全加固、分类级联删除、统计柱状图、预算编辑、月份切换横条、深色模式修复                          |
+| v1.2    | 数据隔离、预算编辑、统计柱状图、月份切换横条、快速记账标签化                                              |
+| v1.1    | Bug 修复、UI 改进、消费时间、账单详情、预算管理                                                           |
+| v1.0    | MVP：基本记账功能、分类管理、统计图表                                                                     |
 
 ## Roadmap
 
