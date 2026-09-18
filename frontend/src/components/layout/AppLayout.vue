@@ -2,7 +2,7 @@
   <v-app :theme="appStore.darkMode ? 'dark' : 'light'">
     <!-- Navigation Drawer (Sidebar) - Desktop only -->
     <v-navigation-drawer
-      v-show="isDesktop"
+      v-show="isDesktop && !isLoginPage"
       v-model="drawer"
       :permanent="!rail"
       :temporary="rail"
@@ -108,12 +108,18 @@
     </v-navigation-drawer>
 
     <!-- Main Content Area -->
-    <v-main class="main-content">
+    <v-main class="main-content" :class="{ 'main-content--locked': isLoginPage }">
       <!-- Top Bar - sticky, must stay outside overflow container -->
       <div class="app-top-bar pa-4 pb-0">
         <div class="d-flex align-center">
           <!-- Hamburger button - Desktop only -->
-          <v-btn v-if="isDesktop" icon variant="text" class="mr-2" @click="toggleNav()">
+          <v-btn
+            v-if="isDesktop && !isLoginPage"
+            icon
+            variant="text"
+            class="mr-2"
+            @click="toggleNav()"
+          >
             <v-icon>{{ rail ? 'mdi-menu' : 'mdi-close' }}</v-icon>
           </v-btn>
           <div>
@@ -128,8 +134,8 @@
       </div>
 
       <!-- Page Content - overflow-x:hidden clips scale(1.1) without affecting sticky top bar -->
-      <div class="content-overflow">
-        <div class="content-wrapper">
+      <div class="content-overflow" :class="{ 'content-overflow--locked': isLoginPage }">
+        <div class="content-wrapper" :class="{ 'content-wrapper--bare': isLoginPage }">
           <router-view v-slot="{ Component, route }">
             <!-- Expand transition for detail page -->
             <transition
@@ -151,13 +157,26 @@
       </div>
     </v-main>
 
-    <!-- Floating Action Button (FAB) - 右下角常驻加号 -->
-    <v-btn class="fab-add" color="primary" size="large" icon elevation="4" @click="goToAddRecord">
+    <!-- Floating Action Button (FAB) - 右下角常驻加号（登录页隐藏） -->
+    <v-btn
+      v-if="!isLoginPage"
+      class="fab-add"
+      color="primary"
+      size="large"
+      icon
+      elevation="4"
+      @click="goToAddRecord"
+    >
       <v-icon size="28">mdi-plus</v-icon>
     </v-btn>
 
-    <!-- Bottom Navigation Bar - Mobile only -->
-    <v-bottom-navigation v-if="!isDesktop" v-model="currentRoute" grow class="bottom-nav">
+    <!-- Bottom Navigation Bar - Mobile only（登录页隐藏） -->
+    <v-bottom-navigation
+      v-if="!isDesktop && !isLoginPage"
+      v-model="currentRoute"
+      grow
+      class="bottom-nav"
+    >
       <v-btn value="/" to="/">
         <v-icon>mdi-view-dashboard-outline</v-icon>
         <span>主页</span>
@@ -199,6 +218,10 @@ const isDesktop = ref(window.innerWidth >= BREAKPOINT)
 function onResize() {
   isDesktop.value = window.innerWidth >= BREAKPOINT
 }
+
+// 登录页判据：以当前路由为 /login 为准（路由守卫保证未登录只会停留在登录页）
+// 用于隐藏侧栏/汉堡/FAB/底栏等导航入口，并锁定登录页滚动
+const isLoginPage = computed(() => route.path === '/login')
 
 // 登录状态
 const token = ref(localStorage.getItem('token') || '')
@@ -397,6 +420,33 @@ onMounted(() => {
 /* Overflow container: clips horizontal overflow from scale(1.1) on wide screens */
 .content-overflow {
   overflow-x: hidden;
+}
+
+/* --- 登录页沉浸式（M1）：仅在 /login 挂类，非登录页布局完全不变 --- */
+
+/* 登录页：视口高度内锁死，顶栏占自然高度，内容区 flex 撑满剩余空间 */
+.main-content--locked {
+  height: 100dvh;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.content-overflow--locked {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 登录页不参与宽屏缩放，且不再为底栏/FAB 预留 padding-bottom
+   （复合选择器提升优先级，避免被下方媒体查询中的 .content-wrapper 内边距覆盖） */
+.content-wrapper.content-wrapper--bare {
+  height: 100%;
+  max-width: none;
+  margin: 0;
+  padding: 0;
+  zoom: 1 !important;
 }
 
 /* Bottom blur gradient */

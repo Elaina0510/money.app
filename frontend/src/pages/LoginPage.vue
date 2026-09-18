@@ -1,5 +1,5 @@
 <template>
-  <v-app>
+  <v-app class="login-root">
     <v-main class="login-main">
       <div class="login-container">
         <!-- Logo & Title -->
@@ -230,15 +230,25 @@ async function handleRegister() {
 </script>
 
 <style scoped>
+/* 承接外层 .content-wrapper--bare 的 100% 高度，断开嵌套 v-app 的高度链 */
+.login-root {
+  height: 100%;
+}
+
+/* 填满给定高度 + 内部滚动兜底；min-height 必须显式断开 Vuetify 默认的 calc(100vh - …) */
 .login-main {
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0 !important;
+  overflow-y: auto;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   background: rgb(var(--v-theme-background));
 }
 
+/* flex 安全居中：空间充足时垂直居中，内容超出时从顶部正常滚动不裁切 */
 .login-container {
+  margin: auto;
   width: 100%;
   max-width: 400px;
   padding: 20px;
