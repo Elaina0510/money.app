@@ -35,6 +35,15 @@ vi.mock('@/stores/useAppStore', () => ({
   }),
 }))
 
+// M5：AppLayout 的登出流程会清除账单页浏览现场，这里用 spy 断言其被调用
+// （工厂内惰性引用，避免 mock 提升导致的 TDZ）
+const mockResetListView = vi.fn()
+vi.mock('@/stores/useRecordsStore', () => ({
+  useRecordsStore: () => ({
+    resetListView: mockResetListView,
+  }),
+}))
+
 // Mock ToastNotification
 vi.mock('@/components/common/ToastNotification.vue', () => ({
   default: {
@@ -491,5 +500,55 @@ describe('AppLayout - M1 登录页沉浸式', () => {
     )
     expect(normalWrapper.find('.content-wrapper').classes()).not.toContain('content-wrapper--bare')
     normalWrapper.unmount()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// M5 需求三联动：登出时清除账单页"浏览现场"（避免换账号后返回现场串号）
+// ---------------------------------------------------------------------------
+describe('AppLayout - 登出清除账单浏览现场（M5）', () => {
+  const stubs = {
+    'router-view': true,
+    'v-app': { template: '<div class="v-app"><slot /></div>' },
+    'v-navigation-drawer': { template: '<div class="app-sidebar"><slot /></div>' },
+    'v-main': { template: '<div class="v-main"><slot /></div>' },
+    'v-btn': { template: '<div class="v-btn"><slot /></div>' },
+    'v-icon': true,
+    'v-list': true,
+    'v-list-item': true,
+    'v-divider': true,
+    'v-spacer': true,
+    'v-switch': true,
+    'v-bottom-navigation': { template: '<div class="v-bottom-navigation"><slot /></div>' },
+    'v-avatar': true,
+    transition: true,
+  }
+
+  beforeEach(() => {
+    mockResetListView.mockClear()
+    routePath.value = '/'
+    localStorage.setItem('token', 'fake-token')
+    localStorage.setItem('username', 'tester')
+    localStorage.setItem('userId', '1')
+    Object.defineProperty(window, 'innerWidth', {
+      writable: true,
+      configurable: true,
+      value: 1280,
+    })
+  })
+
+  it('handleLogout 调用 recordsStore.resetListView 并清空登录态', async () => {
+    const wrapper = mount(AppLayout, { global: { stubs } })
+    await flushPromises()
+
+    wrapper.vm.handleLogout()
+    await nextTick()
+
+    expect(mockResetListView).toHaveBeenCalledTimes(1)
+    expect(localStorage.getItem('token')).toBeNull()
+    expect(localStorage.getItem('username')).toBeNull()
+    expect(localStorage.getItem('userId')).toBeNull()
+    expect(wrapper.vm.isLoggedIn).toBe(false)
+    wrapper.unmount()
   })
 })

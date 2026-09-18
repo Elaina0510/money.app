@@ -29,6 +29,28 @@ export const useRecordsStore = defineStore('records', () => {
   const templates = ref([])
   const loading = ref(false)
 
+  // 账单列表"浏览现场"（M5，内存级：刷新应用即回到默认，符合需求原文）
+  // 形状：{ year: number, month: number|null, scrollTop: number } | null
+  const listView = ref(null)
+
+  // 进入详情页前保存现场（浅拷贝，避免调用方后续复用同一对象造成串改）
+  function rememberListView(state) {
+    listView.value = { ...state }
+  }
+
+  // 一次性消费：取出即清空，保证只有"从详情页返回"这一条路径能恢复现场，
+  // 从底栏/侧栏重新进入账单页时 listView 已为 null → 走默认定位当前月
+  function consumeListView() {
+    const v = listView.value
+    listView.value = null
+    return v
+  }
+
+  // 登出等场景显式清理，避免切换账号后返回现场串号
+  function resetListView() {
+    listView.value = null
+  }
+
   const hasMore = computed(() => page.value < totalPages.value)
 
   async function fetchRecords(params = {}) {
@@ -165,7 +187,11 @@ export const useRecordsStore = defineStore('records', () => {
     filters,
     templates,
     loading,
+    listView,
     hasMore,
+    rememberListView,
+    consumeListView,
+    resetListView,
     fetchRecords,
     fetchRecord,
     addRecord,

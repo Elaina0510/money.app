@@ -161,7 +161,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { getRecords, getEarliestYear } from '@/api/records'
 import { useRecordsStore } from '@/stores/useRecordsStore'
@@ -232,6 +232,13 @@ function goToDetail(event, id) {
   const x = rect.left + rect.width / 2
   const y = rect.top + rect.height / 2
   appStore.setTransitionOrigin({ x, y })
+  // 需求三：仅"点进详情"这条路径记录浏览现场（返回时恢复年月与滚动位置）；
+  // 不用 onBeforeUnmount，避免跳去记一笔/编辑或切底栏离开时也记住现场
+  recordsStore.rememberListView({
+    year: selectedYear.value,
+    month: selectedMonth.value,
+    scrollTop: window.scrollY,
+  })
   router.push(`/detail/${id}`)
 }
 
@@ -299,9 +306,21 @@ async function handleBatchDelete() {
 
 onMounted(async () => {
   loadEarliestYear() // 与下方首屏加载并行发起；内部已兜底，失败不阻塞账单浏览
-  selectMonth(new Date().getMonth() + 1)
-  // 首屏显式一次：filters 恰好同值时 watch 不触发；与 watch 的防抖调用同参 → 去重合并为一次请求
-  await search()
+  const saved = recordsStore.consumeListView()
+  if (saved) {
+    // 需求三：从详情页返回——只恢复年月，不重置也不重写 filters（其值就是离开时的区间），
+    // 否则会触发 M4 的日期防抖 watch → 双请求 / 闪回当前月（回归缺陷）
+    selectedYear.value = saved.year
+    selectedMonth.value = saved.month
+    await search() // 本次挂载唯一一次请求；同参时由去重兜底
+    await nextTick()
+    // 列表撑开前 scrollTo 会被钳制，故等一帧再恢复滚动位置
+    window.requestAnimationFrame(() => window.scrollTo({ top: saved.scrollTop }))
+  } else {
+    selectMonth(new Date().getMonth() + 1)
+    // 首屏显式一次：filters 恰好同值时 watch 不触发；与 watch 的防抖调用同参 → 去重合并为一次请求
+    await search()
+  }
 })
 </script>
 

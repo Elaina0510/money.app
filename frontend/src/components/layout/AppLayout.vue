@@ -203,6 +203,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/useAppStore'
+import { useRecordsStore } from '@/stores/useRecordsStore'
 import ToastNotification from '../common/ToastNotification.vue'
 
 const router = useRouter()
@@ -239,6 +240,8 @@ function handleLogout() {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
   localStorage.removeItem('userId')
+  // 需求三：清除账单页浏览现场（内存级），避免切换账号后返回现场串号
+  useRecordsStore().resetListView()
   checkLogin()
   appStore.showToast('已退出登录', 'info')
 }

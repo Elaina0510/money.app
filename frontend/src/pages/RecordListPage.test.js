@@ -36,6 +36,9 @@ vi.mock('@/api/records', () => ({
   getEarliestYear: vi.fn().mockResolvedValue({ earliest_year: null }),
 }))
 
+// store 的 batchDelete：稳定 spy，供用例断言与替换
+const mockBatchDelete = vi.fn().mockResolvedValue({})
+
 // store 的 filters 在真实实现中是响应式且跨挂载保留的对象：这里同样用 reactive 模拟
 const mockFilters = reactive({
   start_date: '',
@@ -46,11 +49,28 @@ const mockFilters = reactive({
   keyword: '',
 })
 
+// M5：账单页"浏览现场"的内存级状态（与 useRecordsStore 的 consume-once 语义一致）
+const mockListViewHolder = { state: null }
+const mockRememberListView = vi.fn((state) => {
+  mockListViewHolder.state = { ...state }
+})
+const mockConsumeListView = vi.fn(() => {
+  const v = mockListViewHolder.state
+  mockListViewHolder.state = null
+  return v
+})
+const mockResetListView = vi.fn(() => {
+  mockListViewHolder.state = null
+})
+
 // Mock stores
 vi.mock('@/stores/useRecordsStore', () => ({
   useRecordsStore: () => ({
     filters: mockFilters,
-    batchDelete: vi.fn().mockResolvedValue({}),
+    batchDelete: mockBatchDelete,
+    rememberListView: mockRememberListView,
+    consumeListView: mockConsumeListView,
+    resetListView: mockResetListView,
   }),
 }))
 
@@ -615,5 +635,207 @@ describe('RecordListPage - 请求合并与筛选精简', () => {
     await wrapper.vm.search()
     await flushPromises()
     expect(getRecords).toHaveBeenCalledTimes(2)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// M5 需求三：账单详情返回状态记忆（年月 + 滚动位置 + 筛选现场）
+//   保存点只在 goToDetail；恢复路径只赋 selectedYear/selectedMonth，绝不重写 filters
+//   （重写会触发 M4 的日期防抖 watch → 双请求 / 闪回当前月，属回归缺陷）
+// ---------------------------------------------------------------------------
+describe('RecordListPage - 详情返回状态记忆', () => {
+  let scrollToSpy
+  let rafSpy
+
+  // 详情卡片点击事件：goToDetail 只用到 currentTarget.getBoundingClientRect()
+  const clickEvent = {
+    currentTarget: {
+      getBoundingClientRect: () => ({
+        left: 0,
+        top: 0,
+        right: 100,
+        bottom: 40,
+        width: 100,
+        height: 40,
+      }),
+    },
+  }
+
+  function setScrollY(value) {
+    Object.defineProperty(window, 'scrollY', {
+      writable: true,
+      configurable: true,
+      value,
+    })
+  }
+
+  beforeEach(() => {
+    getRecords.mockReset()
+    getEarliestYear.mockReset()
+    getRecords.mockResolvedValue(pageResult([], 1, 1))
+    getEarliestYear.mockResolvedValue({ earliest_year: null })
+    mockFilters.start_date = ''
+    mockFilters.end_date = ''
+    mockListViewHolder.state = null
+    mockRememberListView.mockClear()
+    mockConsumeListView.mockClear()
+    mockResetListView.mockClear()
+    setViewport(375)
+    setScrollY(0)
+
+    // 滚动与动画帧在本用例组内可观测：scrollTo 记录参数，rAF 同步执行回调
+    scrollToSpy = vi.fn()
+    Object.defineProperty(window, 'scrollTo', {
+      writable: true,
+      configurable: true,
+      value: scrollToSpy,
+    })
+    rafSpy = vi.fn((cb) => {
+      cb(0)
+      return 1
+    })
+    Object.defineProperty(window, 'requestAnimationFrame', {
+      writable: true,
+      configurable: true,
+      value: rafSpy,
+    })
+  })
+
+  it('用例1: 点进详情保存现场 → 重新挂载恢复年月/滚动/筛选，且仅一次请求', async () => {
+    // 1) 进入账单页并翻到 3 月（用户浏览行为，含一次防抖请求）
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    wrapper.vm.selectMonth(3)
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(2)
+    const filtersAtLeave = { ...mockFilters }
+    setScrollY(320) // 滚动到列表中部
+
+    // 2) 点进详情：现场写入 store（year/month/scrollTop），并跳转
+    wrapper.vm.goToDetail(clickEvent, 42)
+    await nextTick()
+    expect(mockListViewHolder.state).toEqual({ year: currentYear, month: 3, scrollTop: 320 })
+    expect(mockPush).toHaveBeenCalledWith('/detail/42')
+    wrapper.unmount()
+
+    // 3) 返回（组件重挂载）：现场恢复，且"仅一次请求"
+    getRecords.mockClear()
+    const restored = mount(RecordListPage)
+    await flushPromises()
+
+    expect(restored.vm.selectedYear).toBe(currentYear)
+    expect(restored.vm.selectedMonth).toBe(3)
+    expect(getRecords).toHaveBeenCalledTimes(1)
+    const params = getRecords.mock.calls[0][0]
+    expect(params).toMatchObject({
+      page: 1,
+      start_date: monthRange(currentYear, 3).start,
+      end_date: monthRange(currentYear, 3).end,
+    })
+
+    // filters 未被重写：值逐项一致 + 防抖窗口过后无第二次请求（watch 未被触发）
+    expect({ ...mockFilters }).toEqual(filtersAtLeave)
+    vi.advanceTimersByTime(1000)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1)
+
+    // 滚动位置在 nextTick + 一帧 rAF 后恢复
+    expect(rafSpy).toHaveBeenCalledTimes(1)
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 320 })
+    restored.unmount()
+  })
+
+  it('用例1b: 现场为"往年 + 全年视图（month=null）"→ 年份视图原样恢复，不写 filters', async () => {
+    getEarliestYear.mockResolvedValue({ earliest_year: currentYear - 5 })
+    const yearStart = `${currentYear - 2}-01-01`
+    const yearEnd = `${currentYear - 2}-12-31`
+    mockFilters.start_date = yearStart
+    mockFilters.end_date = yearEnd
+    mockListViewHolder.state = { year: currentYear - 2, month: null, scrollTop: 88 }
+
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+
+    expect(wrapper.vm.selectedYear).toBe(currentYear - 2)
+    expect(wrapper.vm.selectedMonth).toBeNull()
+    expect(getRecords).toHaveBeenCalledTimes(1)
+    expect(getRecords.mock.calls[0][0]).toMatchObject({ start_date: yearStart, end_date: yearEnd })
+    expect(mockFilters.start_date).toBe(yearStart)
+    expect(mockFilters.end_date).toBe(yearEnd)
+
+    vi.advanceTimersByTime(1000)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1)
+    expect(scrollToSpy).toHaveBeenCalledWith({ top: 88 })
+    wrapper.unmount()
+  })
+
+  it('用例2: 现场已被一次性消费后再次挂载 → 回到当前月默认逻辑，不做滚动恢复', async () => {
+    mockListViewHolder.state = { year: currentYear - 1, month: 3, scrollTop: 200 }
+    const first = mount(RecordListPage)
+    await flushPromises()
+    expect(first.vm.selectedMonth).toBe(3)
+    expect(mockListViewHolder.state).toBeNull() // 读取即清除
+    first.unmount()
+
+    getRecords.mockClear()
+    scrollToSpy.mockClear()
+    rafSpy.mockClear()
+
+    const second = mount(RecordListPage) // 底栏重新进入账单页
+    await flushPromises()
+    expect(second.vm.selectedYear).toBe(currentYear)
+    expect(second.vm.selectedMonth).toBe(currentMonth)
+    expect(getRecords).toHaveBeenCalledTimes(1)
+    expect(getRecords.mock.calls[0][0].start_date).toBe(monthRange(currentYear, currentMonth).start)
+    expect(rafSpy).not.toHaveBeenCalled()
+    expect(scrollToSpy).not.toHaveBeenCalled()
+
+    vi.advanceTimersByTime(1000) // 默认路径的 filters 重写与 watch 同参去重 → 仍一次
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1)
+    second.unmount()
+  })
+
+  it('用例4: goToDetail 快照字段完整（year/month/scrollTop）；仅该入口保存现场', async () => {
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    expect(mockConsumeListView).toHaveBeenCalledTimes(1) // 挂载时消费一次
+    expect(mockRememberListView).not.toHaveBeenCalled()
+
+    wrapper.vm.selectMonth(6)
+    await nextTick()
+    setScrollY(123)
+    wrapper.vm.goToDetail(clickEvent, 7)
+
+    expect(mockRememberListView).toHaveBeenCalledTimes(1)
+    expect(mockRememberListView).toHaveBeenCalledWith({
+      year: currentYear,
+      month: 6,
+      scrollTop: 123,
+    })
+    expect(mockListViewHolder.state).toEqual({ year: currentYear, month: 6, scrollTop: 123 })
+
+    // 不用 onBeforeUnmount：离开页面（切底栏/跳记一笔）不会残留现场
+    wrapper.unmount()
+    expect(mockRememberListView).toHaveBeenCalledTimes(1)
+  })
+
+  it('边界: 现场月份数据已被清空 → 恢复后显示既有空态卡片且不报错', async () => {
+    mockFilters.start_date = monthRange(currentYear, 3).start
+    mockFilters.end_date = monthRange(currentYear, 3).end
+    mockListViewHolder.state = { year: currentYear, month: 3, scrollTop: 40 }
+    getRecords.mockResolvedValue(pageResult([], 1, 1))
+
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+
+    expect(wrapper.vm.selectedMonth).toBe(3)
+    expect(wrapper.vm.records).toEqual([])
+    expect(wrapper.vm.loading).toBe(false)
+    expect(wrapper.find('.empty-state-wrapper').exists()).toBe(true)
+    expect(wrapper.text()).toContain('暂无账单')
+    wrapper.unmount()
   })
 })
