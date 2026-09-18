@@ -133,7 +133,7 @@
         </div>
       </div>
 
-      <!-- Page Content - overflow-x:hidden clips scale(1.1) without affecting sticky top bar -->
+      <!-- Page Content - overflow-x:hidden clips zoom(1.1) without affecting sticky top bar -->
       <div class="content-overflow" :class="{ 'content-overflow--locked': isLoginPage }">
         <div class="content-wrapper" :class="{ 'content-wrapper--bare': isLoginPage }">
           <router-view v-slot="{ Component, route }">
@@ -417,7 +417,7 @@ onMounted(() => {
   position: relative;
 }
 
-/* Overflow container: clips horizontal overflow from scale(1.1) on wide screens */
+/* Overflow container: clips horizontal overflow from zoom(1.1) on wide screens */
 .content-overflow {
   overflow-x: hidden;
 }
@@ -535,12 +535,15 @@ onMounted(() => {
   }
 }
 
-/* Wide screen 110% scaling */
+/* Wide screen 110% scaling
+   用 zoom 实现缩放：zoom 参与布局计算，scrollHeight 真实，
+   修复宽屏进入页面后首次向下滚动卡住（v1.4.1 需求四 / 决策 D3）。
+   zoom 以左上角为原点等比放大，视觉与改前等比一致。 */
 @media (min-width: 960px) {
   .content-wrapper {
-    transform: scale(1.1);
-    transform-origin: top center;
-    padding-bottom: calc(100px * 1.1);
+    zoom: 1.1;
+    /* padding-bottom 不再需要乘 1.1：zoom 会把 padding 一并计入布局 */
+    padding-bottom: 100px;
   }
 }
 </style>
