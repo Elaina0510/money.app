@@ -10,7 +10,7 @@
 - [x] [M1 - 登录页沉浸式改造](m1-login-immersive.md) —— 需求一 ✅ 完成（commit beef8a7；手工验收 5 项待抽检）
 - [x] [M2 - 宽屏首次滚动卡顿修复](m2-desktop-scroll-fix.md) —— 需求四 ✅ 完成（commit 2cb0c77；手工验收 8 项待抽检；npm test 门槛项待 M4 收敛后终验复核）
 - [x] [M3 - 账单页年份切换（含最早年份接口）](m3-record-year-switch.md) —— 需求二 ✅ 完成（commit 5532673；手工验收 5 项待抽检；mypy 门槛项见备注）
-- [ ] [M4 - 账单页请求合并与筛选精简](m4-record-filter-dedup.md) —— 需求七 + 需求八
+- [x] [M4 - 账单页请求合并与筛选精简](m4-record-filter-dedup.md) —— 需求七 + 需求八 ✅ 完成（commit acba4f0；手工验收 5 项待抽检；连带收敛 M2 挂账的 3 例失败与仓库级 lint）
 - [ ] [M5 - 账单详情返回状态记忆](m5-record-state-restore.md) —— 需求三
 - [x] [M6 - 预算管理迁移至统计页](m6-budget-to-stats.md) —— 需求五 ✅ 完成（commit 2c8b125；手工验收 6 项待抽检）
 - [ ] [M7 - 设置页三个管理区块改二级页面](m7-settings-subpages.md) —— 需求六
@@ -54,12 +54,12 @@
 | M1 - 登录页沉浸式改造 | 32 | 27 | 84%（余 5 项均为手工验收） |
 | M2 - 宽屏首次滚动卡顿修复 | 20 | 11 | 55%（余 9 项：8 手工 + 1 门槛待终验） |
 | M3 - 账单页年份切换 | 36 | 30 | 83%（余 6 项：5 手工 + mypy 门槛见备注） |
-| M4 - 账单页请求合并与筛选精简 | 38 | 0 | 0% |
+| M4 - 账单页请求合并与筛选精简 | 38 | 33 | 87%（余 5 项均为手工验收） |
 | M5 - 账单详情返回状态记忆 | 28 | 0 | 0% |
 | M6 - 预算管理迁移至统计页 | 56 | 50 | 89%（余 6 项均为手工验收） |
 | M7 - 设置页三个管理区块改二级页面 | 48 | 0 | 0% |
 | M8 - 快速记账日期/时间布局与时间弹层动画 | 39 | 33 | 85%（余 6 项均为手工验收） |
-| **合计** | **297** | **151** | **51%** |
+| **合计** | **297** | **184** | **62%** |
 
 ## 验收对照（需求 → 模块）
 
@@ -92,7 +92,7 @@
 | M1 | — | 89/89（AppLayout 16/16，新增 6 例） | lint pass / build pass | 5 项待抽检 |
 | M2 | — | 模块 27/27（全量 119/122，3 失败均在 M4 在途文件） | lint/build：M2 文件 0 问题 / pass（仓库级 lint 失败源于 M4 在途） | 8 项待抽检 + 1 门槛待终验 |
 | M3 | 150/150（新增 5 例） | 89/89（新增 5 例） | lint pass / build pass；mypy 见备注 | 5 项待抽检 |
-| M4 | — | | | |
+| M4 | — | 122/122 全绿（M4 相关 25 例；收敛 M2 挂账 3 例） | lint pass（0 error，2 既有 warning）/ build pass | 5 项待抽检 |
 | M5 | — | | | |
 | M6 | 150/150（新增用例含 year-summary 四件套） | 100/100 | lint pass / build pass；ruff 零告警（CI 口径） | 6 项待抽检 |
 | M7 | — | | | |
@@ -125,6 +125,13 @@
 - [ ] 宽屏行为同步符合新范围规则
 - [ ] 接口失败场景（可 mock）：账单页核心功能不受阻塞
 
+### M4 - 账单页请求合并与筛选精简
+- [ ] 点击任意月份，DevTools Network 恰有一次 `/api/records` 请求
+- [ ] 切换月份期间列表保留、顶部细进度条一闪，无整块"加载中↔内容"闪没
+- [ ] 筛选区只剩开始/结束两个日期控件，布局无贴挤
+- [ ] 修改日期筛选同样只触发一次请求
+- [ ] 上拉/加载更多分页追加正常，不重复首屏数据
+
 ### M6 - 预算管理迁移至统计页
 - [ ] 设置页不再出现任何预算相关内容
 - [ ] 统计页预算区块：查看、新增、编辑、删除全流程可用，功能与迁移前等价
@@ -154,3 +161,4 @@
 - M6 notes：① 统计页「删除入口」为任务文件 §3.2 明文条目，而 v1.4 SettingsPage 实际无删除按钮——子 Agent 以既有 ConfirmDialog + deleteBudget API 补齐，无新增依赖，主 Agent 已核对任务文件原文，认定有依据非功能漂移；② 概览卡「双 ¥」既有瑕疵按搬移原则原样保留；③ loadBudgets 错误分支按设计 §6.2.1 只 console.error，与旧 SettingsPage 行为不同属设计既定；④ StatisticsPage onMounted 补 loadCategories()（预算行图标依赖）。
 - mypy 门槛裁定依据（M6 复核）：v1.4 基线 `mypy app` 即 107 errors/16 files，CI 配置为 `mypy app || true` 非阻断。§6.2 终验的 mypy 项按「相对基线零新增」口径执行，全量清零超出一版本范围且触红线，列入待人工裁定项。
 - M2 notes：① AppLayout.vue :136/:420 两处注释文本 scale(1.1)→zoom(1.1) 同步（纯注释，略超「仅媒体查询」约束，已评估保留）；② 任务文件原 §4「npm test 无新增用例」与本任务书「必须补测试」冲突，取任务书，新增 §3.1 小节记录 M2-T1~T11 自动化用例（原 6 条真机手工条目原文未动）；③ M8 关联核查：v-dialog teleport 至 body 下 .v-overlay-container，不落入 zoom 上下文，弹层无需适配。
+- M4 notes：① 设计未逐字列出但必要的 3 处收口（batchDelete 后 `search({force:true})`、加载更多按钮 `:loading` 改绑 refreshing、catch 中 `append` 时回退 pageNum）——主 Agent 认可，属去重机制自洽性修复；② `lastQueryKey` 置于 `<script setup>` 顶层（每挂载实例独立）符合设计参考代码；③ 「翻年份本身 0 请求」经主 Agent 核对设计 §3.2：箭头只改年份上下文并清空选中月，数据加载由点击月份芯片 `selectMonth` 驱动——设计既定，非回归；④ RecordListPage.vue 存在一处 M3 遗留 prettier 单行差异（prevYear v-btn 属性换行），test/lint/build 均不受阻，留终验统一 `npm run format` 与否人工定夺。
