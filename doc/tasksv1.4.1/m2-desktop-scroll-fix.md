@@ -49,5 +49,5 @@
 
 ## 4. 质量门槛
 
-- [ ] `cd frontend && npm test` 通过（无新增用例，防回归）
+- [x] `cd frontend && npm test` 通过（无新增用例，防回归）（终验主 Agent 代勾：并行 M4 收敛后全量 149/149 绿）
 - [x] `npm run build` 构建无报错

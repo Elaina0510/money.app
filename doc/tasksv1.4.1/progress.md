@@ -8,7 +8,7 @@
 ## 模块清单
 
 - [x] [M1 - 登录页沉浸式改造](m1-login-immersive.md) —— 需求一 ✅ 完成（commit beef8a7；手工验收 5 项待抽检）
-- [x] [M2 - 宽屏首次滚动卡顿修复](m2-desktop-scroll-fix.md) —— 需求四 ✅ 完成（commit 2cb0c77；手工验收 8 项待抽检；npm test 门槛项待 M4 收敛后终验复核）
+- [x] [M2 - 宽屏首次滚动卡顿修复](m2-desktop-scroll-fix.md) —— 需求四 ✅ 完成（commit 2cb0c77；手工验收 8 项待抽检；npm test 门槛已由主 Agent 终验代勾）
 - [x] [M3 - 账单页年份切换（含最早年份接口）](m3-record-year-switch.md) —— 需求二 ✅ 完成（commit 5532673；手工验收 5 项待抽检；mypy 门槛项见备注）
 - [x] [M4 - 账单页请求合并与筛选精简](m4-record-filter-dedup.md) —— 需求七 + 需求八 ✅ 完成（commit acba4f0；手工验收 5 项待抽检；连带收敛 M2 挂账的 3 例失败与仓库级 lint）
 - [x] [M5 - 账单详情返回状态记忆](m5-record-state-restore.md) —— 需求三 ✅ 完成（commit d244803；手工验收 3 项待抽检）
@@ -52,14 +52,14 @@
 | 模块 | 总任务数 | 已完成 | 进度 |
 |------|---------|--------|------|
 | M1 - 登录页沉浸式改造 | 32 | 27 | 84%（余 5 项均为手工验收） |
-| M2 - 宽屏首次滚动卡顿修复 | 20 | 11 | 55%（余 9 项：8 手工 + 1 门槛待终验） |
+| M2 - 宽屏首次滚动卡顿修复 | 20 | 12 | 60%（余 8 项均为手工验收；npm test 门槛终验代勾） |
 | M3 - 账单页年份切换 | 36 | 30 | 83%（余 6 项：5 手工 + mypy 门槛见备注） |
 | M4 - 账单页请求合并与筛选精简 | 38 | 33 | 87%（余 5 项均为手工验收） |
 | M5 - 账单详情返回状态记忆 | 28 | 25 | 89%（余 3 项均为手工验收） |
 | M6 - 预算管理迁移至统计页 | 56 | 50 | 89%（余 6 项均为手工验收） |
 | M7 - 设置页三个管理区块改二级页面 | 48 | 41 | 85%（余 7 项均为手工验收） |
 | M8 - 快速记账日期/时间布局与时间弹层动画 | 39 | 33 | 85%（余 6 项均为手工验收） |
-| **合计** | **297** | **250** | **84%**（余 47 项全部为手工验收/门槛复核类） |
+| **合计** | **297** | **251** | **84%**（余 46 项全部为手工验收类） |
 
 ## 验收对照（需求 → 模块）
 
@@ -90,7 +90,7 @@
 | 模块 | 后端 pytest | 前端 vitest | lint/build | 手工验收 |
 |------|------------|-------------|------------|----------|
 | M1 | — | 89/89（AppLayout 16/16，新增 6 例） | lint pass / build pass | 5 项待抽检 |
-| M2 | — | 模块 27/27（全量 119/122，3 失败均在 M4 在途文件） | lint/build：M2 文件 0 问题 / pass（仓库级 lint 失败源于 M4 在途） | 8 项待抽检 + 1 门槛待终验 |
+| M2 | — | 模块 27/27（全量 119/122，3 失败均在 M4 在途文件） | lint/build：M2 文件 0 问题 / pass | 8 项待抽检；npm test 门槛终验已代勾 |
 | M3 | 150/150（新增 5 例） | 89/89（新增 5 例） | lint pass / build pass；mypy 见备注 | 5 项待抽检 |
 | M4 | — | 122/122 全绿（M4 相关 25 例；收敛 M2 挂账 3 例） | lint pass（0 error，2 既有 warning）/ build pass | 5 项待抽检 |
 | M5 | — | 149/149 全绿（M5 新增 12 例） | lint pass（0 error）/ build pass | 3 项待抽检 |
@@ -116,7 +116,7 @@
 - [ ] 回归：顶栏 sticky、底部渐变遮罩位置、详情页圆形展开/收起动画、110% 视觉与改前一致
 - [ ] 窄屏（<960px）不出现横向滚动条
 - [ ] 反复切换各页面多次，每次进入首次下滚均顺畅
-- [ ] （门槛复核）`cd frontend && npm test` 通过——M2 完成时全量 3 例失败位于并行 M4 文件，待 M4 收敛/终验复核后代勾
+- [x] ~~（门槛复核）`cd frontend && npm test` 通过~~ ✅ 终验主 Agent 代勾：M4 收敛后全量 149/149 绿（M2 完成时 3 例失败位于并行 M4 文件）
 
 ### M3 - 账单页年份切换
 - [ ] 竖屏可逐年翻到最早有记录的年份，查看该年 1–12 月账单
@@ -164,7 +164,23 @@
 
 ## 阻塞清单
 
-（暂无）
+（暂无——8 个模块均一次通过，无 blocked、无重试）
+
+## 终验记录（主 Agent，2026-09-19）
+
+| 命令 | 结果 |
+|------|------|
+| `cd backend && python -m pytest tests/` | ✅ 150 passed（22 warnings，均为缓存目录权限提示） |
+| `cd backend && python -m mypy app/ --ignore-missing-imports` | ⚠️ HEAD 107 errors/16 files；基线 ed41d89 实测（临时 worktree）104 errors/16 files → **净增 3 条**，与 M6 自报的 3 条吻合（budget_service.py union-attr×2 + budgets.py 新端点缺 return annotation×1，均与同文件既有写法同类）。全量清零基线问题超红线，待人工裁定（m3 任务文件该项保持未勾） |
+| `cd backend && python -m ruff check app/ tests/` | ✅ All checks passed! |
+| `cd frontend && npm test` | ✅ 10 files / 149 tests passed |
+| `cd frontend && npm run lint` | ✅ 0 errors（2 条既有 CsvMappingDialog warning） |
+| `cd frontend && npm run build` | ✅ 构建成功（仅 chunk size 提示） |
+
+- 无新增前后端依赖；数据模型/数据库零变更；`GET /api/records` 响应结构不变（终验复核）。
+- `frontend/dist` 由终验统一重建并提交（b2861fa）。
+- M2 任务文件「npm test」门槛项由主 Agent 代勾（全量 149/149 绿）。
+- 手工验收共 46 项，全部列于「待人工抽检清单」，未以任何自动化结果替代打勾。
 
 ## 备注
 
