@@ -11,7 +11,7 @@
 - [x] [M2 - 宽屏首次滚动卡顿修复](m2-desktop-scroll-fix.md) —— 需求四 ✅ 完成（commit 2cb0c77；手工验收 8 项待抽检；npm test 门槛项待 M4 收敛后终验复核）
 - [x] [M3 - 账单页年份切换（含最早年份接口）](m3-record-year-switch.md) —— 需求二 ✅ 完成（commit 5532673；手工验收 5 项待抽检；mypy 门槛项见备注）
 - [x] [M4 - 账单页请求合并与筛选精简](m4-record-filter-dedup.md) —— 需求七 + 需求八 ✅ 完成（commit acba4f0；手工验收 5 项待抽检；连带收敛 M2 挂账的 3 例失败与仓库级 lint）
-- [ ] [M5 - 账单详情返回状态记忆](m5-record-state-restore.md) —— 需求三
+- [x] [M5 - 账单详情返回状态记忆](m5-record-state-restore.md) —— 需求三 ✅ 完成（commit d244803；手工验收 3 项待抽检）
 - [x] [M6 - 预算管理迁移至统计页](m6-budget-to-stats.md) —— 需求五 ✅ 完成（commit 2c8b125；手工验收 6 项待抽检）
 - [x] [M7 - 设置页三个管理区块改二级页面](m7-settings-subpages.md) —— 需求六 ✅ 完成（commit 51d67da；手工验收 7 项待抽检）
 - [x] [M8 - 快速记账日期/时间布局与时间弹层动画](m8-datetime-picker.md) —— 需求九 ✅ 完成（commit b60e0e9；手工验收 6 项待抽检）
@@ -55,11 +55,11 @@
 | M2 - 宽屏首次滚动卡顿修复 | 20 | 11 | 55%（余 9 项：8 手工 + 1 门槛待终验） |
 | M3 - 账单页年份切换 | 36 | 30 | 83%（余 6 项：5 手工 + mypy 门槛见备注） |
 | M4 - 账单页请求合并与筛选精简 | 38 | 33 | 87%（余 5 项均为手工验收） |
-| M5 - 账单详情返回状态记忆 | 28 | 0 | 0% |
+| M5 - 账单详情返回状态记忆 | 28 | 25 | 89%（余 3 项均为手工验收） |
 | M6 - 预算管理迁移至统计页 | 56 | 50 | 89%（余 6 项均为手工验收） |
 | M7 - 设置页三个管理区块改二级页面 | 48 | 41 | 85%（余 7 项均为手工验收） |
 | M8 - 快速记账日期/时间布局与时间弹层动画 | 39 | 33 | 85%（余 6 项均为手工验收） |
-| **合计** | **297** | **225** | **76%** |
+| **合计** | **297** | **250** | **84%**（余 47 项全部为手工验收/门槛复核类） |
 
 ## 验收对照（需求 → 模块）
 
@@ -93,7 +93,7 @@
 | M2 | — | 模块 27/27（全量 119/122，3 失败均在 M4 在途文件） | lint/build：M2 文件 0 问题 / pass（仓库级 lint 失败源于 M4 在途） | 8 项待抽检 + 1 门槛待终验 |
 | M3 | 150/150（新增 5 例） | 89/89（新增 5 例） | lint pass / build pass；mypy 见备注 | 5 项待抽检 |
 | M4 | — | 122/122 全绿（M4 相关 25 例；收敛 M2 挂账 3 例） | lint pass（0 error，2 既有 warning）/ build pass | 5 项待抽检 |
-| M5 | — | | | |
+| M5 | — | 149/149 全绿（M5 新增 12 例） | lint pass（0 error）/ build pass | 3 项待抽检 |
 | M6 | 150/150（新增用例含 year-summary 四件套） | 100/100 | lint pass / build pass；ruff 零告警（CI 口径） | 6 项待抽检 |
 | M7 | — | 137/137 全绿（新增 15 例，含 36 标识符零残留 grep 断言） | lint pass / build pass | 7 项待抽检 |
 | M8 | — | 78/78 | pass/pass | 6 项待抽检 |
@@ -131,6 +131,11 @@
 - [ ] 筛选区只剩开始/结束两个日期控件，布局无贴挤
 - [ ] 修改日期筛选同样只触发一次请求
 - [ ] 上拉/加载更多分页追加正常，不重复首屏数据
+
+### M5 - 账单详情返回状态记忆
+- [ ] 翻到 3 月、滚动到列表中部、点开任一详情、返回：仍是 3 月、滚动位置不变、筛选条件不变、无回跳当前月的闪动
+- [ ] 返回后再点底栏「账单」重新进入：定位当前月（现场已被消费）
+- [ ] 登录 → 登出 → 换账号登录 → 进入账单页：默认当前月，无串号
 
 ### M6 - 预算管理迁移至统计页
 - [ ] 设置页不再出现任何预算相关内容
@@ -172,3 +177,4 @@
 - M2 notes：① AppLayout.vue :136/:420 两处注释文本 scale(1.1)→zoom(1.1) 同步（纯注释，略超「仅媒体查询」约束，已评估保留）；② 任务文件原 §4「npm test 无新增用例」与本任务书「必须补测试」冲突，取任务书，新增 §3.1 小节记录 M2-T1~T11 自动化用例（原 6 条真机手工条目原文未动）；③ M8 关联核查：v-dialog teleport 至 body 下 .v-overlay-container，不落入 zoom 上下文，弹层无需适配。
 - M4 notes：① 设计未逐字列出但必要的 3 处收口（batchDelete 后 `search({force:true})`、加载更多按钮 `:loading` 改绑 refreshing、catch 中 `append` 时回退 pageNum）——主 Agent 认可，属去重机制自洽性修复；② `lastQueryKey` 置于 `<script setup>` 顶层（每挂载实例独立）符合设计参考代码；③ 「翻年份本身 0 请求」经主 Agent 核对设计 §3.2：箭头只改年份上下文并清空选中月，数据加载由点击月份芯片 `selectMonth` 驱动——设计既定，非回归；④ RecordListPage.vue 存在一处 M3 遗留 prettier 单行差异（prevYear v-btn 属性换行），test/lint/build 均不受阻，留终验统一 `npm run format` 与否人工定夺。
 - M7 notes：① getRecords import 随 confirmDeleteCategory 迁入分类二级页（SettingsPage 保留会触发 no-unused-vars，任务书允许「如仍使用则保留」，实际未使用）；② 标签/快速记账二级页 onMounted 补 fetchCategories()/fetchTags()（刷新直达时弹窗数据源自足，与迁移前等价）；③ 快速记账数量 ref 命名 quickTemplateCount 以保证 grep 干净，口径同迁移前列表条目数；④ 宽屏侧栏「设置」精确匹配、/settings/* 不高亮——与 /history 现状一致，设计 §7.4 既定边界。
+- M5 notes：① 设计伪码裸 `requestAnimationFrame` 改 `window.requestAnimationFrame`（eslint globals 白名单未含裸全局，no-undef；等价改写，未动 eslint 配置）；② store 额外导出 listView ref 本身（任务只要求三函数），供测试观测，不改行为；③ 恢复点只赋 selectedYear/selectedMonth 后直接 search()，未写 filters（红线遵守）；保存点仅挂 goToDetail；④ 源码变异探针被权限系统拦截未执行，敏感性以「恢复态 vs 默认态」差异断言保证。
