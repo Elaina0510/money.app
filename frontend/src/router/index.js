@@ -54,6 +54,24 @@ const routes = [
     meta: { title: '设置', icon: 'mdi-cog-outline' },
   },
   {
+    path: '/settings/categories',
+    name: 'SettingsCategories',
+    component: () => import('@/pages/SettingsCategoriesPage.vue'),
+    meta: { title: '分类管理' },
+  },
+  {
+    path: '/settings/tags',
+    name: 'SettingsTags',
+    component: () => import('@/pages/SettingsTagsPage.vue'),
+    meta: { title: '标签管理' },
+  },
+  {
+    path: '/settings/quick-templates',
+    name: 'SettingsQuickTemplates',
+    component: () => import('@/pages/SettingsQuickTemplatesPage.vue'),
+    meta: { title: '快速记账' },
+  },
+  {
     path: '/history',
     name: 'History',
     component: () => import('@/pages/HistoryPage.vue'),
