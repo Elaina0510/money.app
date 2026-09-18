@@ -5,44 +5,14 @@
       <p class="text-caption text-grey">共 {{ totalCount }} 条记录</p>
     </div>
 
-    <!-- Filter Bar -->
+    <!-- Filter Bar：需求八——仅保留日期两项，类型/分类筛选入口已下线（store 字段与后端参数保留） -->
     <v-card class="pa-4 mb-3 filter-card" rounded="xl">
       <v-row dense>
-        <v-col cols="6" sm="3">
+        <v-col cols="6">
           <DatePickerPopover v-model="filters.start_date" label="开始日期" />
         </v-col>
-        <v-col cols="6" sm="3">
+        <v-col cols="6">
           <DatePickerPopover v-model="filters.end_date" label="结束日期" />
-        </v-col>
-        <v-col cols="6" sm="3">
-          <v-select
-            v-model="filters.type"
-            :items="typeOptions"
-            label="类型"
-            hide-details
-            density="compact"
-            variant="outlined"
-            clearable
-            rounded="lg"
-            bg-color="surface"
-            prepend-inner-icon="mdi-swap-vertical"
-          />
-        </v-col>
-        <v-col cols="6" sm="3">
-          <v-select
-            v-model="filters.category_id"
-            :items="categoryOptions"
-            item-title="name"
-            item-value="id"
-            label="分类"
-            hide-details
-            density="compact"
-            variant="outlined"
-            clearable
-            rounded="lg"
-            bg-color="surface"
-            prepend-inner-icon="mdi-shape-outline"
-          />
         </v-col>
       </v-row>
     </v-card>
@@ -107,8 +77,18 @@
       </v-card>
     </div>
 
-    <!-- Loading State -->
-    <div v-if="loading" class="text-center pa-8">
+    <!-- Refreshing：已有列表时仅顶部细进度条，列表内容不闪没 -->
+    <v-progress-linear
+      v-if="refreshing"
+      indeterminate
+      color="primary"
+      height="2"
+      rounded
+      class="mb-2"
+    />
+
+    <!-- Loading State：仅首屏（无数据）整块 spinner -->
+    <div v-if="loading && records.length === 0" class="text-center pa-8">
       <v-progress-circular indeterminate color="primary" size="32" />
     </div>
 
@@ -162,7 +142,7 @@
 
       <!-- Load More -->
       <div v-if="hasMore" class="text-center pa-4">
-        <v-btn variant="tonal" color="primary" :loading="loading" @click="loadMore" rounded="xl">
+        <v-btn variant="tonal" color="primary" :loading="refreshing" rounded="xl" @click="loadMore">
           加载更多
         </v-btn>
       </div>
@@ -181,10 +161,9 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { getRecords, getEarliestYear } from '@/api/records'
-import { getCategories } from '@/api/categories'
 import { useRecordsStore } from '@/stores/useRecordsStore'
 import { useAppStore } from '@/stores/useAppStore'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
@@ -195,31 +174,19 @@ const recordsStore = useRecordsStore()
 const appStore = useAppStore()
 
 const records = ref([])
-const categories = ref([])
-const loading = ref(false)
+const loading = ref(false) // 首屏：无列表时的整块 spinner
+const refreshing = ref(false) // 已有列表时的后台刷新：仅顶部细进度条
 const selected = ref([])
 const showDeleteDialog = ref(false)
 const hasMore = ref(false)
 const totalCount = ref(0)
+const pageNum = ref(1)
+
+// 同参数去重键：一次筛选变化被显式调用与 watch 防抖重复触发时只发一次请求
+let lastQueryKey = ''
 
 // Use store's filters so they persist across page navigation
 const filters = recordsStore.filters
-
-const typeOptions = [
-  { title: '全部', value: '' },
-  { title: '支出', value: 'expense' },
-  { title: '收入', value: 'income' },
-]
-
-const categoryOptions = computed(() => {
-  const list = [{ name: '全部分类', id: null }]
-  if (filters.type) {
-    // Filter categories by selected type
-    const filtered = categories.value.filter((c) => c.type === filters.type)
-    return list.concat(filtered)
-  }
-  return list.concat(categories.value)
-})
 
 const selectedMonth = ref(new Date().getMonth() + 1)
 const selectedYear = ref(new Date().getFullYear())
@@ -237,6 +204,7 @@ async function loadEarliestYear() {
   }
 }
 
+// 只写日期区间：请求由防抖 watch 统一驱动（同参再被去重兜底），避免一次点击两次请求
 function selectMonth(month) {
   selectedMonth.value = month
   const start = `${selectedYear.value}-${String(month).padStart(2, '0')}-01`
@@ -244,7 +212,6 @@ function selectMonth(month) {
   const end = `${selectedYear.value}-${String(month).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
   filters.start_date = start
   filters.end_date = end
-  search()
 }
 
 function prevYear() {
@@ -268,46 +235,54 @@ function goToDetail(event, id) {
   router.push(`/detail/${id}`)
 }
 
-async function search() {
-  loading.value = true
+// 请求参数：页码 + 页大小 + 两个日期（需求八：不再携带 type/category_id）
+function buildQuery() {
+  const params = { page: pageNum.value, page_size: 20 }
+  if (filters.start_date) params.start_date = filters.start_date
+  if (filters.end_date) params.end_date = filters.end_date
+  return params
+}
+
+async function search({ append = false, force = false } = {}) {
+  if (!append) pageNum.value = 1
+  const params = buildQuery()
+  const key = JSON.stringify(params) // 去重键含页码，避免加载更多被同参吞掉
+  if (!force && key === lastQueryKey) return // 去重：显式调用与 watch 防抖同参只发一次
+  lastQueryKey = key
+  // 加载态分流：无列表→整块 spinner；已有列表→仅顶部细进度条（消除整块闪没）
+  if (append || records.value.length > 0) {
+    refreshing.value = true
+  } else {
+    loading.value = true
+  }
   try {
-    const params = { page: 1, page_size: 20 }
-    if (filters.start_date) params.start_date = filters.start_date
-    if (filters.end_date) params.end_date = filters.end_date
-    if (filters.type) params.type = filters.type
-    if (filters.category_id) params.category_id = filters.category_id
     const result = await getRecords(params)
-    records.value = result.items
+    records.value = append ? [...records.value, ...result.items] : result.items
     totalCount.value = result.total
     hasMore.value = result.page < result.total_pages
   } catch (e) {
     console.error('Search error:', e)
+    lastQueryKey = '' // 失败清空去重键，否则同参重试会被去重吞掉
+    if (append) pageNum.value -= 1 // 追加失败回退页码，避免下次加载更多跳页
   } finally {
     loading.value = false
+    refreshing.value = false
   }
 }
 
+// 加载更多：页码递增后以 append + force 追加，不参与去重跳过
 async function loadMore() {
-  await search()
+  pageNum.value += 1
+  await search({ append: true, force: true })
 }
 
-// 筛选条件变化时自动触发搜索（防抖 300ms）
+// 日期筛选变化时自动触发搜索（防抖 300ms）；依赖数组仅两个日期字段，不监听整个 filters
 let searchDebounceTimer = null
 watch(
-  () => [filters.start_date, filters.end_date, filters.type, filters.category_id],
+  () => [filters.start_date, filters.end_date],
   () => {
     clearTimeout(searchDebounceTimer)
-    searchDebounceTimer = setTimeout(() => {
-      search()
-    }, 300)
-  }
-)
-
-// When type changes, clear selected category
-watch(
-  () => filters.type,
-  () => {
-    filters.category_id = null
+    searchDebounceTimer = setTimeout(() => search(), 300)
   }
 )
 
@@ -316,20 +291,17 @@ async function handleBatchDelete() {
     await recordsStore.batchDelete(selected.value)
     selected.value = []
     showDeleteDialog.value = false
-    await search()
+    await search({ force: true }) // 服务端数据已变：绕过同参去重强制重查
   } catch {
     // Toast shown by store
   }
 }
 
 onMounted(async () => {
-  loadEarliestYear() // 与下方加载并行发起；内部已兜底，失败不阻塞账单浏览
-  try {
-    categories.value = await getCategories()
-    selectMonth(new Date().getMonth() + 1)
-  } catch (e) {
-    console.error('List load error:', e)
-  }
+  loadEarliestYear() // 与下方首屏加载并行发起；内部已兜底，失败不阻塞账单浏览
+  selectMonth(new Date().getMonth() + 1)
+  // 首屏显式一次：filters 恰好同值时 watch 不触发；与 watch 的防抖调用同参 → 去重合并为一次请求
+  await search()
 })
 </script>
 

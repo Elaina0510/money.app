@@ -1,6 +1,17 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { mount, flushPromises } from '@vue/test-utils'
-import { nextTick } from 'vue'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
+import { nextTick, reactive } from 'vue'
+
+// 用例隔离：每个用例一份全新时钟（丢弃上一用例遗留的防抖定时器），
+// 并自动卸载组件（残留实例的 watch 停用，共享 filters 变化不会再排新定时器）
+enableAutoUnmount(afterEach)
+beforeEach(() => {
+  vi.useRealTimers()
+  vi.useFakeTimers()
+})
+afterEach(() => {
+  vi.useRealTimers()
+})
 
 // Mock vue-router
 const mockPush = vi.fn()
@@ -25,22 +36,20 @@ vi.mock('@/api/records', () => ({
   getEarliestYear: vi.fn().mockResolvedValue({ earliest_year: null }),
 }))
 
-vi.mock('@/api/categories', () => ({
-  getCategories: vi.fn().mockResolvedValue([
-    { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food' },
-    { id: 2, name: '工资', type: 'income', icon: 'mdi-cash' },
-  ]),
-}))
+// store 的 filters 在真实实现中是响应式且跨挂载保留的对象：这里同样用 reactive 模拟
+const mockFilters = reactive({
+  start_date: '',
+  end_date: '',
+  type: '',
+  category_id: null,
+  tag_id: null,
+  keyword: '',
+})
 
 // Mock stores
 vi.mock('@/stores/useRecordsStore', () => ({
   useRecordsStore: () => ({
-    filters: {
-      start_date: '',
-      end_date: '',
-      type: '',
-      category_id: null,
-    },
+    filters: mockFilters,
     batchDelete: vi.fn().mockResolvedValue({}),
   }),
 }))
@@ -352,5 +361,259 @@ describe('RecordListPage - 年份切换', () => {
     expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(0)
     expect(getRecords).toHaveBeenCalled()
     expect(wrapper.vm.records).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// M4 需求七（一次点击一次请求：防抖 + 同参去重 + 加载态分流）
+//    需求八（筛选仅日期：不再渲染类型/分类控件、请求不携带 type/category_id）
+// ---------------------------------------------------------------------------
+const currentMonth = new Date().getMonth() + 1
+
+function pad(n) {
+  return String(n).padStart(2, '0')
+}
+
+// 与 selectMonth 一致的月份区间，用于断言 filters 写入与请求参数
+function monthRange(year, month) {
+  const lastDay = new Date(year, month, 0).getDate()
+  return {
+    start: `${year}-${pad(month)}-01`,
+    end: `${year}-${pad(month)}-${pad(lastDay)}`,
+  }
+}
+
+function makeRecord(id) {
+  return {
+    id,
+    type: 'expense',
+    amount: 10 + id,
+    category_icon: 'mdi-food',
+    category_name: '餐饮',
+    consume_time: '2026-06-06 12:00',
+  }
+}
+
+function pageResult(items, page, totalPages) {
+  return { items, total: items.length * totalPages, page, total_pages: totalPages }
+}
+
+describe('RecordListPage - 请求合并与筛选精简', () => {
+  beforeEach(() => {
+    // 清掉上个用例遗留的 once 队列，避免实现泄漏（fake timers 由文件顶层统一安装）
+    getRecords.mockReset()
+    getEarliestYear.mockReset()
+    getRecords.mockResolvedValue(pageResult([], 1, 1))
+    getEarliestYear.mockResolvedValue({ earliest_year: null })
+    mockFilters.start_date = ''
+    mockFilters.end_date = ''
+    mockFilters.type = ''
+    mockFilters.category_id = null
+    mockFilters.tag_id = null
+    mockFilters.keyword = ''
+    setViewport(375)
+  })
+
+  it('用例1: selectMonth 只写日期，推进 300ms 防抖后恰好新增一次请求', async () => {
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1) // 首屏显式 search
+
+    wrapper.vm.selectMonth(3)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1) // 未到防抖时间不发请求
+
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(2) // 恰一次
+
+    const params = getRecords.mock.calls[1][0]
+    expect(params.start_date).toBe(monthRange(currentYear, 3).start)
+    expect(params.end_date).toBe(monthRange(currentYear, 3).end)
+    expect(params.page).toBe(1)
+
+    // 防抖窗口内连点两个月：只发最后一次
+    wrapper.vm.selectMonth(5)
+    await nextTick()
+    vi.advanceTimersByTime(150)
+    wrapper.vm.selectMonth(8)
+    await nextTick()
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(3)
+    expect(getRecords.mock.calls[2][0].start_date).toBe(monthRange(currentYear, 8).start)
+  })
+
+  it('用例1b: 已有列表时切月份走 refreshing——列表保留、顶部细进度条，无整块闪没', async () => {
+    getRecords.mockResolvedValue(pageResult([makeRecord(1), makeRecord(2)], 1, 1))
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    expect(wrapper.findAll('.record-card')).toHaveLength(2)
+    expect(wrapper.vm.loading).toBe(false)
+    expect(wrapper.vm.refreshing).toBe(false)
+
+    let resolvePending
+    getRecords.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolvePending = resolve
+        })
+    )
+    wrapper.vm.selectMonth(4)
+    await nextTick()
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+
+    // 请求在途：走后台刷新，列表仍在，不渲染首屏整块 spinner
+    expect(wrapper.vm.refreshing).toBe(true)
+    expect(wrapper.vm.loading).toBe(false)
+    expect(wrapper.findAll('.record-card')).toHaveLength(2)
+    expect(wrapper.find('v-progress-linear').exists()).toBe(true)
+    expect(wrapper.find('v-progress-circular').exists()).toBe(false)
+
+    resolvePending(pageResult([makeRecord(9)], 1, 1))
+    await flushPromises()
+    expect(wrapper.vm.refreshing).toBe(false)
+    expect(wrapper.vm.records.map((r) => r.id)).toEqual([9])
+  })
+
+  it('用例2: filters 与目标月区间相同（store 跨挂载残留）→ 显式 search 与 watch 同参去重，仅一次请求', async () => {
+    const { start, end } = monthRange(currentYear, currentMonth)
+    mockFilters.start_date = start
+    mockFilters.end_date = end
+
+    mount(RecordListPage)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1) // 值恰好相同 → watch 不触发，显式 search 兜底
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1)
+    expect(getRecords.mock.calls[0][0]).toMatchObject({ page: 1, start_date: start, end_date: end })
+  })
+
+  it('用例2b: filters 与目标月不同（首屏）→ 显式 search 与随后 watch 同参被去重，仍仅一次请求', async () => {
+    mount(RecordListPage)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1) // 显式 search
+
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1) // watch 同参 → 去重跳过
+
+    vi.advanceTimersByTime(1000)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1) // 无重复定时器残留
+  })
+
+  it('用例3: 修改 filters 两次且最终参数与上次相同 → 第二次不发请求', async () => {
+    mount(RecordListPage)
+    await flushPromises()
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1)
+
+    const queried = getRecords.mock.calls[0][0]
+    mockFilters.end_date = `${currentYear}-12-31` // 第 1 次修改
+    await nextTick()
+    mockFilters.end_date = queried.end_date // 第 2 次修改：回到上次已查询的参数
+    await nextTick()
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1)
+
+    // 对照：真正变化的参数会正常发出
+    mockFilters.start_date = `${currentYear}-01-01`
+    await nextTick()
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(2)
+  })
+
+  it('用例4: 筛选卡片不再渲染类型/分类控件，请求参数不含 type/category_id', async () => {
+    mockFilters.type = 'expense'
+    mockFilters.category_id = 7
+
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+
+    const filterCard = wrapper.find('.filter-card')
+    expect(filterCard.exists()).toBe(true)
+    expect(filterCard.findAll('v-select')).toHaveLength(0)
+    expect(filterCard.text()).not.toContain('类型')
+    expect(filterCard.text()).not.toContain('分类')
+    expect(filterCard.findAll('input, .v-field').length).toBeLessThanOrEqual(2)
+
+    const params = getRecords.mock.calls[0][0]
+    expect(Object.keys(params)).not.toContain('type')
+    expect(Object.keys(params)).not.toContain('category_id')
+    expect(Object.keys(params).sort()).toEqual(['end_date', 'page', 'page_size', 'start_date'])
+
+    // 残留 type/category_id 再变化也不触发请求（watch 依赖仅两个日期字段）
+    const calls = getRecords.mock.calls.length
+    mockFilters.type = 'income'
+    mockFilters.category_id = 2
+    await nextTick()
+    vi.advanceTimersByTime(300)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(calls)
+  })
+
+  it('用例5: loadMore 页码递增并以 append 追加，不整体替换', async () => {
+    getRecords
+      .mockResolvedValueOnce(pageResult([makeRecord(1), makeRecord(2)], 1, 2))
+      .mockResolvedValueOnce(pageResult([makeRecord(3), makeRecord(4)], 2, 2))
+
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    expect(getRecords.mock.calls[0][0].page).toBe(1)
+    expect(wrapper.vm.records).toHaveLength(2)
+    expect(wrapper.vm.hasMore).toBe(true)
+
+    await wrapper.vm.loadMore()
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(2)
+    expect(getRecords.mock.calls[1][0].page).toBe(2)
+    expect(wrapper.vm.records.map((r) => r.id)).toEqual([1, 2, 3, 4])
+    expect(wrapper.vm.hasMore).toBe(false)
+    expect(wrapper.vm.loading).toBe(false)
+    expect(wrapper.vm.refreshing).toBe(false)
+  })
+
+  it('用例5b: loadMore 失败回退页码，重试不跳页；失败后同参仍可重发', async () => {
+    getRecords.mockResolvedValueOnce(pageResult([makeRecord(1), makeRecord(2)], 1, 3))
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    expect(wrapper.vm.pageNum).toBe(1)
+
+    getRecords.mockRejectedValueOnce(new Error('网络异常'))
+    await wrapper.vm.loadMore()
+    await flushPromises()
+    expect(wrapper.vm.pageNum).toBe(1)
+    expect(wrapper.vm.records).toHaveLength(2) // 失败不清列表
+
+    getRecords.mockResolvedValueOnce(pageResult([makeRecord(3), makeRecord(4)], 2, 3))
+    await wrapper.vm.loadMore()
+    await flushPromises()
+    expect(getRecords.mock.calls[2][0].page).toBe(2)
+    expect(wrapper.vm.records.map((r) => r.id)).toEqual([1, 2, 3, 4])
+  })
+
+  it('用例6: 请求失败后清空去重键，同参再次调用可重发', async () => {
+    getRecords.mockRejectedValueOnce(new Error('网络异常'))
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.records).toEqual([])
+    expect(wrapper.vm.loading).toBe(false)
+
+    await wrapper.vm.search() // 同参重试：lastQueryKey 已在失败时清空
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(2)
+    expect(getRecords.mock.calls[1][0]).toEqual(getRecords.mock.calls[0][0])
+
+    // 成功之后同参再调用被去重
+    await wrapper.vm.search()
+    await flushPromises()
+    expect(getRecords).toHaveBeenCalledTimes(2)
   })
 })
