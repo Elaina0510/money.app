@@ -246,3 +246,95 @@ async def test_quick_templates(client, expense_category_id):
     assert len(data["data"]) == 1
     assert data["data"][0]["tag_id"] == tag_id
     assert data["data"][0]["amount"] == 25.0
+
+
+# ---------------------------------------------------------------------------
+# M3: GET /api/records/earliest-year — 账单页年份切换的最早记录年份接口
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_earliest_year_returns_min_year(client, expense_category_id):
+    """用例 1: 登录用户有 2023/2025 两年记录 → 返回 2023。"""
+    for year in (2025, 2023):
+        resp = await client.post(
+            "/api/records",
+            json={
+                "amount": 10.0,
+                "type": "expense",
+                "category_id": expense_category_id,
+                "consume_time": f"{year}-06-01 12:00",
+            },
+        )
+        assert resp.status_code == 200
+
+    resp = await client.get("/api/records/earliest-year")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 0
+    assert body["data"]["earliest_year"] == 2023
+
+
+@pytest.mark.asyncio
+async def test_earliest_year_null_when_no_records(client):
+    """用例 2: 无记录用户 → earliest_year 为 null。"""
+    resp = await client.get("/api/records/earliest-year")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 0
+    assert body["data"]["earliest_year"] is None
+
+
+@pytest.mark.asyncio
+async def test_earliest_year_isolated_per_user(auth_client_a, auth_client_b):
+    """用例 3: 数据隔离——用户 A 的最早年份不受用户 B 记录影响。"""
+    # 用户 A 建一条 2021 年记录
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_a = resp.json()["data"]["id"]
+    await auth_client_a.post(
+        "/api/records",
+        json={"amount": 20.0, "type": "expense", "category_id": cat_a, "consume_time": "2021-03-05 08:00"},
+    )
+
+    # 用户 B 建一条更早的 1999 年记录
+    resp = await auth_client_b.post(
+        "/api/categories",
+        json={"name": "B分类", "type": "expense", "icon": "mdi-cart", "sort_order": 1},
+    )
+    cat_b = resp.json()["data"]["id"]
+    await auth_client_b.post(
+        "/api/records",
+        json={"amount": 30.0, "type": "expense", "category_id": cat_b, "consume_time": "1999-01-01 09:00"},
+    )
+
+    resp_a = await auth_client_a.get("/api/records/earliest-year")
+    assert resp_a.status_code == 200
+    assert resp_a.json()["data"]["earliest_year"] == 2021
+
+    resp_b = await auth_client_b.get("/api/records/earliest-year")
+    assert resp_b.status_code == 200
+    assert resp_b.json()["data"]["earliest_year"] == 1999
+
+
+@pytest.mark.asyncio
+async def test_earliest_year_requires_auth(anon_client):
+    """用例 4: 未认证 → 401（沿用 require_auth 行为）。"""
+    resp = await anon_client.get("/api/records/earliest-year")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_earliest_year_not_shadowed_by_record_id_route(client):
+    """用例 5: 路径不被 {record_id} 抢占（返回 200 而非 422）——回归路由声明顺序。"""
+    resp = await client.get("/api/records/earliest-year")
+    assert resp.status_code == 200, "被 /{record_id} 抢占会返回 422"
+    body = resp.json()
+    assert body["code"] == 0
+    assert "earliest_year" in body["data"]
+
+    # 数字路径仍应走 {record_id}：不存在的记录返回业务 404 码而非最早年份
+    resp = await client.get("/api/records/999999")
+    assert resp.json()["code"] == 40002

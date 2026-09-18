@@ -107,6 +107,16 @@ async def delete_quick_template(
     return success_response(message="模板删除成功")
 
 
+@router.get("/earliest-year")
+async def earliest_year(
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_auth),
+) -> JSONResponse:
+    """Get the earliest year that has records for current user."""
+    year = await record_service.get_earliest_year(db, current_user)
+    return success_response(data={"earliest_year": year})
+
+
 @router.get("/{record_id}")
 async def get_record(
     record_id: int,

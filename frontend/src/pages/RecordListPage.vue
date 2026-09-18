@@ -51,11 +51,10 @@
     <v-card class="pa-2 mb-3" rounded="xl">
       <div class="d-flex align-center">
         <v-btn
-          v-if="selectedYear !== currentYear - 5"
+          v-if="selectedYear > minYear"
           icon
           variant="text"
           size="x-small"
-          class="d-none d-md-flex"
           @click="prevYear"
         >
           <v-icon size="small">mdi-chevron-left</v-icon>
@@ -85,7 +84,6 @@
           icon
           variant="text"
           size="x-small"
-          class="d-none d-md-flex"
           @click="nextYear"
         >
           <v-icon size="small">mdi-chevron-right</v-icon>
@@ -185,7 +183,7 @@
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
-import { getRecords } from '@/api/records'
+import { getRecords, getEarliestYear } from '@/api/records'
 import { getCategories } from '@/api/categories'
 import { useRecordsStore } from '@/stores/useRecordsStore'
 import { useAppStore } from '@/stores/useAppStore'
@@ -226,6 +224,18 @@ const categoryOptions = computed(() => {
 const selectedMonth = ref(new Date().getMonth() + 1)
 const selectedYear = ref(new Date().getFullYear())
 const currentYear = new Date().getFullYear()
+const minYear = ref(null) // null = 未加载；加载后为当前用户最早记录年份
+
+// 年份可往前翻到的边界 = 用户最早有记录的年份（无记录则为当前年）
+async function loadEarliestYear() {
+  try {
+    const result = await getEarliestYear()
+    // 无记录用户：minYear = 当前年 → 上一年箭头隐藏
+    minYear.value = result?.earliest_year ?? currentYear
+  } catch {
+    minYear.value = currentYear // 接口异常兜底：退化为"仅当前年"，不阻塞账单浏览
+  }
+}
 
 function selectMonth(month) {
   selectedMonth.value = month
@@ -238,6 +248,7 @@ function selectMonth(month) {
 }
 
 function prevYear() {
+  if (minYear.value !== null && selectedYear.value - 1 < minYear.value) return
   selectedYear.value--
   selectedMonth.value = null
 }
@@ -312,6 +323,7 @@ async function handleBatchDelete() {
 }
 
 onMounted(async () => {
+  loadEarliestYear() // 与下方加载并行发起；内部已兜底，失败不阻塞账单浏览
   try {
     categories.value = await getCategories()
     selectMonth(new Date().getMonth() + 1)

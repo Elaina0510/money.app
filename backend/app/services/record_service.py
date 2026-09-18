@@ -158,6 +158,20 @@ async def get_records(
     }
 
 
+async def get_earliest_year(db: AsyncSession, current_user: User) -> int | None:
+    """获取当前用户最早账单记录所在年份。无记录返回 None。
+
+    依据: consume_time 存为 "%Y-%m-%d %H:%M:%S" 字符串,字典序即时间序,
+    故 SQLite 的 substr(consume_time, 1, 4) 即年份,字符串 MIN 等价年份 MIN。
+    """
+    stmt = select(func.min(func.substr(Record.consume_time, 1, 4))).where(
+        Record.user_id == current_user.id
+    )
+    result = await db.exec(stmt)
+    year_str = result.one_or_none()
+    return int(year_str) if year_str else None
+
+
 async def get_record(
     db: AsyncSession, record_id: int, current_user: User | None = None
 ) -> dict[str, Any] | None:

@@ -22,6 +22,7 @@ vi.mock('@/api/records', () => ({
     page: 1,
     total_pages: 1,
   }),
+  getEarliestYear: vi.fn().mockResolvedValue({ earliest_year: null }),
 }))
 
 vi.mock('@/api/categories', () => ({
@@ -232,5 +233,124 @@ describe('RecordListPage - Category Icons', () => {
 
     // The component should render with size 20
     expect(wrapper.vm.records.length).toBe(1)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// M3 需求二：账单页年份切换（竖屏可见 + 往前到最早记录年、往后不超当前年）
+// ---------------------------------------------------------------------------
+import { getRecords, getEarliestYear } from '@/api/records'
+
+const currentYear = new Date().getFullYear()
+
+function setViewport(width) {
+  Object.defineProperty(window, 'innerWidth', {
+    writable: true,
+    configurable: true,
+    value: width,
+  })
+}
+
+// 未安装 Vuetify 插件时 v-btn 渲染为同名自定义元素，按图标名区分左右箭头
+function findArrow(wrapper, icon) {
+  return wrapper.findAll('v-btn').filter((btn) => btn.text().includes(icon))
+}
+
+describe('RecordListPage - 年份切换', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setViewport(375) // 竖屏
+    getEarliestYear.mockResolvedValue({ earliest_year: null })
+    getRecords.mockResolvedValue({ items: [], total: 0, page: 1, total_pages: 1 })
+  })
+
+  it('用例1: 竖屏下月份切换条两侧渲染年份箭头，且不再有宽屏独占类', async () => {
+    getEarliestYear.mockResolvedValue({ earliest_year: currentYear - 4 })
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    await nextTick()
+
+    // 当前年时右箭头隐藏（不能往后翻），翻到上一年两侧箭头同时存在
+    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(1)
+    expect(findArrow(wrapper, 'mdi-chevron-right')).toHaveLength(0)
+
+    wrapper.vm.prevYear()
+    await nextTick()
+    const left = findArrow(wrapper, 'mdi-chevron-left')
+    const right = findArrow(wrapper, 'mdi-chevron-right')
+    expect(left).toHaveLength(1)
+    expect(right).toHaveLength(1)
+    for (const btn of [...left, ...right]) {
+      expect(btn.classes()).not.toContain('d-none')
+      expect(btn.classes()).not.toContain('d-md-flex')
+    }
+  })
+
+  it('用例2a: selectedYear === minYear 时左箭头不存在', async () => {
+    getEarliestYear.mockResolvedValue({ earliest_year: currentYear - 2 })
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    await nextTick()
+
+    wrapper.vm.prevYear()
+    await nextTick()
+    expect(wrapper.vm.selectedYear).toBe(currentYear - 1)
+    expect(wrapper.vm.minYear).toBe(currentYear - 2)
+    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(1)
+
+    wrapper.vm.prevYear()
+    await nextTick()
+    expect(wrapper.vm.selectedYear).toBe(currentYear - 2)
+    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(0)
+    expect(findArrow(wrapper, 'mdi-chevron-right')).toHaveLength(1)
+
+    // 双保险守卫：已到最早年，再点不会更早
+    wrapper.vm.prevYear()
+    await nextTick()
+    expect(wrapper.vm.selectedYear).toBe(currentYear - 2)
+  })
+
+  it('用例2b: selectedYear === currentYear 时右箭头不存在', async () => {
+    getEarliestYear.mockResolvedValue({ earliest_year: currentYear - 3 })
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    await nextTick()
+
+    wrapper.vm.prevYear()
+    await nextTick()
+    expect(findArrow(wrapper, 'mdi-chevron-right')).toHaveLength(1)
+
+    wrapper.vm.nextYear()
+    await nextTick()
+    expect(wrapper.vm.selectedYear).toBe(currentYear)
+    expect(findArrow(wrapper, 'mdi-chevron-right')).toHaveLength(0)
+
+    // 已在当前年，再点不会超过当前年
+    wrapper.vm.nextYear()
+    await nextTick()
+    expect(wrapper.vm.selectedYear).toBe(currentYear)
+  })
+
+  it('用例3: earliest_year=null（无账单用户）时左箭头不存在', async () => {
+    getEarliestYear.mockResolvedValue({ earliest_year: null })
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.vm.minYear).toBe(currentYear)
+    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(0)
+    expect(findArrow(wrapper, 'mdi-chevron-right')).toHaveLength(0)
+  })
+
+  it('接口异常时兜底为仅当前年，账单列表功能不受阻塞', async () => {
+    getEarliestYear.mockRejectedValue(new Error('网络异常'))
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.vm.minYear).toBe(currentYear)
+    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(0)
+    expect(getRecords).toHaveBeenCalled()
+    expect(wrapper.vm.records).toEqual([])
   })
 })

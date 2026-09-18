@@ -4,6 +4,10 @@ export function getRecords(params = {}) {
   return request.get('/records', { params })
 }
 
+export function getEarliestYear() {
+  return request.get('/records/earliest-year')
+}
+
 export function getRecord(id) {
   return request.get(`/records/${id}`)
 }
