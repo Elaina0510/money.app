@@ -316,140 +316,6 @@
       @confirm="handleDeleteTag"
     />
 
-    <!-- Budget Management -->
-    <v-card class="pa-4 mb-3 settings-card" rounded="xl">
-      <div class="d-flex justify-space-between align-center mb-3">
-        <div class="d-flex align-center">
-          <v-avatar size="36" color="rgba(156, 39, 176, 0.1)" class="mr-2">
-            <v-icon color="purple" size="20">mdi-piggy-bank-outline</v-icon>
-          </v-avatar>
-          <span class="text-subtitle-2 font-weight-bold">预算管理</span>
-        </div>
-        <v-btn size="small" color="primary" variant="tonal" @click="openBudgetAddDialog">
-          <v-icon start size="small">mdi-plus</v-icon>
-          设置
-        </v-btn>
-      </div>
-
-      <!-- 月度预算概览 -->
-      <v-card variant="tonal" class="pa-4 mb-3" rounded="lg">
-        <div class="text-caption text-grey mb-1">本月预算</div>
-        <div class="text-h5 font-weight-bold mb-2">¥{{ formatAmount(totalBudget) }}</div>
-        <v-progress-linear
-          :model-value="budgetUsagePercent"
-          :color="
-            budgetUsagePercent > 80 ? 'error' : budgetUsagePercent > 50 ? 'warning' : 'success'
-          "
-          height="8"
-          rounded
-          class="mb-2"
-        />
-        <div class="d-flex justify-space-between text-caption">
-          <span>已用 ¥{{ formatAmount(totalSpent) }}</span>
-          <span>{{ budgetUsagePercent.toFixed(0) }}%</span>
-        </div>
-      </v-card>
-
-      <!-- 分类预算列表 -->
-      <div v-if="budgets.length === 0" class="text-center pa-4 text-grey text-caption">
-        暂无预算设置，点击上方按钮添加分类预算
-      </div>
-
-      <div
-        v-for="(item, index) in enrichedBudgets"
-        :key="item.category_id"
-        class="budget-item mb-3"
-      >
-        <div class="d-flex justify-space-between align-center mb-1">
-          <div class="d-flex align-center">
-            <v-avatar size="32" :color="getBudgetColor(index) + '20'" class="mr-2">
-              <v-icon size="small" :color="getBudgetColor(index)">{{ item.icon }}</v-icon>
-            </v-avatar>
-            <span class="text-body-2 font-weight-medium">{{ item.category_name }}</span>
-          </div>
-          <div class="d-flex align-center">
-            <template v-if="editingBudget === item.category_id">
-              <v-text-field
-                v-model.number="editBudgetAmount"
-                type="number"
-                density="compact"
-                hide-details
-                variant="outlined"
-                prefix="¥"
-                style="width: 120px"
-                class="mr-1"
-                autofocus
-                @keyup.enter="saveBudgetEdit(item)"
-                @keyup.escape="cancelBudgetEdit"
-              />
-              <v-btn
-                icon
-                size="x-small"
-                variant="text"
-                color="primary"
-                @click="saveBudgetEdit(item)"
-                :loading="savingBudget"
-              >
-                <v-icon size="small">mdi-check</v-icon>
-              </v-btn>
-              <v-btn icon size="x-small" variant="text" @click="cancelBudgetEdit">
-                <v-icon size="small">mdi-close</v-icon>
-              </v-btn>
-            </template>
-            <template v-else>
-              <span class="text-body-2 font-weight-bold">{{ formatAmount(item.spent) }}</span>
-              <span class="text-grey"> / {{ formatAmount(item.amount) }}</span>
-              <v-btn icon size="x-small" variant="text" class="ml-1" @click="startBudgetEdit(item)">
-                <v-icon size="small" color="grey">mdi-pencil</v-icon>
-              </v-btn>
-            </template>
-          </div>
-        </div>
-        <v-progress-linear
-          :model-value="item.amount > 0 ? (item.spent / item.amount) * 100 : 0"
-          :color="
-            item.amount > 0 && item.spent / item.amount > 0.8
-              ? 'error'
-              : item.amount > 0 && item.spent / item.amount > 0.5
-                ? 'warning'
-                : 'primary'
-          "
-          height="6"
-          rounded
-        />
-      </div>
-    </v-card>
-
-    <!-- Budget Add Dialog -->
-    <v-dialog v-model="showBudgetAddDialog" max-width="400">
-      <v-card class="pa-4" rounded="xl">
-        <v-card-title class="text-h6 pa-0 mb-3">设置分类预算</v-card-title>
-        <v-select
-          v-model="budgetForm.category_id"
-          :items="availableBudgetCategories"
-          item-title="name"
-          item-value="id"
-          label="选择分类"
-          hide-details
-          class="mb-3"
-          variant="outlined"
-        />
-        <v-text-field
-          v-model.number="budgetForm.amount"
-          label="预算金额"
-          type="number"
-          prefix="¥"
-          hide-details
-          class="mb-3"
-          variant="outlined"
-        />
-        <div class="d-flex justify-end ga-2">
-          <v-btn variant="text" @click="showBudgetAddDialog = false">取消</v-btn>
-          <v-btn color="primary" :loading="savingBudget" @click="saveBudget">保存</v-btn>
-        </div>
-      </v-card>
-    </v-dialog>
-
     <!-- Quick Template Management -->
     <v-card class="pa-4 mb-3 settings-card" rounded="xl">
       <div class="d-flex justify-space-between align-center mb-3">
@@ -702,8 +568,6 @@ import { storeToRefs } from 'pinia'
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { getRecords, getQuickTemplates, addQuickTemplate, deleteQuickTemplate } from '@/api/records'
-import { getBudgets, batchSetBudgets } from '@/api/budgets'
-import { formatAmount } from '@/utils/format'
 import dayjs from 'dayjs'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import CsvMappingDialog from '@/components/common/CsvMappingDialog.vue'
@@ -756,47 +620,6 @@ const showTagDialog = ref(false)
 const savingTag = ref(false)
 
 const tagForm = reactive({ name: '', category_id: null })
-
-// Budget state
-const budgets = ref([])
-const showBudgetAddDialog = ref(false)
-const savingBudget = ref(false)
-const editingBudget = ref(null)
-const editBudgetAmount = ref(0)
-const budgetForm = ref({ category_id: null, amount: 0 })
-const currentMonth = dayjs().format('YYYY-MM')
-
-const BUDGET_COLORS = [
-  '#FF6B6B',
-  '#4DABF7',
-  '#9775FA',
-  '#51CF66',
-  '#FF922B',
-  '#22B8CF',
-  '#F06595',
-  '#845EF7',
-  '#20C997',
-  '#FD7E14',
-]
-
-const totalBudget = computed(() => budgets.value.reduce((sum, b) => sum + b.amount, 0))
-const totalSpent = computed(() => budgets.value.reduce((sum, b) => sum + b.spent, 0))
-const budgetUsagePercent = computed(() => {
-  if (totalBudget.value === 0) return 0
-  return (totalSpent.value / totalBudget.value) * 100
-})
-
-const enrichedBudgets = computed(() => {
-  return budgets.value.map((b) => {
-    const cat = categories.value.find((c) => c.id === b.category_id)
-    return { ...b, icon: cat?.icon || 'mdi-cash' }
-  })
-})
-
-const availableBudgetCategories = computed(() => {
-  const budgetCategoryIds = budgets.value.map((b) => b.category_id)
-  return categories.value.filter((c) => c.type === 'expense' && !budgetCategoryIds.includes(c.id))
-})
 
 // Quick template state
 const quickTemplates = ref([])
@@ -967,69 +790,6 @@ async function handleDeleteTag() {
   deletingTag.value = null
 }
 
-function getBudgetColor(index) {
-  return BUDGET_COLORS[index % BUDGET_COLORS.length]
-}
-
-async function loadBudgets() {
-  try {
-    budgets.value = (await getBudgets({ month: currentMonth })) || []
-  } catch (e) {
-    console.error('Load budgets error:', e)
-    budgets.value = []
-  }
-}
-
-function startBudgetEdit(item) {
-  editingBudget.value = item.category_id
-  editBudgetAmount.value = item.amount
-}
-
-function cancelBudgetEdit() {
-  editingBudget.value = null
-  editBudgetAmount.value = 0
-}
-
-async function saveBudgetEdit(item) {
-  if (editBudgetAmount.value <= 0) return
-  savingBudget.value = true
-  try {
-    await batchSetBudgets({
-      month: currentMonth,
-      budgets: [{ category_id: item.category_id, amount: editBudgetAmount.value }],
-    })
-    editingBudget.value = null
-    await loadBudgets()
-  } catch (e) {
-    console.error('Save budget error:', e)
-  } finally {
-    savingBudget.value = false
-  }
-}
-
-function openBudgetAddDialog() {
-  budgetForm.value = { category_id: null, amount: 0 }
-  showBudgetAddDialog.value = true
-}
-
-async function saveBudget() {
-  if (!budgetForm.value.category_id || budgetForm.value.amount <= 0) return
-  savingBudget.value = true
-  try {
-    await batchSetBudgets({
-      month: currentMonth,
-      budgets: [{ category_id: budgetForm.value.category_id, amount: budgetForm.value.amount }],
-    })
-    showBudgetAddDialog.value = false
-    budgetForm.value = { category_id: null, amount: 0 }
-    await loadBudgets()
-  } catch (e) {
-    console.error('Save budget error:', e)
-  } finally {
-    savingBudget.value = false
-  }
-}
-
 async function loadQuickTemplates() {
   try {
     quickTemplates.value = (await getQuickTemplates()) || []
@@ -1087,7 +847,7 @@ async function loadTags() {
 }
 
 onMounted(async () => {
-  await Promise.all([loadCategories(), loadTags(), loadBudgets(), loadQuickTemplates()])
+  await Promise.all([loadCategories(), loadTags(), loadQuickTemplates()])
 })
 
 // ── Import/Export ──────────────────────────────────────────────────

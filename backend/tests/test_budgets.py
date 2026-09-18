@@ -241,6 +241,190 @@ async def test_delete_nonexistent_budget(client):
     assert data["code"] == 40002
 
 
+@pytest.mark.asyncio
+async def test_year_summary_fixed_12_ordered_months(
+    client, expense_category_id, income_category_id
+):
+    """M6 用例 1：year-summary 固定返回 12 个月，顺序 01→12，每月 budgets 按 category_id 升序。"""
+    # 查询年内两个月份 + 邻年月份（邻年不应参与聚合）
+    await client.post(
+        "/api/budgets",
+        json={"category_id": income_category_id, "month": "2026-11", "amount": 900.0},
+    )
+    await client.post(
+        "/api/budgets",
+        json={"category_id": expense_category_id, "month": "2026-11", "amount": 1200.0},
+    )
+    await client.post(
+        "/api/budgets",
+        json={"category_id": expense_category_id, "month": "2026-03", "amount": 1500.0},
+    )
+    await client.post(
+        "/api/budgets",
+        json={"category_id": expense_category_id, "month": "2025-12", "amount": 5000.0},
+    )
+    await client.post(
+        "/api/budgets",
+        json={"category_id": expense_category_id, "month": "2027-01", "amount": 7000.0},
+    )
+
+    resp = await client.get("/api/budgets/year-summary?year=2026")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 0
+
+    months = body["data"]["months"]
+    assert body["data"]["year"] == 2026
+    assert len(months) == 12
+    assert [m["month"] for m in months] == [f"2026-{i:02d}" for i in range(1, 13)]
+
+    # 无预算月份：空数组 + total 为 0
+    empty = months[0]
+    assert empty["month"] == "2026-01"
+    assert empty["budgets"] == []
+    assert empty["total_amount"] == 0
+    assert empty["total_spent"] == 0
+
+    # 有预算月份
+    assert months[2]["total_amount"] == 1500.0
+    assert months[10]["total_amount"] == 2100.0
+    assert [b["category_id"] for b in months[10]["budgets"]] == sorted(
+        [b["category_id"] for b in months[10]["budgets"]]
+    )
+    assert months[10]["total_amount"] == sum(b["amount"] for b in months[10]["budgets"])
+
+    # 邻年预算不混入
+    assert all(b["month"].startswith("2026-") for m in months for b in m["budgets"])
+
+
+@pytest.mark.asyncio
+async def test_year_summary_totals_and_spent_match_monthly_api(
+    client, expense_category_id, income_category_id
+):
+    """M6 用例 2：各月 total 等于该月 budgets 求和；spent 与按月 GET /api/budgets 一致。
+
+    同时覆盖易错点 7：年汇总行的 spent 必须按各 budget 自身月份统计，
+    不得统一按查询年的某个月计算。
+    """
+    plan = {
+        "2026-01": (1000.0, 2000.0),
+        "2026-02": (1500.5, 3000.0),
+        "2026-07": (800.0, 4000.0),
+    }
+    for month, (expense_amt, income_amt) in plan.items():
+        await client.post(
+            "/api/budgets",
+            json={"category_id": expense_category_id, "month": month, "amount": expense_amt},
+        )
+        await client.post(
+            "/api/budgets",
+            json={"category_id": income_category_id, "month": month, "amount": income_amt},
+        )
+
+    # 每月各一笔支出（金额不同），用于校验 spent 的月份口径
+    for month, amount in (("2026-01", 200.0), ("2026-01", 150.0), ("2026-02", 700.0), ("2026-07", 60.0)):
+        await client.post(
+            "/api/records",
+            json={
+                "amount": amount,
+                "type": "expense",
+                "category_id": expense_category_id,
+                "consume_time": f"{month}-15 12:00",
+            },
+        )
+
+    resp = await client.get("/api/budgets/year-summary?year=2026")
+    assert resp.status_code == 200
+    months = {m["month"]: m for m in resp.json()["data"]["months"]}
+
+    for month, (expense_amt, income_amt) in plan.items():
+        monthly = (await client.get(f"/api/budgets?month={month}")).json()["data"]
+        entry = months[month]
+
+        # 行结构与按月接口一致（category_id / spent 口径回归）
+        assert {b["category_id"] for b in entry["budgets"]} == {b["category_id"] for b in monthly}
+        by_cat = {b["category_id"]: b for b in monthly}
+        for row in entry["budgets"]:
+            assert row["spent"] == by_cat[row["category_id"]]["spent"]
+            assert row["amount"] == by_cat[row["category_id"]]["amount"]
+            assert row["month"] == month
+
+        # total = 该月 budgets 求和
+        assert entry["total_amount"] == round(sum(b["amount"] for b in entry["budgets"]), 2)
+        assert entry["total_spent"] == round(sum(b["spent"] for b in entry["budgets"]), 2)
+        assert entry["total_amount"] == round(expense_amt + income_amt, 2)
+
+    # spent 只统计各自月份
+    assert months["2026-01"]["total_spent"] == 350.0
+    assert months["2026-02"]["total_spent"] == 700.0
+    assert months["2026-07"]["total_spent"] == 60.0
+    # 未设置预算的月份为空
+    assert months["2026-03"]["budgets"] == []
+    assert months["2026-03"]["total_amount"] == 0
+
+
+@pytest.mark.asyncio
+async def test_year_summary_data_isolation(auth_client_a, auth_client_b):
+    """M6 用例 3：数据隔离——跨用户不可见。"""
+    resp = await auth_client_a.post(
+        "/api/categories",
+        json={"name": "A的预算分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+    )
+    cat_id = resp.json()["data"]["id"]
+    await auth_client_a.post(
+        "/api/budgets",
+        json={"category_id": cat_id, "month": "2026-05", "amount": 1111.0},
+    )
+
+    resp = await auth_client_a.get("/api/budgets/year-summary?year=2026")
+    assert resp.status_code == 200
+    a_months = resp.json()["data"]["months"]
+    assert a_months[4]["total_amount"] == 1111.0
+    assert len(a_months[4]["budgets"]) == 1
+
+    resp = await auth_client_b.get("/api/budgets/year-summary?year=2026")
+    assert resp.status_code == 200
+    b_months = resp.json()["data"]["months"]
+    assert len(b_months) == 12
+    assert all(m["budgets"] == [] for m in b_months)
+    assert all(m["total_amount"] == 0 for m in b_months)
+    assert all(m["total_spent"] == 0 for m in b_months)
+
+
+@pytest.mark.asyncio
+async def test_year_summary_requires_auth(anon_client):
+    """M6 用例 4a：未认证 → 401。"""
+    resp = await anon_client.get("/api/budgets/year-summary?year=2026")
+    assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_year_summary_param_validation(client):
+    """M6 用例 4b：year 缺失 / 非数字 / 超出范围 → 422。"""
+    for url in (
+        "/api/budgets/year-summary",
+        "/api/budgets/year-summary?year=abc",
+        "/api/budgets/year-summary?year=1999",
+        "/api/budgets/year-summary?year=2101",
+    ):
+        resp = await client.get(url)
+        assert resp.status_code == 422, url
+
+
+@pytest.mark.asyncio
+async def test_year_summary_without_any_budget(client):
+    """M6 用例 5：无任何预算 → 12 个空月份，不报错。"""
+    resp = await client.get("/api/budgets/year-summary?year=2030")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["code"] == 0
+    months = body["data"]["months"]
+    assert len(months) == 12
+    assert [m["month"] for m in months] == [f"2030-{i:02d}" for i in range(1, 13)]
+    assert all(m["budgets"] == [] for m in months)
+    assert all(m["total_amount"] == 0 and m["total_spent"] == 0 for m in months)
+
+
 @pytest.fixture
 async def expense_category_id(client):
     """Create an expense category and return its ID."""

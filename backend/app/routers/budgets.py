@@ -29,6 +29,17 @@ async def list_budgets(
     return success_response(data=budgets)
 
 
+@router.get("/year-summary")
+async def year_summary(
+    year: int = Query(..., ge=2000, le=2100, description="年份"),
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_auth),
+):
+    """Get budgets grouped by each month of a year (fixed 12 months)."""
+    data = await budget_service.get_year_summary(db, year, current_user)
+    return success_response(data=data)
+
+
 @router.post("")
 async def create_budget(
     data: BudgetCreate,

@@ -111,6 +111,56 @@ async def _enrich_budget(
     }
 
 
+async def get_year_summary(
+    db: AsyncSession, year: int, current_user: User | None = None
+) -> dict[str, Any]:
+    """Get budgets grouped by month for a given year (fixed 12 months).
+
+    用于统计页年视图的逐月预算概览：无论该月是否有预算，
+    `months` 固定返回 01→12 共 12 项，无预算的月份 budgets 为空数组、
+    total_amount/total_spent 为 0。
+
+    Args:
+        db: 异步数据库会话。
+        year: 年份（YYYY）。
+        current_user: 当前登录用户，用于数据隔离。
+
+    Returns:
+        ``{"year": year, "months": [{"month", "total_amount",
+        "total_spent", "budgets"} × 12]}``
+    """
+    stmt = select(Budget).where(Budget.month >= f"{year}-01", Budget.month <= f"{year}-12")
+
+    # Data isolation: filter by user_id（与 get_budgets 相同写法）
+    if current_user:
+        stmt = stmt.where(Budget.user_id == current_user.id)
+    else:
+        stmt = stmt.where(Budget.user_id.is_(None))
+
+    result = await db.exec(stmt)
+    budgets = list(result.all())
+
+    months: list[dict[str, Any]] = []
+    for m in range(1, 13):
+        month = f"{year}-{m:02d}"
+        month_items = sorted(
+            (b for b in budgets if b.month == month),
+            key=lambda b: (b.category_id, b.id or 0),
+        )
+        # 逐条复用 _enrich_budget，spent 按各 budget 自身月份计算（勿传查询年）
+        enriched = [await _enrich_budget(db, b, b.month) for b in month_items]
+        months.append(
+            {
+                "month": month,
+                "total_amount": round_money(sum(i["amount"] for i in enriched)),
+                "total_spent": round_money(sum(i["spent"] for i in enriched)),
+                "budgets": enriched,
+            }
+        )
+
+    return {"year": year, "months": months}
+
+
 async def create_or_update_budget(
     db: AsyncSession, data: BudgetCreate, current_user: User | None = None
 ) -> Budget:
