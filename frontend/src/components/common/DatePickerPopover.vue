@@ -1,69 +1,79 @@
 <template>
-  <ExpandTransition v-model="showPicker" :origin="origin" :max-width="400">
-    <template #activator="activatorProps">
-      <div v-bind="activatorProps" @click="openPicker" class="d-flex align-center ga-2">
-        <slot name="activator">
+  <div class="date-time-fields w-100">
+    <!-- 第一行：日期（占满行宽），圆形展开日历弹层 -->
+    <ExpandTransition v-model="showPicker" :origin="origin" :max-width="400">
+      <template #activator="activatorProps">
+        <div v-bind="activatorProps" @click="openPicker">
+          <slot name="activator">
+            <v-text-field
+              :model-value="displayValue"
+              :label="label"
+              readonly
+              hide-details
+              variant="outlined"
+              density="compact"
+              prepend-inner-icon="mdi-calendar"
+              class="w-100"
+            />
+          </slot>
+        </div>
+      </template>
+
+      <v-card rounded="xl">
+        <v-card-text class="pa-0">
+          <v-date-picker
+            v-model="selectedDate"
+            :show-adjacent-months="false"
+            color="primary"
+            width="100%"
+            @update:model-value="onDateSelected"
+          />
+        </v-card-text>
+      </v-card>
+    </ExpandTransition>
+
+    <!-- 第二行：时间（仅 showTime），点击位置圆形展开的表盘时钟 -->
+    <ExpandTransition
+      v-if="showTime"
+      v-model="showTimePicker"
+      :origin="timeOrigin"
+      :max-width="360"
+    >
+      <template #activator="activatorProps">
+        <div v-bind="activatorProps" @click="openTimePicker">
           <v-text-field
-            :model-value="displayValue"
-            :label="label"
+            :model-value="selectedTime"
             readonly
+            label="时间"
             hide-details
             variant="outlined"
             density="compact"
-            prepend-inner-icon="mdi-calendar"
-            class="flex-grow-1"
+            prepend-inner-icon="mdi-clock-outline"
+            class="w-100"
           />
-        </slot>
-        <!-- Time field: same row, right-aligned -->
-        <v-text-field
-          v-if="showTime"
-          :model-value="selectedTime"
-          readonly
-          label="时间"
-          hide-details
-          variant="outlined"
-          density="compact"
-          prepend-inner-icon="mdi-clock-outline"
-          class="time-field"
-          @click.stop="openTimePicker"
-        />
-      </div>
-    </template>
+        </div>
+      </template>
 
-    <v-card rounded="xl">
-      <v-card-text class="pa-0">
-        <v-date-picker
-          v-model="selectedDate"
-          :show-adjacent-months="false"
-          color="primary"
-          width="100%"
-          @update:model-value="onDateSelected"
-        />
-      </v-card-text>
-    </v-card>
-  </ExpandTransition>
-
-  <!-- Independent time picker dialog -->
-  <v-dialog v-model="showTimePicker" max-width="340">
-    <v-card rounded="xl" class="time-picker-card">
-      <v-card-title class="text-subtitle-1 font-weight-bold pa-4 pb-2">
-        选择时间
-      </v-card-title>
-      <v-card-text class="pa-4 pt-0 d-flex justify-center">
-        <v-time-picker
-          v-model="pendingTime"
-          color="primary"
-          format="24hr"
-          width="280"
-        />
-      </v-card-text>
-      <v-card-actions class="pa-4 pt-0">
-        <v-spacer />
-        <v-btn variant="text" @click="showTimePicker = false">取消</v-btn>
-        <v-btn variant="tonal" color="primary" @click="confirmTime">确定</v-btn>
-      </v-card-actions>
-    </v-card>
-  </v-dialog>
+      <v-card rounded="xl" class="time-picker-card">
+        <v-card-title class="text-subtitle-1 font-weight-bold pa-4 pb-2">
+          选择时间
+        </v-card-title>
+        <v-card-text class="pa-4 pt-0 d-flex justify-center">
+          <v-time-picker
+            v-model="pendingTime"
+            color="primary"
+            format="24hr"
+            width="280"
+          />
+        </v-card-text>
+        <v-card-actions class="pa-4 pt-0">
+          <v-spacer />
+          <v-btn variant="text" @click="cancelTime">取消</v-btn>
+          <v-btn variant="tonal" color="primary" @click="confirmTime">确定</v-btn>
+        </v-card-actions>
+      </v-card>
+    </ExpandTransition>
+  </div>
 </template>
 
 <script setup>
@@ -98,6 +108,7 @@ const selectedTime = ref(props.modelValueTime)
 
 // Time picker state
 const showTimePicker = ref(false)
+const timeOrigin = ref({ x: 0, y: 0 })
 const pendingTime = ref('')
 
 const displayValue = computed(() => {
@@ -119,9 +130,19 @@ function onDateSelected(date) {
   showPicker.value = false
 }
 
-function openTimePicker() {
+function openTimePicker(event) {
+  // 点击位置 → 圆形展开原点
+  timeOrigin.value = {
+    x: event.clientX,
+    y: event.clientY,
+  }
   pendingTime.value = selectedTime.value || '12:00'
   showTimePicker.value = true
+}
+
+function cancelTime() {
+  // 仅关闭弹层，不回写 selectedTime
+  showTimePicker.value = false
 }
 
 function confirmTime() {
@@ -137,8 +158,10 @@ function confirmTime() {
   border-radius: 16px;
 }
 
-.time-field {
-  max-width: 140px;
+.date-time-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .time-picker-card {

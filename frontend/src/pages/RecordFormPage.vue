@@ -112,13 +112,12 @@
       <!-- Consume Time -->
       <div class="mb-3">
         <div class="text-caption text-grey mb-1">消费时间</div>
-        <div class="d-flex ga-2">
+        <div>
           <DatePickerPopover
             v-model="consumeDate"
             v-model:model-value-time="consumeTime"
             :show-time="true"
             label="消费日期"
-            class="flex-grow-1"
           />
         </div>
       </div>
