@@ -14,18 +14,21 @@
       </v-btn>
     </div>
 
-    <div v-if="tags.length === 0" class="text-center pa-4 text-grey text-caption">暂无标签</div>
+    <!-- 主体内容统一卡片图层（M4）：chip 云不再直贴页面背景 -->
+    <div class="page-card">
+      <div v-if="tags.length === 0" class="text-center pa-4 text-grey text-caption">暂无标签</div>
 
-    <div v-else class="d-flex flex-wrap ga-1">
-      <v-chip v-for="tag in tags" :key="tag.id" size="small" variant="tonal" class="mb-1">
-        <v-icon start size="x-small">mdi-tag</v-icon>
-        {{ tag.name }}
-        <template v-slot:append>
-          <v-icon size="x-small" class="ml-1 tag-delete-icon" @click.stop="confirmDeleteTag(tag)">
-            mdi-close
-          </v-icon>
-        </template>
-      </v-chip>
+      <div v-else class="d-flex flex-wrap ga-1">
+        <v-chip v-for="tag in tags" :key="tag.id" size="small" variant="tonal" class="mb-1">
+          <v-icon start size="x-small">mdi-tag</v-icon>
+          {{ tag.name }}
+          <template v-slot:append>
+            <v-icon size="x-small" class="ml-1 tag-delete-icon" @click.stop="confirmDeleteTag(tag)">
+              mdi-close
+            </v-icon>
+          </template>
+        </v-chip>
+      </div>
     </div>
 
     <!-- Tag Dialog -->

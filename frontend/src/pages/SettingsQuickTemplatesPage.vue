@@ -19,36 +19,43 @@
       </v-btn>
     </div>
 
-    <div v-if="quickTemplates.length === 0" class="text-center pa-4 text-grey text-caption">
-      暂无快速记账模板
-    </div>
+    <!-- 主体内容统一卡片图层（M4）：列表页面级透视写法随之清除 -->
+    <div class="page-card">
+      <div v-if="quickTemplates.length === 0" class="text-center pa-4 text-grey text-caption">
+        暂无快速记账模板
+      </div>
 
-    <v-list v-else density="compact" class="bg-transparent pa-0">
-      <v-list-item
-        v-for="tpl in quickTemplates"
-        :key="(tpl.tag_id || '') + '-' + tpl.amount + '-' + tpl.source"
-        class="quick-template-item"
-      >
-        <template v-slot:prepend>
-          <v-avatar size="32" :color="tpl.type === 'expense' ? '#FFE8E8' : '#E8FFF3'" class="mr-2">
-            <v-icon size="16" :color="tpl.type === 'expense' ? '#FF6B6B' : '#20C997'">
-              {{ tpl.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
-            </v-icon>
-          </v-avatar>
-        </template>
-        <v-list-item-title class="text-body-2">
-          {{ tpl.tag_name }} · ¥{{ tpl.amount }}
-        </v-list-item-title>
-        <v-list-item-subtitle class="text-caption">
-          {{ tpl.category_name }}{{ tpl.count > 0 ? ` · 使用 ${tpl.count} 次` : '' }}
-        </v-list-item-subtitle>
-        <template v-slot:append>
-          <v-btn icon variant="text" size="x-small" @click="removeQuickTemplate(tpl)">
-            <v-icon size="small" color="error">mdi-delete</v-icon>
-          </v-btn>
-        </template>
-      </v-list-item>
-    </v-list>
+      <v-list v-else density="compact" class="pa-0">
+        <v-list-item
+          v-for="tpl in quickTemplates"
+          :key="(tpl.tag_id || '') + '-' + tpl.amount + '-' + tpl.source"
+          class="quick-template-item"
+        >
+          <template v-slot:prepend>
+            <v-avatar
+              size="32"
+              :color="tpl.type === 'expense' ? '#FFE8E8' : '#E8FFF3'"
+              class="mr-2"
+            >
+              <v-icon size="16" :color="tpl.type === 'expense' ? '#FF6B6B' : '#20C997'">
+                {{ tpl.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
+              </v-icon>
+            </v-avatar>
+          </template>
+          <v-list-item-title class="text-body-2">
+            {{ tpl.tag_name }} · ¥{{ tpl.amount }}
+          </v-list-item-title>
+          <v-list-item-subtitle class="text-caption">
+            {{ tpl.category_name }}{{ tpl.count > 0 ? ` · 使用 ${tpl.count} 次` : '' }}
+          </v-list-item-subtitle>
+          <template v-slot:append>
+            <v-btn icon variant="text" size="x-small" @click="removeQuickTemplate(tpl)">
+              <v-icon size="small" color="error">mdi-delete</v-icon>
+            </v-btn>
+          </template>
+        </v-list-item>
+      </v-list>
+    </div>
 
     <!-- Quick Template Add Dialog -->
     <v-dialog v-model="showQuickTemplateDialog" max-width="400">

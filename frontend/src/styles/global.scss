@@ -102,6 +102,18 @@ body {
   font-size: 20px;
 }
 
+/* 设置系二级页统一卡片图层（M4）：与设置主页卡片同源规范
+   （surface 底 / 16px 圆角 / level-1 静态卡片海拔 / 16px 内边距）
+   深色模式无需分支：--v-theme-surface 运行时随主题切换（light #FFFFFF / dark #2C2C2C）
+   注：.settings-card 仅作语义钩子，样式统一由本类承载，不重复定义 */
+.page-card {
+  background: rgb(var(--v-theme-surface));
+  border-radius: 16px;
+  box-shadow: var(--shadow-level-1);
+  padding: 16px;
+  margin-bottom: 12px; /* 对齐设置主页 .mb-3 节奏 */
+}
+
 /* Page transition */
 .page-enter-active,
 .page-leave-active {

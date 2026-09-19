@@ -20,111 +20,126 @@
       </div>
     </div>
 
-    <div
-      v-if="expenseDragList.length === 0 && incomeDragList.length === 0"
-      class="text-center pa-4 text-grey text-caption"
-    >
-      暂无分类
-    </div>
+    <!-- 主体内容统一卡片图层（M4）：消除列表透视到页面背景 -->
+    <div class="page-card">
+      <div
+        v-if="expenseDragList.length === 0 && incomeDragList.length === 0"
+        class="text-center pa-4 text-grey text-caption"
+      >
+        暂无分类
+      </div>
 
-    <!-- Expense Categories -->
-    <div class="mb-2">
-      <div class="text-caption text-grey font-weight-medium mb-1">支出分类</div>
-      <v-list v-if="expenseDragList.length" density="compact" class="bg-transparent pa-0">
-        <Draggable
-          v-model="expenseDragList"
-          :handle="'.drag-handle'"
-          :disabled="isOtherLocked(expenseDragList)"
-          item-key="id"
-          :delay="150"
-          :delay-on-touch-only="true"
-          :touch-start-threshold="5"
-          ghost-class="drag-ghost"
-          drag-class="drag-float"
-          @start="onDragStart('expense')"
-          @end="onDragEnd('expense')"
-        >
-          <template #item="{ element: cat }">
-            <v-list-item class="category-list-item" rounded="lg">
-              <template v-slot:prepend>
-                <v-icon v-if="!isOther(cat)" class="drag-handle mr-1" size="20" color="grey">
-                  mdi-drag-vertical
-                </v-icon>
-                <span v-else class="drag-handle-placeholder mr-1" />
-                <v-avatar size="32" color="#FFE8E8" class="mr-2">
-                  <v-icon size="16" color="#FF6B6B">{{ cat.icon || 'mdi-circle' }}</v-icon>
-                </v-avatar>
-              </template>
-              <v-list-item-title class="text-body-2 category-title">
-                <span>{{ cat.name }}</span>
-                <v-chip v-if="cat.is_preset" size="x-small" color="grey" variant="tonal" class="preset-chip">
-                  预设
-                </v-chip>
-              </v-list-item-title>
-              <template v-slot:append>
-                <div class="d-flex action-btns">
-                  <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
-                    <v-icon size="small" color="grey">mdi-pencil</v-icon>
-                  </v-btn>
-                  <v-btn icon variant="text" size="x-small" @click="confirmDeleteCategory(cat)">
-                    <v-icon size="small" color="error">mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-              </template>
-            </v-list-item>
-          </template>
-        </Draggable>
-      </v-list>
-    </div>
+      <!-- Expense Categories -->
+      <div class="mb-4">
+        <div class="text-caption text-grey font-weight-medium mb-1">支出分类</div>
+        <v-list v-if="expenseDragList.length" density="compact" class="bg-transparent pa-0">
+          <Draggable
+            v-model="expenseDragList"
+            :handle="'.drag-handle'"
+            :disabled="isOtherLocked(expenseDragList)"
+            item-key="id"
+            :delay="150"
+            :delay-on-touch-only="true"
+            :touch-start-threshold="5"
+            ghost-class="drag-ghost"
+            drag-class="drag-float"
+            @start="onDragStart('expense')"
+            @end="onDragEnd('expense')"
+          >
+            <template #item="{ element: cat }">
+              <v-list-item class="category-list-item" rounded="lg">
+                <template v-slot:prepend>
+                  <v-icon v-if="!isOther(cat)" class="drag-handle mr-1" size="20" color="grey">
+                    mdi-drag-vertical
+                  </v-icon>
+                  <span v-else class="drag-handle-placeholder mr-1" />
+                  <v-avatar size="32" color="#FFE8E8" class="mr-2">
+                    <v-icon size="16" color="#FF6B6B">{{ cat.icon || 'mdi-circle' }}</v-icon>
+                  </v-avatar>
+                </template>
+                <v-list-item-title class="text-body-2 category-title">
+                  <span>{{ cat.name }}</span>
+                  <v-chip
+                    v-if="cat.is_preset"
+                    size="x-small"
+                    color="grey"
+                    variant="tonal"
+                    class="preset-chip"
+                  >
+                    预设
+                  </v-chip>
+                </v-list-item-title>
+                <template v-slot:append>
+                  <div class="d-flex action-btns">
+                    <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
+                      <v-icon size="small" color="grey">mdi-pencil</v-icon>
+                    </v-btn>
+                    <v-btn icon variant="text" size="x-small" @click="confirmDeleteCategory(cat)">
+                      <v-icon size="small" color="error">mdi-delete</v-icon>
+                    </v-btn>
+                  </div>
+                </template>
+              </v-list-item>
+            </template>
+          </Draggable>
+        </v-list>
+      </div>
 
-    <!-- Income Categories -->
-    <div>
-      <div class="text-caption text-grey font-weight-medium mb-1">收入分类</div>
-      <v-list v-if="incomeDragList.length" density="compact" class="bg-transparent pa-0">
-        <Draggable
-          v-model="incomeDragList"
-          :handle="'.drag-handle'"
-          :disabled="isOtherLocked(incomeDragList)"
-          item-key="id"
-          :delay="150"
-          :delay-on-touch-only="true"
-          :touch-start-threshold="5"
-          ghost-class="drag-ghost"
-          drag-class="drag-float"
-          @start="onDragStart('income')"
-          @end="onDragEnd('income')"
-        >
-          <template #item="{ element: cat }">
-            <v-list-item class="category-list-item" rounded="lg">
-              <template v-slot:prepend>
-                <v-icon v-if="!isOther(cat)" class="drag-handle mr-1" size="20" color="grey">
-                  mdi-drag-vertical
-                </v-icon>
-                <span v-else class="drag-handle-placeholder mr-1" />
-                <v-avatar size="32" color="#E8FFF3" class="mr-2">
-                  <v-icon size="16" color="#20C997">{{ cat.icon || 'mdi-circle' }}</v-icon>
-                </v-avatar>
-              </template>
-              <v-list-item-title class="text-body-2 category-title">
-                <span>{{ cat.name }}</span>
-                <v-chip v-if="cat.is_preset" size="x-small" color="grey" variant="tonal" class="preset-chip">
-                  预设
-                </v-chip>
-              </v-list-item-title>
-              <template v-slot:append>
-                <div class="d-flex action-btns">
-                  <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
-                    <v-icon size="small" color="grey">mdi-pencil</v-icon>
-                  </v-btn>
-                  <v-btn icon variant="text" size="x-small" @click="confirmDeleteCategory(cat)">
-                    <v-icon size="small" color="error">mdi-delete</v-icon>
-                  </v-btn>
-                </div>
-              </template>
-            </v-list-item>
-          </template>
-        </Draggable>
-      </v-list>
+      <!-- Income Categories -->
+      <div>
+        <div class="text-caption text-grey font-weight-medium mb-1">收入分类</div>
+        <v-list v-if="incomeDragList.length" density="compact" class="bg-transparent pa-0">
+          <Draggable
+            v-model="incomeDragList"
+            :handle="'.drag-handle'"
+            :disabled="isOtherLocked(incomeDragList)"
+            item-key="id"
+            :delay="150"
+            :delay-on-touch-only="true"
+            :touch-start-threshold="5"
+            ghost-class="drag-ghost"
+            drag-class="drag-float"
+            @start="onDragStart('income')"
+            @end="onDragEnd('income')"
+          >
+            <template #item="{ element: cat }">
+              <v-list-item class="category-list-item" rounded="lg">
+                <template v-slot:prepend>
+                  <v-icon v-if="!isOther(cat)" class="drag-handle mr-1" size="20" color="grey">
+                    mdi-drag-vertical
+                  </v-icon>
+                  <span v-else class="drag-handle-placeholder mr-1" />
+                  <v-avatar size="32" color="#E8FFF3" class="mr-2">
+                    <v-icon size="16" color="#20C997">{{ cat.icon || 'mdi-circle' }}</v-icon>
+                  </v-avatar>
+                </template>
+                <v-list-item-title class="text-body-2 category-title">
+                  <span>{{ cat.name }}</span>
+                  <v-chip
+                    v-if="cat.is_preset"
+                    size="x-small"
+                    color="grey"
+                    variant="tonal"
+                    class="preset-chip"
+                  >
+                    预设
+                  </v-chip>
+                </v-list-item-title>
+                <template v-slot:append>
+                  <div class="d-flex action-btns">
+                    <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
+                      <v-icon size="small" color="grey">mdi-pencil</v-icon>
+                    </v-btn>
+                    <v-btn icon variant="text" size="x-small" @click="confirmDeleteCategory(cat)">
+                      <v-icon size="small" color="error">mdi-delete</v-icon>
+                    </v-btn>
+                  </div>
+                </template>
+              </v-list-item>
+            </template>
+          </Draggable>
+        </v-list>
+      </div>
     </div>
 
     <!-- Category Dialog -->

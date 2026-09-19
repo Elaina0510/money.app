@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { cwd } from 'node:process'
 
 // ── Mocks ──────────────────────────────────────────────────────────
 // vue-router 只桩掉 composable，保留 createRouter/createWebHashHistory，
@@ -87,6 +90,7 @@ import settingsPageSource from './SettingsPage.vue?raw'
 import categoriesPageSource from './SettingsCategoriesPage.vue?raw'
 import tagsPageSource from './SettingsTagsPage.vue?raw'
 import quickTemplatesPageSource from './SettingsQuickTemplatesPage.vue?raw'
+import historyPageSource from './HistoryPage.vue?raw'
 
 // ── 测试数据 ────────────────────────────────────────────────────────
 const CATEGORIES = [
@@ -680,5 +684,147 @@ describe('M7 设置页三个管理区块改二级页面', () => {
 
     // 三个区块的关键标识符逐项零命中（词边界）
     residues.forEach((id) => expect(settingsPageSource).not.toMatch(new RegExp(`\\b${id}\\b`)))
+  })
+})
+
+// ── M4 设置二级页面统一卡片图层容器 ─────────────────────────────────
+const PAGE_CARD_OPEN = '<div class="page-card">'
+
+// vitest 默认不处理 CSS（?raw 会拿到空串），故沿用 categoryIcons.test.js 手法直读样式表原文
+function readGlobalStyles() {
+  const relative = join('src', 'styles', 'global.scss')
+  let dir = cwd()
+  for (let i = 0; i < 5; i++) {
+    const candidate = join(dir, relative)
+    if (existsSync(candidate)) return readFileSync(candidate, 'utf8')
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  throw new Error(`未找到 global.scss（cwd=${cwd()}）`)
+}
+
+// 按 div 深度配对截出卡壳区间，返回 { card, outside }
+// P2 收敛口径（设计 §4.3-1 字面写法不可直照）：M4 清除对象是「页面级透视」，
+// 故断言取结构性写法——截出卡壳之外片段再断言，而非整串 not.toContain
+function splitByPageCard(source) {
+  const start = source.indexOf(PAGE_CARD_OPEN)
+  if (start < 0) throw new Error('未找到 .page-card 容器')
+  const divTags = /<\/?div\b[^>]*>/g
+  divTags.lastIndex = start
+  let depth = 0
+  let match
+  while ((match = divTags.exec(source)) !== null) {
+    if (match[0].startsWith('</')) depth -= 1
+    else if (!match[0].endsWith('/>')) depth += 1
+    if (depth === 0) {
+      return {
+        card: source.slice(start, divTags.lastIndex),
+        outside: source.slice(0, start) + source.slice(divTags.lastIndex),
+      }
+    }
+  }
+  throw new Error('.page-card 容器未闭合')
+}
+
+describe('M4 设置二级页面统一卡片图层容器', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    getCategories.mockResolvedValue(reorderCopy())
+    reorderCategories.mockResolvedValue(reorderCopy())
+  })
+
+  // 任务 §4.1（含 §1.1/§1.2/§1.3、§2.1、§3.1/§3.2）
+  it('用例M4-1: 四个二级页主体内容入 page-card，全局容器规范齐备且不改挂 settings-card', () => {
+    const styles = readGlobalStyles()
+    expect(styles).toMatch(/\.page-card \{[^}]*background: rgb\(var\(--v-theme-surface\)\)/)
+    expect(styles).toMatch(/\.page-card \{[^}]*border-radius: 16px/)
+    expect(styles).toMatch(/\.page-card \{[^}]*box-shadow: var\(--shadow-level-1\)/)
+    expect(styles).toMatch(/\.page-card \{[^}]*padding: 16px/)
+    expect(styles).toMatch(/\.page-card \{[^}]*margin-bottom: 12px/)
+    // §1.2 深色不加分支（--v-theme-surface 运行时随主题切换）
+    expect(styles).not.toMatch(/\.v-theme--dark[^{]*\.page-card/)
+    // §1.3 钩子类 .settings-card 不另行赋样式，样式统一由 .page-card 承载
+    expect(styles).not.toMatch(/\.settings-card\s*\{/)
+
+    const pages = [
+      ['分类页', categoriesPageSource, ['支出分类', '收入分类', '暂无分类']],
+      ['标签页', tagsPageSource, ['暂无标签']],
+      ['快速记账页', quickTemplatesPageSource, ['暂无快速记账模板']],
+    ]
+    pages.forEach(([name, source, markers]) => {
+      expect(source, `${name} 未接 .page-card`).toContain(PAGE_CARD_OPEN)
+      // 每页恰一个卡壳（容器复用不重复定义），空态与主体内容均在卡内
+      expect(source.match(/class="page-card"/g), `${name} 卡壳应恰一处}`).toHaveLength(1)
+      const { card, outside } = splitByPageCard(source)
+      markers.forEach((m) => expect(card, `${name}「${m}」未入卡`).toContain(m))
+      // §2.1 页头（返回 + 操作按钮）留在卡外
+      expect(outside).toContain('mdi-arrow-left')
+      expect(outside).toContain('$router.back()')
+    })
+
+    // 分类页两块同卡分区（§2.2：块间距 mb-4）；快速记账页模板列表入卡（§2.4）
+    expect(splitByPageCard(categoriesPageSource).card).toContain('class="mb-4"')
+    // 标签页 chip 云入卡（§2.3，M5 分页控件同卡位由 M5 承接）
+    expect(splitByPageCard(tagsPageSource).card).toContain('flex-wrap')
+
+    // §3.1 数据回溯页空态包卡；§3.2 既有列表 v-card 保持不重构
+    expect(historyPageSource).toMatch(/class="page-card text-center"[\s\S]*?暂无操作记录/)
+    expect(historyPageSource).toMatch(/<v-card v-else rounded="xl" class="mb-4">/)
+  })
+
+  // 任务 §4.2（P2 收敛后的「页面级无透视」结构性口径）
+  it('用例M4-2: 卡壳之外无列表透明直贴页面背景；卡内 Draggable 的 bg-transparent 合法保留', () => {
+    const categories = splitByPageCard(categoriesPageSource)
+    expect(categories.outside).not.toContain('bg-transparent')
+    // M3 合入后两个 Draggable 的 v-list 位于卡壳内部，不再产生透视 → 不入清除范围（易错点 6）
+    expect(categories.card.match(/bg-transparent/g)).toHaveLength(2)
+
+    const templates = splitByPageCard(quickTemplatesPageSource)
+    expect(templates.outside).not.toContain('bg-transparent')
+    // 模板页原页面级透视列表（§2.5 点名）彻底去除透明写法
+    expect(templates.card).not.toContain('bg-transparent')
+
+    const tags = splitByPageCard(tagsPageSource)
+    expect(tags.outside).not.toContain('bg-transparent')
+
+    // 数据回溯页唯一 bg-transparent 在既有 v-card 内（展开明细列表），页面级无裸列表
+    expect(historyPageSource).toMatch(/<v-card v-else rounded="xl"[\s\S]*?bg-transparent/)
+  })
+
+  // 任务 §4.3（渲染快照）+ M3 交接的卡壳 × 拖拽回归
+  it('用例M4-3: 分类页支出/收入标题渲染在 .page-card 内，卡壳不影响拖拽与批量重排', async () => {
+    const wrapper = await mountPage(SettingsCategoriesPage)
+    const cards = wrapper.findAll('.page-card')
+    expect(cards).toHaveLength(1)
+    const card = cards[0]
+
+    const text = card.text()
+    expect(text).toContain('支出分类')
+    expect(text).toContain('收入分类')
+    expect(text).toContain('餐饮')
+    expect(text).toContain('其他收入')
+    // 页头操作按钮留卡外
+    expect(text).not.toContain('恢复默认')
+    expect(wrapper.text()).toContain('恢复默认')
+    // 卡内两块分区，支出块 mb-4 生效一处
+    expect(card.findAll('.mb-4')).toHaveLength(1)
+
+    // 卡壳未吃掉 M3 拖拽结构：两组各一个 Draggable 实例、行渲染源一一对应
+    expect(card.findAllComponents(Draggable)).toHaveLength(2)
+    expect(card.findAll('.category-list-item')).toHaveLength(6)
+    expect(card.findAll('[data-draggable]')).toHaveLength(6)
+
+    // 拖拽改序仍走一次批量重排（视觉结构未回归破坏）
+    const list = wrapper.vm.expenseDragList
+    wrapper.vm.onDragStart('expense')
+    wrapper.vm.expenseDragList = [list[1], list[0], list[2], list[3]]
+    wrapper.vm.onDragEnd('expense')
+    await flushPromises()
+    expect(reorderCategories).toHaveBeenCalledTimes(1)
+    expect(reorderCategories).toHaveBeenCalledWith({ type: 'expense', ids: [2, 1, 3, 8] })
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith('排序已保存')
   })
 })

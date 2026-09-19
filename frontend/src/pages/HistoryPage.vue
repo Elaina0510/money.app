@@ -19,7 +19,7 @@
       <v-progress-circular indeterminate color="primary" />
     </div>
 
-    <div v-else-if="items.length === 0" class="text-center pa-8">
+    <div v-else-if="items.length === 0" class="page-card text-center">
       <v-icon size="64" color="grey-lighten-1">mdi-history</v-icon>
       <p class="text-body-2 text-grey mt-2">暂无操作记录</p>
     </div>
