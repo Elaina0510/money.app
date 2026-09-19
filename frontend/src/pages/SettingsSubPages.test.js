@@ -8,6 +8,8 @@ import { createPinia, setActivePinia } from 'pinia'
 // 使同一文件内可导入真实路由表做快照断言（用例5）。
 const mockPush = vi.fn()
 const mockBack = vi.fn()
+// useAppStore 每次调用返回新对象，故 toast spy 提升到模块级供页面与 store 共享断言
+const mockShowToast = vi.fn()
 
 vi.mock('vue-router', async (importOriginal) => {
   const actual = await importOriginal()
@@ -22,6 +24,7 @@ vi.mock('@/api/categories', () => ({
   getCategories: vi.fn().mockResolvedValue([]),
   createCategory: vi.fn().mockResolvedValue({}),
   updateCategory: vi.fn().mockResolvedValue({}),
+  reorderCategories: vi.fn().mockResolvedValue([]),
   deleteCategory: vi.fn().mockResolvedValue({}),
   restoreDefaultCategories: vi.fn().mockResolvedValue({ message: '已恢复默认分类' }),
 }))
@@ -51,7 +54,7 @@ vi.mock('@/api/export', () => ({
 
 vi.mock('@/stores/useAppStore', () => ({
   useAppStore: () => ({
-    showToast: vi.fn(),
+    showToast: mockShowToast,
     themeMode: 'auto',
     setThemeMode: vi.fn(),
   }),
@@ -61,10 +64,12 @@ import {
   getCategories,
   createCategory,
   updateCategory,
+  reorderCategories,
   deleteCategory,
   restoreDefaultCategories,
 } from '@/api/categories'
 import { getTags, createTag, deleteTag } from '@/api/tags'
+import Draggable from 'vuedraggable'
 import {
   getRecords,
   getQuickTemplates,
@@ -127,6 +132,33 @@ async function mountPage(component) {
   return wrapper
 }
 
+// ── M3 拖拽排序：含「其他」的可见集合（等价于后端 GET 的排序真值） ──────
+const REORDER_CATEGORIES = [
+  { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 1, is_preset: 1 },
+  { id: 2, name: '出行', type: 'expense', icon: 'mdi-bus', sort_order: 2, is_preset: 1 },
+  { id: 3, name: '购物', type: 'expense', icon: 'mdi-cart', sort_order: 3, is_preset: 0 },
+  { id: 8, name: '其他支出', type: 'expense', icon: 'mdi-cash-minus', sort_order: 99, is_preset: 1 },
+  { id: 9, name: '工资', type: 'income', icon: 'mdi-wallet', sort_order: 1, is_preset: 1 },
+  { id: 10, name: '其他收入', type: 'income', icon: 'mdi-cash-plus', sort_order: 99, is_preset: 1 },
+]
+
+const reorderCopy = () => REORDER_CATEGORIES.map((c) => ({ ...c }))
+
+async function mountReorderPage() {
+  getCategories.mockResolvedValue(reorderCopy())
+  reorderCategories.mockResolvedValue(reorderCopy())
+  return mountPage(SettingsCategoriesPage)
+}
+
+// vuedraggable 把非声明属性按 kebab → camel 透传给 Sortable，这里同口径归一
+function sortableOptionsOf(node) {
+  const out = {}
+  Object.entries(node.vm.$attrs).forEach(([key, value]) => {
+    out[key.replace(/-([a-z])/g, (_, ch) => ch.toUpperCase())] = value
+  })
+  return out
+}
+
 describe('M7 设置页三个管理区块改二级页面', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -138,6 +170,7 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     getQuickTemplates.mockResolvedValue(TEMPLATES.map((t) => ({ ...t })))
     createCategory.mockResolvedValue({ id: 4, name: '新分类', type: 'expense' })
     updateCategory.mockResolvedValue({ id: 1, name: '餐饮', type: 'expense' })
+    reorderCategories.mockResolvedValue(CATEGORIES.map((c) => ({ ...c })))
     deleteCategory.mockResolvedValue({})
     restoreDefaultCategories.mockResolvedValue({ message: '已恢复默认分类' })
     createTag.mockResolvedValue({ id: 16, name: '新标签', category_id: 1 })
@@ -211,17 +244,112 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     expect(getCategories).toHaveBeenCalledTimes(1)
   })
 
-  it('用例2b: 上移/下移走 store.editCategory 交换 sort_order', async () => {
-    const wrapper = await mountPage(SettingsCategoriesPage)
+  it('用例2b: 拖拽把手替换上下按钮，松手一次批量重排 PUT + 唯一「排序已保存」toast', async () => {
+    const wrapper = await mountReorderPage()
 
-    // store 内元素为 reactive 代理，需取列表内的同一引用
-    const expense = wrapper.vm.expenseCategories
-    await wrapper.vm.moveCategory(expense[1], -1)
+    // 本文件挂载不装 Vuetify 插件，v-list-item 的具名 slot（把手所在）不落 DOM，
+    // 故把手/占位/上下按钮移除按仓库既定的 ?raw 源码口径断言
+    // D8：旧上移/下移按钮与 moveCategory 整体移除（单个 PUT 已不改排序）
+    expect(categoriesPageSource).not.toContain('mdi-chevron')
+    expect(categoriesPageSource).not.toMatch(/\bmoveCategory\b/)
+    expect(categoriesPageSource.match(/mdi-drag-vertical/g)).toHaveLength(2)
+    expect(categoriesPageSource.match(/class="drag-handle mr-1"/g)).toHaveLength(2)
+    expect(categoriesPageSource.match(/class="drag-handle-placeholder mr-1"/g)).toHaveLength(2)
+    expect(categoriesPageSource).toMatch(/v-if="!isOther\(cat\)"/)
+    // 样式红线：touch-action: none 只加把手，未污染整行（加整行会杀死列表滚动）
+    expect(categoriesPageSource).toMatch(/\.drag-handle \{[^}]*touch-action: none/)
+    expect(categoriesPageSource).not.toMatch(/\.category-list-item \{[^}]*touch-action/)
+    expect(categoriesPageSource).toMatch(/\.drag-handle-placeholder \{[^}]*width: 20px/)
+
+    // 支出/收入各一个独立 Draggable 实例（天然不可跨组拖）
+    const draggables = wrapper.findAllComponents(Draggable)
+    expect(draggables).toHaveLength(2)
+    const options = sortableOptionsOf(draggables[0])
+    expect(options.handle).toBe('.drag-handle')
+    expect(options.delay).toBe(150)
+    expect(options.delayOnTouchOnly).toBe(true)
+    expect(options.touchStartThreshold).toBe(5)
+    expect(options.ghostClass).toBe('drag-ghost')
+    expect(options.dragClass).toBe('drag-float')
+    expect(options.disabled).toBe(false)
+    expect(draggables[0].props('itemKey')).toBe('id')
+
+    // REORDER 夹具：支出 4 行 + 收入 2 行；行渲染与 Sortable 命中集一一对应
+    // （[data-draggable] 缺失即整列表拖不动，属真实渲染断言）
+    expect(wrapper.findAll('.category-list-item')).toHaveLength(6)
+    expect(wrapper.findAll('[data-draggable]')).toHaveLength(6)
+
+    // jsdom 不真实驱动 sortable：vm 直改 dragList 后手动调 onDragEnd
+    expect(wrapper.vm.expenseDragList.map((c) => c.name)).toEqual([
+      '餐饮',
+      '出行',
+      '购物',
+      '其他支出',
+    ])
+    const list = wrapper.vm.expenseDragList
+    wrapper.vm.onDragStart('expense')
+    expect(wrapper.vm.preDragSnapshot.expense.map((c) => c.id)).toEqual([1, 2, 3, 8])
+    wrapper.vm.expenseDragList = [list[1], list[0], list[2], list[3]]
+    wrapper.vm.onDragEnd('expense')
     await flushPromises()
 
-    expect(updateCategory).toHaveBeenNthCalledWith(1, 2, { sort_order: 0 })
-    expect(updateCategory).toHaveBeenNthCalledWith(2, 1, { sort_order: 1 })
-    expect(getCategories).toHaveBeenCalledTimes(2) // 初始加载 + 搬移后刷新
+    expect(reorderCategories).toHaveBeenCalledTimes(1)
+    expect(reorderCategories).toHaveBeenCalledWith({ type: 'expense', ids: [2, 1, 3, 8] })
+    // 全流程唯一一次 toast：store 成功路径不再附加「更新成功」类提示
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith('排序已保存')
+  })
+
+  it('用例2b-2:「其他」被拖到中间 → 本地与提交 ids 均归一化回末位；isOther/isOtherLocked 口径', async () => {
+    const wrapper = await mountReorderPage()
+    const list = wrapper.vm.expenseDragList
+    const [food, trip, shopping, other] = list
+
+    wrapper.vm.onDragStart('expense')
+    wrapper.vm.expenseDragList = [food, other, trip, shopping]
+    wrapper.vm.onDragEnd('expense')
+    // 本地镜像后端「末尾占位」归一化（同步生效，避免保存后跳变）
+    expect(wrapper.vm.expenseDragList.map((c) => c.name)).toEqual([
+      '餐饮',
+      '出行',
+      '购物',
+      '其他支出',
+    ])
+    await flushPromises()
+    expect(reorderCategories).toHaveBeenCalledWith({ type: 'expense', ids: [1, 2, 3, 8] })
+
+    // isOther: name + type 双判（与后端助手对齐），错类型同名不算「其他」
+    expect(wrapper.vm.isOther(other)).toBe(true)
+    expect(wrapper.vm.isOther({ name: '其他支出', type: 'income' })).toBe(false)
+    expect(wrapper.vm.isOther({ name: '其他收入', type: 'income' })).toBe(true)
+    expect(wrapper.vm.isOther({ name: '餐饮', type: 'expense' })).toBe(false)
+
+    // isOtherLocked: 非末位「其他」（异常数据）→ 禁用本组拖动
+    expect(wrapper.vm.isOtherLocked([other, food, trip])).toBe(true)
+    expect(wrapper.vm.isOtherLocked([food, trip, other])).toBe(false)
+    expect(wrapper.vm.isOtherLocked([])).toBe(false)
+    expect(sortableOptionsOf(wrapper.findAllComponents(Draggable)[1]).disabled).toBe(false)
+  })
+
+  it('用例2b-3: 保存失败 → 回滚拖前快照 + 错误 toast，并静默重拉对齐后端真值', async () => {
+    const wrapper = await mountReorderPage()
+    reorderCategories.mockRejectedValue(new Error('排序列表与当前分类不一致'))
+    // 重拉同样失败：证明列表恢复来自快照回滚而非重新请求
+    getCategories.mockRejectedValue(new Error('network down'))
+
+    const list = wrapper.vm.expenseDragList
+    wrapper.vm.onDragStart('expense')
+    // 出行↑ 购物↑ 其他↑ 餐饮↓ →「其他」在中间，归一化后提交 ids = [2,3,1,8]
+    wrapper.vm.expenseDragList = [list[1], list[2], list[3], list[0]]
+    wrapper.vm.onDragEnd('expense')
+    await flushPromises()
+
+    expect(reorderCategories).toHaveBeenCalledTimes(1)
+    expect(reorderCategories).toHaveBeenCalledWith({ type: 'expense', ids: [2, 3, 1, 8] })
+    expect(wrapper.vm.expenseDragList.map((c) => c.id)).toEqual([1, 2, 3, 8])
+    expect(getCategories).toHaveBeenCalledTimes(2) // 初始加载 + 失败后静默对齐
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith('排序保存失败', 'error')
   })
 
   it('用例2c: 新增/编辑分类共用 Category Dialog，icon 由精选面板回填（无文本输入框），保存分别走 create/update', async () => {
@@ -466,7 +594,7 @@ describe('M7 设置页三个管理区块改二级页面', () => {
       'typeOptions',
       'editingCategory',
       'savingCategory',
-      'moveCategory',
+      // 'moveCategory' 随 M3 决策 D8 整体移除（拖拽把手口径见用例 2b）
       'editCategory',
       'saveCategory',
       'resetCategoryForm',

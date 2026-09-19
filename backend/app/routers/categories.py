@@ -6,7 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.models.user import User
-from app.schemas.category import CategoryCreate, CategoryResponse, CategoryUpdate
+from app.schemas.category import CategoryCreate, CategoryReorder, CategoryResponse, CategoryUpdate
 from app.services import category_service
 from app.utils.auth import require_auth
 from app.utils.response import Code, error_response, success_response
@@ -47,6 +47,28 @@ async def create_category(
         if "UNIQUE constraint" in str(e):
             return error_response(Code.CONFLICT, "该名称的分类已存在")
         raise
+
+
+@router.put("/reorder")
+async def reorder_categories(
+    data: CategoryReorder,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_auth),
+) -> JSONResponse:
+    """批量重排某类型分组的分类排序（原子保存，「其他」强制置尾）。
+
+    注意：必须声明在 ``PUT /{category_id}`` 之前，否则会被路径参数抢先匹配 422。
+    """
+    try:
+        categories = await category_service.reorder_categories(
+            db, data.type, data.ids, current_user
+        )
+    except ValueError as e:
+        return error_response(Code.PARAM_ERROR, str(e))
+    items = [
+        CategoryResponse.model_validate(c, from_attributes=True).model_dump() for c in categories
+    ]
+    return success_response(data=items, message="排序已保存")
 
 
 @router.put("/{category_id}")

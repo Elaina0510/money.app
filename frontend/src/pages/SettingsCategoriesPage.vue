@@ -20,113 +20,110 @@
       </div>
     </div>
 
-    <div v-if="categories.length === 0" class="text-center pa-4 text-grey text-caption">
+    <div
+      v-if="expenseDragList.length === 0 && incomeDragList.length === 0"
+      class="text-center pa-4 text-grey text-caption"
+    >
       暂无分类
     </div>
 
     <!-- Expense Categories -->
     <div class="mb-2">
       <div class="text-caption text-grey font-weight-medium mb-1">支出分类</div>
-      <v-list v-if="expenseCategories.length" density="compact" class="bg-transparent pa-0">
-        <v-list-item
-          v-for="cat in expenseCategories"
-          :key="cat.id"
-          class="category-list-item"
-          rounded="lg"
+      <v-list v-if="expenseDragList.length" density="compact" class="bg-transparent pa-0">
+        <Draggable
+          v-model="expenseDragList"
+          :handle="'.drag-handle'"
+          :disabled="isOtherLocked(expenseDragList)"
+          item-key="id"
+          :delay="150"
+          :delay-on-touch-only="true"
+          :touch-start-threshold="5"
+          ghost-class="drag-ghost"
+          drag-class="drag-float"
+          @start="onDragStart('expense')"
+          @end="onDragEnd('expense')"
         >
-          <template v-slot:prepend>
-            <v-avatar size="32" color="#FFE8E8" class="mr-2">
-              <v-icon size="16" color="#FF6B6B">{{ cat.icon || 'mdi-circle' }}</v-icon>
-            </v-avatar>
+          <template #item="{ element: cat }">
+            <v-list-item class="category-list-item" rounded="lg">
+              <template v-slot:prepend>
+                <v-icon v-if="!isOther(cat)" class="drag-handle mr-1" size="20" color="grey">
+                  mdi-drag-vertical
+                </v-icon>
+                <span v-else class="drag-handle-placeholder mr-1" />
+                <v-avatar size="32" color="#FFE8E8" class="mr-2">
+                  <v-icon size="16" color="#FF6B6B">{{ cat.icon || 'mdi-circle' }}</v-icon>
+                </v-avatar>
+              </template>
+              <v-list-item-title class="text-body-2 category-title">
+                <span>{{ cat.name }}</span>
+                <v-chip v-if="cat.is_preset" size="x-small" color="grey" variant="tonal" class="preset-chip">
+                  预设
+                </v-chip>
+              </v-list-item-title>
+              <template v-slot:append>
+                <div class="d-flex action-btns">
+                  <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
+                    <v-icon size="small" color="grey">mdi-pencil</v-icon>
+                  </v-btn>
+                  <v-btn icon variant="text" size="x-small" @click="confirmDeleteCategory(cat)">
+                    <v-icon size="small" color="error">mdi-delete</v-icon>
+                  </v-btn>
+                </div>
+              </template>
+            </v-list-item>
           </template>
-          <v-list-item-title class="text-body-2 category-title">
-            <span>{{ cat.name }}</span>
-            <v-chip v-if="cat.is_preset" size="x-small" color="grey" variant="tonal" class="preset-chip">
-              预设
-            </v-chip>
-          </v-list-item-title>
-          <template v-slot:append>
-            <div class="d-flex action-btns">
-              <v-btn
-                v-if="expenseCategories.indexOf(cat) > 0"
-                icon
-                variant="text"
-                size="x-small"
-                @click="moveCategory(cat, -1)"
-              >
-                <v-icon size="small" color="grey">mdi-chevron-up</v-icon>
-              </v-btn>
-              <v-btn
-                v-if="expenseCategories.indexOf(cat) < expenseCategories.length - 1"
-                icon
-                variant="text"
-                size="x-small"
-                @click="moveCategory(cat, 1)"
-              >
-                <v-icon size="small" color="grey">mdi-chevron-down</v-icon>
-              </v-btn>
-              <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
-                <v-icon size="small" color="grey">mdi-pencil</v-icon>
-              </v-btn>
-              <v-btn icon variant="text" size="x-small" @click="confirmDeleteCategory(cat)">
-                <v-icon size="small" color="error">mdi-delete</v-icon>
-              </v-btn>
-            </div>
-          </template>
-        </v-list-item>
+        </Draggable>
       </v-list>
     </div>
 
     <!-- Income Categories -->
     <div>
       <div class="text-caption text-grey font-weight-medium mb-1">收入分类</div>
-      <v-list v-if="incomeCategories.length" density="compact" class="bg-transparent pa-0">
-        <v-list-item
-          v-for="cat in incomeCategories"
-          :key="cat.id"
-          class="category-list-item"
-          rounded="lg"
+      <v-list v-if="incomeDragList.length" density="compact" class="bg-transparent pa-0">
+        <Draggable
+          v-model="incomeDragList"
+          :handle="'.drag-handle'"
+          :disabled="isOtherLocked(incomeDragList)"
+          item-key="id"
+          :delay="150"
+          :delay-on-touch-only="true"
+          :touch-start-threshold="5"
+          ghost-class="drag-ghost"
+          drag-class="drag-float"
+          @start="onDragStart('income')"
+          @end="onDragEnd('income')"
         >
-          <template v-slot:prepend>
-            <v-avatar size="32" color="#E8FFF3" class="mr-2">
-              <v-icon size="16" color="#20C997">{{ cat.icon || 'mdi-circle' }}</v-icon>
-            </v-avatar>
+          <template #item="{ element: cat }">
+            <v-list-item class="category-list-item" rounded="lg">
+              <template v-slot:prepend>
+                <v-icon v-if="!isOther(cat)" class="drag-handle mr-1" size="20" color="grey">
+                  mdi-drag-vertical
+                </v-icon>
+                <span v-else class="drag-handle-placeholder mr-1" />
+                <v-avatar size="32" color="#E8FFF3" class="mr-2">
+                  <v-icon size="16" color="#20C997">{{ cat.icon || 'mdi-circle' }}</v-icon>
+                </v-avatar>
+              </template>
+              <v-list-item-title class="text-body-2 category-title">
+                <span>{{ cat.name }}</span>
+                <v-chip v-if="cat.is_preset" size="x-small" color="grey" variant="tonal" class="preset-chip">
+                  预设
+                </v-chip>
+              </v-list-item-title>
+              <template v-slot:append>
+                <div class="d-flex action-btns">
+                  <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
+                    <v-icon size="small" color="grey">mdi-pencil</v-icon>
+                  </v-btn>
+                  <v-btn icon variant="text" size="x-small" @click="confirmDeleteCategory(cat)">
+                    <v-icon size="small" color="error">mdi-delete</v-icon>
+                  </v-btn>
+                </div>
+              </template>
+            </v-list-item>
           </template>
-          <v-list-item-title class="text-body-2 category-title">
-            <span>{{ cat.name }}</span>
-            <v-chip v-if="cat.is_preset" size="x-small" color="grey" variant="tonal" class="preset-chip">
-              预设
-            </v-chip>
-          </v-list-item-title>
-          <template v-slot:append>
-            <div class="d-flex action-btns">
-              <v-btn
-                v-if="incomeCategories.indexOf(cat) > 0"
-                icon
-                variant="text"
-                size="x-small"
-                @click="moveCategory(cat, -1)"
-              >
-                <v-icon size="small" color="grey">mdi-chevron-up</v-icon>
-              </v-btn>
-              <v-btn
-                v-if="incomeCategories.indexOf(cat) < incomeCategories.length - 1"
-                icon
-                variant="text"
-                size="x-small"
-                @click="moveCategory(cat, 1)"
-              >
-                <v-icon size="small" color="grey">mdi-chevron-down</v-icon>
-              </v-btn>
-              <v-btn icon variant="text" size="x-small" @click="editCategory(cat)">
-                <v-icon size="small" color="grey">mdi-pencil</v-icon>
-              </v-btn>
-              <v-btn icon variant="text" size="x-small" @click="confirmDeleteCategory(cat)">
-                <v-icon size="small" color="error">mdi-delete</v-icon>
-              </v-btn>
-            </div>
-          </template>
-        </v-list-item>
+        </Draggable>
       </v-list>
     </div>
 
@@ -198,8 +195,9 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
+import Draggable from 'vuedraggable'
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { getRecords } from '@/api/records'
@@ -237,18 +235,81 @@ const deleteCategoryMessage = ref('')
 const showRestoreConfirm = ref(false)
 const restoring = ref(false)
 
-async function moveCategory(cat, direction) {
-  const list = cat.type === 'expense' ? expenseCategories.value : incomeCategories.value
-  const idx = list.indexOf(cat)
-  const target = list[idx + direction]
-  if (!target) return
+// ── M3 拖拽排序 ──────────────────────────────────────────────────────
+// 「其他」判定与后端 category_service 助手对齐（name + type 双判）：
+// 预设行与其 CoW 用户副本同名，一并命中；错类型的同名行不算「其他」
+const OTHER_NAMES = { expense: '其他支出', income: '其他收入' }
+
+function isOther(cat) {
+  return !!cat && cat.name === OTHER_NAMES[cat.type]
+}
+
+// 「其他」非末位（异常数据）→ 禁用本组拖动，避免拖出无法解释的顺序
+function isOtherLocked(list) {
+  const idx = list.findIndex(isOther)
+  return idx >= 0 && idx !== list.length - 1
+}
+
+// 单一渲染源：模板只读 dragList；store computed 仅作派生源（预设 CoW 后 id 会变）
+const expenseDragList = ref([])
+const incomeDragList = ref([])
+
+watch(
+  expenseCategories,
+  (list) => {
+    expenseDragList.value = [...list]
+  },
+  { immediate: true }
+)
+
+watch(
+  incomeCategories,
+  (list) => {
+    incomeDragList.value = [...list]
+  },
+  { immediate: true }
+)
+
+function dragList(type) {
+  return type === 'expense' ? expenseDragList.value : incomeDragList.value
+}
+
+function setDragList(type, list) {
+  if (type === 'expense') expenseDragList.value = list
+  else incomeDragList.value = list
+}
+
+// 拖前快照：保存失败时回滚本地顺序
+const preDragSnapshot = ref({ expense: [], income: [] })
+
+function onDragStart(type) {
+  preDragSnapshot.value[type] = [...dragList(type)]
+}
+
+function onDragEnd(type) {
+  const list = dragList(type)
+  const otherIdx = list.findIndex(isOther)
+  // 本地镜像后端「末尾占位」归一化：「其他」被拖到中间 → 移回末位再提交，避免保存后跳变
+  const effective =
+    otherIdx >= 0 && otherIdx !== list.length - 1
+      ? [...list.filter((c) => !isOther(c)), list[otherIdx]]
+      : list
+  if (effective !== list) setDragList(type, effective)
+  submitReorder(type, effective)
+}
+
+async function submitReorder(type, list) {
   try {
-    const tempOrder = cat.sort_order
-    await categoriesStore.editCategory(cat.id, { sort_order: target.sort_order })
-    await categoriesStore.editCategory(target.id, { sort_order: tempOrder })
-    await loadCategories()
+    // 一次拖动只发一次 PUT /categories/reorder（原子保存），store 内已重拉对齐
+    await categoriesStore.reorderCategories(
+      type,
+      list.map((c) => c.id)
+    )
+    appStore.showToast('排序已保存') // 全流程唯一一次 toast
   } catch {
-    // Toast shown by store
+    // 失败回滚：先恢复拖前快照，再静默重拉以后端真值为准
+    setDragList(type, [...preDragSnapshot.value[type]])
+    await loadCategories()
   }
 }
 
@@ -390,5 +451,34 @@ onMounted(async () => {
 
 .action-btns {
   gap: 1px;
+}
+
+/* ── M3 拖拽排序态 ───────────────────────────────────────── */
+/* touch-action: none 只加在把手上：加整行会杀死列表滚动 */
+.drag-handle {
+  cursor: grab;
+  touch-action: none;
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* 「其他」不可拖，用同宽占位保持行高与对齐一致 */
+.drag-handle-placeholder {
+  width: 20px;
+  flex-shrink: 0;
+}
+
+/* 插入位置指示 */
+.drag-ghost {
+  opacity: 0.4;
+  background: rgba(var(--v-theme-primary), 0.08);
+}
+
+/* 拖起浮动态 */
+.drag-float {
+  transform: scale(1.02);
+  box-shadow: var(--shadow-level-3);
 }
 </style>

@@ -1,6 +1,19 @@
 """Category Pydantic schemas."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+
+class CategoryReorder(BaseModel):
+    """Schema for M3 batch reordering one type group (full ordered id list).
+
+    ``ids`` 必须是该用户该类型可见分类的全量 id（缺一即 400，见 service 校验）；
+    「其他」无论提交落点均由服务端强制归一化到末位。
+    """
+
+    type: Literal["expense", "income"]
+    ids: list[int]
 
 
 class CategoryCreate(BaseModel):

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { getCategories, createCategory, updateCategory, deleteCategory, restoreDefaultCategories } from '@/api/categories'
+import { getCategories, createCategory, updateCategory, reorderCategories as reorderCategoriesApi, deleteCategory, restoreDefaultCategories } from '@/api/categories'
 import { getTags, createTag, deleteTag } from '@/api/tags'
 import { useAppStore } from './useAppStore'
 
@@ -65,6 +65,19 @@ export const useCategoriesStore = defineStore('categories', () => {
     }
   }
 
+  async function reorderCategories(type, ids) {
+    const app = useAppStore()
+    try {
+      const result = await reorderCategoriesApi({ type, ids })
+      // 唯一对齐手段：整体重拉（预设行 CoW 后 id 会变，不原地替换）；不弹附加成功 toast
+      await fetchCategories()
+      return result
+    } catch (e) {
+      app.showToast('排序保存失败', 'error')
+      throw e
+    }
+  }
+
   async function removeCategory(id) {
     const app = useAppStore()
     try {
@@ -118,6 +131,7 @@ export const useCategoriesStore = defineStore('categories', () => {
     fetchTags,
     addCategory,
     editCategory,
+    reorderCategories,
     removeCategory,
     addTag,
     removeTag,

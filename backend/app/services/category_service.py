@@ -208,6 +208,81 @@ async def update_category(
     return category
 
 
+async def _set_sort_order(
+    db: AsyncSession, row: Category, sort_order: int, user_id: int | None
+) -> None:
+    """把新排序写入用户可见行：预设行走 Copy-on-Write，全局预设行永不被写脏。
+
+    - 用户自有行（is_preset=0）：直接更新；
+    - 预设有用户副本：更新副本；
+    - 预设无副本：按预设字段建副本（is_preset=0、新 sort_order）后写位。
+    """
+    if row.is_preset == 0 or user_id is None:
+        row.sort_order = sort_order
+        db.add(row)
+        return
+
+    if row.sort_order == sort_order:
+        # 预设行本就在目标位：无需建副本，避免无意义的 CoW 膨胀（全局预设行不被写）
+        return
+
+    dup_stmt = select(Category).where(
+        Category.name == row.name,
+        Category.type == row.type,
+        Category.user_id == user_id,
+        Category.is_preset == 0,
+    )
+    existing = (await db.exec(dup_stmt)).first()
+    if existing is None:
+        existing = Category(
+            name=row.name,
+            type=row.type,
+            icon=row.icon,
+            sort_order=sort_order,
+            is_preset=0,
+            user_id=user_id,
+        )
+    else:
+        existing.sort_order = sort_order
+    db.add(existing)
+
+
+async def reorder_categories(
+    db: AsyncSession,
+    type_: str,
+    ids: list[int],
+    current_user: User | None = None,
+) -> list[Category]:
+    """批量重排某类型分组的分类排序（M3）：单次原子提交、归一化为 1..n 连续。
+
+    规则（设计 §3.2.2）：
+    1. ``ids`` 必须是该用户该类型可见集合的全量有序 id（防漏位）；
+    2. 「其他」无论提交落点，强制归一化到末位 n（其余行保持相对次序）；
+    3. 预设行的改序落到用户副本上，全局预设行 sort_order 永不写脏。
+
+    Raises:
+        ValueError: 提交与当前可见分类不一致（缺项/多项/重复/本用户无「其他」行）。
+    """
+    visible = await _visible_categories(db, type_, current_user)
+    visible_ids = {c.id for c in visible}
+    if len(set(ids)) != len(ids) or set(ids) != visible_ids:
+        raise ValueError("排序列表与当前分类不一致")
+    if not any(_is_other_category(c) for c in visible):
+        raise ValueError("排序列表与当前分类不一致：缺少「其他」分类")
+
+    by_id = {c.id: c for c in visible}
+    submitted = [by_id[cid] for cid in ids]
+    others = [c for c in submitted if _is_other_category(c)]
+    ordered = [c for c in submitted if not _is_other_category(c)] + others
+
+    user_id = current_user.id if current_user else None
+    for position, row in enumerate(ordered, start=1):
+        await _set_sort_order(db, row, position, user_id)
+    await db.commit()
+
+    return await _visible_categories(db, type_, current_user)
+
+
 async def delete_category(
     db: AsyncSession, category_id: int, current_user: User | None = None
 ) -> dict[str, Any] | None:
