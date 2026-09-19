@@ -331,6 +331,10 @@ async function loadCategories() {
 }
 
 onMounted(async () => {
+  // 标签摘要真实数量来源：进入即拉全量标签数组（后端已解除 20 条上限）。
+  // store 的标签拉取内部已 try/catch 不外抛 → fire-and-forget 安全；
+  // 红线：不新增本地同名薄包装函数，直接调 store 方法（用例 6b 零命中断言）
+  categoriesStore.fetchTags()
   await Promise.all([loadCategories(), loadQuickTemplates()])
 })
 

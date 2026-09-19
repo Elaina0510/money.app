@@ -47,6 +47,8 @@ vi.mock('@/stores/useAppStore', () => ({
 
 // Import component after mocks
 import RecordFormPage from './RecordFormPage.vue'
+import recordFormSource from './RecordFormPage.vue?raw'
+import { searchTags } from '@/api/tags'
 
 describe('RecordFormPage - Leave Guard', () => {
   beforeEach(() => {
@@ -171,5 +173,34 @@ describe('RecordFormPage - Leave Guard', () => {
     await nextTick()
 
     expect(wrapper.vm.isDirty).toBe(true)
+  })
+})
+
+// ── M5 回归：记一笔页标签搜索触达全量（后端解除 20 条上限）──────────────
+describe('RecordFormPage - 标签搜索全量回归', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('searchTags 返回 25 条时 tagSearchResults 全量渲染，前端无二次截断', async () => {
+    const results = Array.from({ length: 25 }, (_, i) => ({ id: 201 + i, name: `标签${i + 1}` }))
+    searchTags.mockResolvedValue(results)
+
+    const wrapper = mount(RecordFormPage)
+    await flushPromises()
+
+    wrapper.vm.onTagSearch('标签') // 内部 200ms 防抖
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await flushPromises()
+
+    expect(searchTags).toHaveBeenCalledWith('标签')
+    expect(wrapper.vm.tagSearchResults).toHaveLength(25)
+    // 第 21+ 条同样可选（旧后端上限下最多只有 20 条）
+    expect(wrapper.vm.tagSearchResults[20].name).toBe('标签21')
+    expect(wrapper.vm.tagSearchResults[24].name).toBe('标签25')
+    expect(wrapper.vm.tagSearching).toBe(false)
+    // 渲染源即接口返回的数组：items 直绑 tagSearchResults，无本地 slice
+    expect(recordFormSource).toMatch(/:items="tagSearchResults"/)
+    expect(recordFormSource).not.toMatch(/tagSearchResults\.value\.slice\(/)
   })
 })

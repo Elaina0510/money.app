@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlmodel import select
+from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.category import Category
@@ -16,7 +16,10 @@ from app.utils.response import Code
 async def get_tags(
     db: AsyncSession, current_user: User | None = None, search: str | None = None
 ) -> list[Tag]:
-    """Get all tags visible to the user, excluding soft-deleted tags."""
+    """Get all tags visible to the user, excluding soft-deleted tags.
+
+    v1.4.2 M5：解除原 limit(20) 硬上限，响应仍为裸数组，既有调用方零改动即拿到全量。
+    """
     query = select(Tag).where(Tag.deleted_at.is_(None)).order_by(Tag.id)
     if current_user:
         query = query.where(Tag.user_id == current_user.id)
@@ -24,9 +27,42 @@ async def get_tags(
         query = query.where(Tag.user_id.is_(None))
     if search:
         query = query.where(Tag.name.contains(search))
-    query = query.limit(20)
     result = await db.exec(query)
     return list(result.all())
+
+
+async def get_tags_paged(
+    db: AsyncSession,
+    current_user: User | None = None,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> tuple[list[Tag], int]:
+    """分页取标签，返回 (当页列表, 匹配总数)。
+
+    v1.4.2 M5 新增：供标签管理二级页「展开更多」使用。
+    过滤口径与 get_tags 完全一致（未软删 + 用户隔离），search 同时作用于
+    items 与 total 两处，故 total 即「匹配总数」而非全库总数。
+    """
+    conds: list[Any] = [col(Tag.deleted_at).is_(None)]
+    if current_user:
+        conds.append(col(Tag.user_id) == current_user.id)
+    else:
+        conds.append(col(Tag.user_id).is_(None))
+    if search:
+        conds.append(col(Tag.name).contains(search))
+
+    count_result = await db.exec(select(func.count(col(Tag.id))).where(*conds))
+    total: int = int(count_result.one() or 0)
+
+    rows = await db.exec(
+        select(Tag)
+        .where(*conds)
+        .order_by(col(Tag.id))
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    )
+    return list(rows.all()), total
 
 
 async def get_tag(

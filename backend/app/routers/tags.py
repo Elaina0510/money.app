@@ -27,6 +27,35 @@ async def list_tags(
     )
 
 
+@router.get("/paged")
+async def list_tags_paged(
+    page: int = Query(1, ge=1, description="页码，从 1 开始"),
+    page_size: int = Query(20, ge=1, le=100, description="每页条数"),
+    q: str | None = Query(None, description="搜索关键词"),
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_auth),
+) -> JSONResponse:
+    """Get tags with pagination: {items, total, page, page_size}.
+
+    v1.4.2 M5 新增，供标签管理二级页「展开更多」使用；total 为匹配总数（含 q）。
+    路由顺序红线：必须声明在 GET /{tag_id} 之前，否则 "paged" 被 int 路径参数
+    抢匹配 → 422。
+    """
+    tags, total = await tag_service.get_tags_paged(
+        db, current_user, search=q, page=page, page_size=page_size
+    )
+    return success_response(
+        data={
+            "items": [
+                TagResponse.model_validate(t, from_attributes=True).model_dump() for t in tags
+            ],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+    )
+
+
 @router.get("/{tag_id}")
 async def get_tag(
     tag_id: int,

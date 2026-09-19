@@ -34,6 +34,8 @@ vi.mock('@/api/categories', () => ({
 
 vi.mock('@/api/tags', () => ({
   getTags: vi.fn().mockResolvedValue([]),
+  // M5：标签二级页分页数据源；默认空分页，具体用例内按需覆盖
+  getTagsPaged: vi.fn().mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 }),
   searchTags: vi.fn().mockResolvedValue([]),
   createTag: vi.fn().mockResolvedValue({}),
   deleteTag: vi.fn().mockResolvedValue({}),
@@ -71,7 +73,7 @@ import {
   deleteCategory,
   restoreDefaultCategories,
 } from '@/api/categories'
-import { getTags, createTag, deleteTag } from '@/api/tags'
+import { getTags, getTagsPaged, createTag, deleteTag } from '@/api/tags'
 import Draggable from 'vuedraggable'
 import {
   getRecords,
@@ -107,6 +109,29 @@ const TAGS = [
   { id: 14, name: '报销', category_id: 9 },
   { id: 15, name: '旅行', category_id: 3 },
 ]
+
+// ── M5 分页夹具：等价后端 GET /api/tags/paged 的切片语义 ────────────────
+const MANY_TAGS = Array.from({ length: 30 }, (_, i) => ({
+  id: 101 + i,
+  name: `标签${String(i + 1).padStart(2, '0')}`,
+  category_id: 1,
+}))
+
+function pagedOf(all, page = 1, pageSize = 20) {
+  return {
+    items: all.slice((page - 1) * pageSize, page * pageSize).map((t) => ({ ...t })),
+    total: all.length,
+    page,
+    page_size: pageSize,
+  }
+}
+
+// 让 getTagsPaged 按入参真实分页（越界页自然返回空 items、total 不变）
+function useSlicedPagedMock(all) {
+  getTagsPaged.mockImplementation((params) =>
+    Promise.resolve(pagedOf(all, params?.page ?? 1, params?.page_size ?? 20))
+  )
+}
 
 const TEMPLATES = [
   {
@@ -170,6 +195,8 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     // 每次返回副本：store 的 addCategory/addTag 会 push 进数组，避免污染模块级常量
     getCategories.mockResolvedValue(CATEGORIES.map((c) => ({ ...c })))
     getTags.mockResolvedValue(TAGS.map((t) => ({ ...t })))
+    // M5：标签二级页 chip 源为分页接口首页数据（默认全量落在第 1 页，≤20 条无展开区）
+    useSlicedPagedMock(TAGS)
     getRecords.mockResolvedValue({ items: [], total: 0 })
     getQuickTemplates.mockResolvedValue(TEMPLATES.map((t) => ({ ...t })))
     createCategory.mockResolvedValue({ id: 4, name: '新分类', type: 'expense' })
@@ -185,8 +212,7 @@ describe('M7 设置页三个管理区块改二级页面', () => {
 
   // ── 用例1：设置页摘要卡 ──────────────────────────────────────────
   it('用例1: 设置页渲染三张摘要卡，只含数量与箭头，不含列表条目/新增按钮', async () => {
-    const store = useCategoriesStore()
-    await store.fetchTags()
+    // M5：不再手动预拉标签——摘要数量应由 onMounted 自身的 fetchTags 提供
     const wrapper = await mountPage(SettingsPage)
 
     // 三张摘要卡的跳转目标
@@ -214,10 +240,14 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     expect(wrapper.findAll('.category-list-item')).toHaveLength(0)
   })
 
-  it('用例1b: 二级页操作后（共享 store 变更）摘要数量即时响应，无需重新请求', async () => {
+  // 口径反转改写（M5 易错点 10）：旧断言「设置页不请求 getTags」→ 新断言
+  // 「mount 后 getTags 恰一次（进入即拉真实总数），此后改 store.tags 不再新增请求」
+  it('用例1b: 进入设置页拉一次全量标签，共享 store 变更后摘要即时响应且不再新增请求', async () => {
     const store = useCategoriesStore()
-    await store.fetchTags()
     const wrapper = await mountPage(SettingsPage)
+
+    // 未进过任何标签页也拿到真实数量（后端已解除 20 条上限 → 全量数组 length）
+    expect(getTags).toHaveBeenCalledTimes(1)
     expect(wrapper.text()).toContain('支出 3 / 收入 1')
     expect(wrapper.text()).toContain('5 个')
 
@@ -477,19 +507,24 @@ describe('M7 设置页三个管理区块改二级页面', () => {
   // ── 用例3：标签管理二级页 ────────────────────────────────────────
   it('用例3: 标签二级页空态文案，chip 云渲染全部标签且返回按钮可用', async () => {
     getTags.mockResolvedValue([])
+    getTagsPaged.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
     const wrapper = await mountPage(SettingsTagsPage)
     expect(wrapper.text()).toContain('暂无标签')
 
     await wrapper.findAll('v-btn')[0].trigger('click')
     expect(mockBack).toHaveBeenCalledTimes(1)
 
-    useCategoriesStore().tags = TAGS
+    // M5：chip 云渲染源为本地分页列表（首页数据来自 /tags/paged），断言条目与改版前一致
+    getTagsPaged.mockResolvedValue(pagedOf(TAGS))
+    await wrapper.vm.resetPaging()
     await nextTick()
     const text = wrapper.text()
     expect(text).not.toContain('暂无标签')
     expect(text).toContain('日常')
     expect(text).toContain('旅行')
     expect(wrapper.findAll('v-chip')).toHaveLength(5)
+    // 5 ≤ PAGE_SIZE → 分页展开区不渲染（用例 M5-2 详断言）
+    expect(text).not.toContain('展开更多')
   })
 
   it('用例3b: 新增标签走 store.addTag（名称去空格），删除标签走 store.removeTag', async () => {
@@ -826,5 +861,167 @@ describe('M4 设置二级页面统一卡片图层容器', () => {
     expect(reorderCategories).toHaveBeenCalledWith({ type: 'expense', ids: [2, 1, 3, 8] })
     expect(mockShowToast).toHaveBeenCalledTimes(1)
     expect(mockShowToast).toHaveBeenCalledWith('排序已保存')
+  })
+})
+
+// ── M5 标签解除 20 条上限 + 分页展开 ─────────────────────────────────
+describe('M5 标签分页展开', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    getCategories.mockResolvedValue(CATEGORIES.map((c) => ({ ...c })))
+    getQuickTemplates.mockResolvedValue(TEMPLATES.map((t) => ({ ...t })))
+    createTag.mockResolvedValue({ id: 131, name: '新标签', category_id: 1 })
+    deleteTag.mockResolvedValue({})
+  })
+
+  const expandBtn = (wrapper) =>
+    wrapper.findAll('v-btn').find((node) => node.text() === '展开更多')
+
+  // 任务 §5.1-§5.5 + 用例 6.2.1
+  it('用例M5-1: 30 条标签首屏渲染 20 个 chip + 展开更多 + 计数文案，点击后追加至 30 并隐藏按钮', async () => {
+    getTags.mockResolvedValue(MANY_TAGS.map((t) => ({ ...t })))
+    useSlicedPagedMock(MANY_TAGS)
+    const wrapper = await mountPage(SettingsTagsPage)
+
+    expect(getTagsPaged).toHaveBeenCalledTimes(1)
+    expect(getTagsPaged).toHaveBeenCalledWith({ page: 1, page_size: 20 })
+    expect(wrapper.findAll('v-chip')).toHaveLength(20)
+    expect(wrapper.text()).toContain('已显示 20 / 共 30 个')
+    // 首屏只到第 20 条，第 21 条靠「展开更多」触达
+    expect(wrapper.text()).toContain('标签20')
+    expect(wrapper.text()).not.toContain('标签21')
+    // M4 交接：分页控件与 chip 云同处唯一 .page-card 内
+    const card = wrapper.findAll('.page-card')[0]
+    expect(card.text()).toContain('已显示 20 / 共 30 个')
+    expect(expandBtn(card)).toBeTruthy()
+
+    await expandBtn(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(getTagsPaged).toHaveBeenCalledTimes(2)
+    expect(getTagsPaged).toHaveBeenLastCalledWith({ page: 2, page_size: 20 })
+    expect(wrapper.findAll('v-chip')).toHaveLength(30)
+    expect(wrapper.text()).toContain('标签21')
+    expect(wrapper.text()).toContain('标签30')
+    expect(wrapper.text()).toContain('已显示 30 / 共 30 个')
+    expect(expandBtn(wrapper)).toBeUndefined()
+    expect(wrapper.vm.loadingMore).toBe(false)
+    expect(wrapper.vm.page).toBe(2)
+  })
+
+  // 任务 §5.7 边界一 + 用例 6.2.2
+  it('用例M5-2: 总数 ≤ PAGE_SIZE（恰 20 条与 5 条）时按钮与计数文案均不渲染', async () => {
+    const exactly20 = MANY_TAGS.slice(0, 20).map((t) => ({ ...t }))
+    getTags.mockResolvedValue(exactly20.map((t) => ({ ...t })))
+    useSlicedPagedMock(exactly20)
+    const wrapper = await mountPage(SettingsTagsPage)
+
+    expect(wrapper.findAll('v-chip')).toHaveLength(20)
+    const text = wrapper.text()
+    expect(text).not.toContain('展开更多')
+    expect(text).not.toContain('已显示')
+    // 卡壳内无任何分页控件（页头「新增」按钮在卡外，不受影响）
+    const card = wrapper.findAll('.page-card')[0]
+    expect(card.findAll('v-btn')).toHaveLength(0)
+    expect(wrapper.text()).toContain('新增')
+
+    // 少量标签同样零冗余渲染
+    getTags.mockResolvedValue(TAGS.map((t) => ({ ...t })))
+    useSlicedPagedMock(TAGS)
+    const small = await mountPage(SettingsTagsPage)
+    expect(small.findAll('v-chip')).toHaveLength(5)
+    expect(small.text()).not.toContain('展开更多')
+    expect(small.text()).not.toContain('已显示')
+  })
+
+  // 任务 §5.6 + 用例 6.2.3
+  it('用例M5-3: 新增/删除标签后保留 store 流程并 fetchTags + resetPaging 回到第 1 页', async () => {
+    getTags.mockResolvedValue(MANY_TAGS.map((t) => ({ ...t })))
+    useSlicedPagedMock(MANY_TAGS)
+    const wrapper = await mountPage(SettingsTagsPage)
+
+    // 先展开到第 2 页，才能证明「新增后回到第 1 页」
+    await expandBtn(wrapper).trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('v-chip')).toHaveLength(30)
+
+    getTags.mockClear()
+    getTagsPaged.mockClear()
+    wrapper.vm.showTagDialog = true
+    wrapper.vm.tagForm.name = '新标签'
+    wrapper.vm.tagForm.category_id = 1
+    await wrapper.vm.saveTag()
+    await flushPromises()
+
+    expect(createTag).toHaveBeenCalledWith({ name: '新标签', category_id: 1 })
+    expect(getTags).toHaveBeenCalledTimes(1)
+    expect(getTagsPaged).toHaveBeenCalledTimes(1)
+    expect(getTagsPaged).toHaveBeenCalledWith({ page: 1, page_size: 20 })
+    expect(wrapper.findAll('v-chip')).toHaveLength(20)
+    expect(wrapper.vm.page).toBe(1)
+
+    getTags.mockClear()
+    getTagsPaged.mockClear()
+    wrapper.vm.confirmDeleteTag(wrapper.vm.displayedTags[0])
+    await wrapper.vm.handleDeleteTag()
+    await flushPromises()
+    expect(deleteTag).toHaveBeenCalledTimes(1)
+    expect(getTags).toHaveBeenCalledTimes(1)
+    expect(getTagsPaged).toHaveBeenCalledTimes(1)
+    expect(getTagsPaged).toHaveBeenCalledWith({ page: 1, page_size: 20 })
+  })
+
+  // 任务 §5.7 边界二（设计 §5.4 page 越界）
+  it('用例M5-4: 增量拿到越界空页 → 不追加、隐藏按钮、total 文案不失真', async () => {
+    getTags.mockResolvedValue(MANY_TAGS.map((t) => ({ ...t })))
+    getTagsPaged.mockResolvedValue(pagedOf(MANY_TAGS))
+    const wrapper = await mountPage(SettingsTagsPage)
+    expect(wrapper.findAll('v-chip')).toHaveLength(20)
+
+    getTagsPaged.mockResolvedValue({ items: [], total: 30, page: 2, page_size: 20 })
+    await expandBtn(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('v-chip')).toHaveLength(20)
+    expect(wrapper.vm.hasMore).toBe(false)
+    expect(expandBtn(wrapper)).toBeUndefined()
+    expect(wrapper.text()).toContain('已显示 20 / 共 30 个')
+    expect(wrapper.vm.loadingMore).toBe(false)
+    expect(wrapper.vm.page).toBe(1)
+  })
+
+  // 任务 §5.7 边界三（设计 §5.4 请求失败）
+  it('用例M5-5: 「展开更多」请求失败 → 已显示列表不变、loadingMore 复位、按钮可重试', async () => {
+    getTags.mockResolvedValue(MANY_TAGS.map((t) => ({ ...t })))
+    useSlicedPagedMock(MANY_TAGS)
+    const wrapper = await mountPage(SettingsTagsPage)
+
+    getTagsPaged.mockRejectedValueOnce(new Error('网络异常'))
+    await expandBtn(wrapper).trigger('click')
+    await flushPromises()
+
+    expect(wrapper.findAll('v-chip')).toHaveLength(20)
+    expect(wrapper.vm.loadingMore).toBe(false)
+    expect(wrapper.vm.page).toBe(1)
+    expect(wrapper.text()).toContain('已显示 20 / 共 30 个')
+
+    const retry = expandBtn(wrapper)
+    expect(retry).toBeTruthy()
+    await retry.trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('v-chip')).toHaveLength(30)
+  })
+
+  // 用例 6.2.5 回归：快速记账弹窗标签下拉触达全量（前端零改动）
+  it('用例M5-6: 快速记账「选择标签」数据源为 store 全量，>20 条不截断', async () => {
+    getTags.mockResolvedValue(MANY_TAGS.map((t) => ({ ...t })))
+    const wrapper = await mountPage(SettingsQuickTemplatesPage)
+
+    expect(getTags).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.tags).toHaveLength(30)
+    expect(useCategoriesStore().tags).toHaveLength(30)
+    // 弹窗下拉与 store 同源：解除后端上限即全量可选
+    expect(quickTemplatesPageSource).toMatch(/:items="tags"[\s\S]*?label="选择标签 \*"/)
   })
 })
