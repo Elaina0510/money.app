@@ -52,14 +52,39 @@ vi.mock('@/stores/useAppStore', () => ({
 }))
 
 // chart.js 在 jsdom 下无法绘制，替换为轻量桩件
+// M7：桩件声明 data/options props（便于配置断言），并以 mounted 计数验证「实例全程存活、未被重建」
+const chartStub = vi.hoisted(() => ({ barMounts: 0, lineMounts: 0 }))
+
 vi.mock('vue-chartjs', () => ({
-  Bar: { name: 'Bar', template: '<div class="chart-stub"></div>' },
-  Line: { name: 'Line', template: '<div class="chart-stub"></div>' },
+  Bar: {
+    name: 'Bar',
+    props: {
+      data: { type: Object, default: null },
+      options: { type: Object, default: null },
+    },
+    mounted() {
+      chartStub.barMounts += 1
+    },
+    template: '<div class="chart-stub bar-stub"></div>',
+  },
+  Line: {
+    name: 'Line',
+    props: {
+      data: { type: Object, default: null },
+      options: { type: Object, default: null },
+    },
+    mounted() {
+      chartStub.lineMounts += 1
+    },
+    template: '<div class="chart-stub line-stub"></div>',
+  },
 }))
 
 import { getBudgets, getBudgetYearSummary, batchSetBudgets, deleteBudget } from '@/api/budgets'
+import { getByCategory, getTrend } from '@/api/statistics'
 import StatisticsPage from './StatisticsPage.vue'
 import settingsPageSource from './SettingsPage.vue?raw'
+import statisticsPageSource from './StatisticsPage.vue?raw'
 
 async function mountPage() {
   const wrapper = mount(StatisticsPage)
@@ -282,5 +307,169 @@ describe('StatisticsPage - M6 预算区块', () => {
     expect(settingsPageSource).not.toMatch(/budget/i)
     expect(settingsPageSource).not.toContain('预算')
     expect(settingsPageSource).not.toMatch(/BUDGET_COLORS|currentMonth|formatAmount/)
+  })
+})
+
+// ── M7 分类柱状图过渡动画（设计 §7.4）────────────────────────────────
+describe('StatisticsPage - M7 分类柱状图过渡动画', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    chartStub.barMounts = 0
+    chartStub.lineMounts = 0
+    getByCategory.mockResolvedValue({ items: [] })
+    getTrend.mockResolvedValue({ items: [] })
+    getBudgets.mockResolvedValue([])
+    getBudgetYearSummary.mockResolvedValue({ months: [] })
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-01-15T12:00:00'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+    // 不污染前序/后续用例的默认桩返回
+    getByCategory.mockResolvedValue({ items: [] })
+    getTrend.mockResolvedValue({ items: [] })
+  })
+
+  // 5.1 配置断言
+  it('用例M7-1: Bar 收到 animation/transitions 动画配置，scales 现状保留', async () => {
+    const wrapper = await mountPage()
+    const options = wrapper.findComponent({ name: 'Bar' }).props('options')
+
+    expect(options.animation).toEqual({ duration: 750, easing: 'easeOutQuart' })
+    expect(options.transitions.active).toEqual({ duration: 750, easing: 'easeOutQuart' })
+    // 现状配置保留（类目轴 x 去网格、数值轴 y beginAtZero）
+    expect(options.scales.x.grid.display).toBe(false)
+    expect(options.scales.y.beginAtZero).toBe(true)
+    expect(options.plugins.legend.display).toBe(false)
+    expect(options.responsive).toBe(true)
+    expect(options.maintainAspectRatio).toBe(false)
+  })
+
+  // 5.2 空态回归 + 4.3 月↔年切换
+  it('用例M7-2: 空数据时 Bar 仍挂载且叠加覆盖层；转非空覆盖层消失、图表实例不重建', async () => {
+    getByCategory.mockResolvedValue({ items: [] })
+    const wrapper = await mountPage()
+
+    // canvas 常驻：Bar 桩件在空数据下依然渲染，且叠加空态覆盖层
+    expect(wrapper.find('.chart-stub').exists()).toBe(true)
+    expect(wrapper.find('.bar-stub').exists()).toBe(true)
+    expect(wrapper.find('.chart-holder').exists()).toBe(true)
+    const overlay = wrapper.find('.chart-empty-overlay')
+    expect(overlay.exists()).toBe(true)
+    expect(overlay.text()).toContain('暂无数据')
+    // 明细列表为非动画元素，仍按 v-if 隐藏（2.5）
+    expect(wrapper.find('.category-list').exists()).toBe(false)
+
+    const mountsAfterEmpty = chartStub.barMounts
+
+    // 转非空：覆盖层消失、柱表容器与实例持续存活
+    getByCategory.mockResolvedValue({
+      items: [
+        { category_name: '餐饮', total: 300 },
+        { category_name: '出行', total: 120 },
+      ],
+    })
+    await wrapper.vm.nextPeriod()
+    await flushPromises()
+
+    expect(wrapper.find('.chart-empty-overlay').exists()).toBe(false)
+    expect(wrapper.find('.bar-stub').exists()).toBe(true)
+    expect(wrapper.find('.category-list').exists()).toBe(true)
+    expect(chartStub.barMounts).toBe(mountsAfterEmpty)
+
+    // 月↔年视图切换：labels 整体替换，实例仍不重建
+    getByCategory.mockResolvedValue({
+      items: [{ category_name: '购物', total: 900 }],
+    })
+    wrapper.vm.switchPeriod('yearly')
+    await flushPromises()
+
+    expect(wrapper.vm.periodType).toBe('yearly')
+    expect(wrapper.vm.categoryBarData.labels).toEqual(['购物'])
+    expect(wrapper.find('.chart-empty-overlay').exists()).toBe(false)
+    expect(chartStub.barMounts).toBe(mountsAfterEmpty)
+  })
+
+  // 5.3 + 3.1 防闪 0
+  it('用例M7-3: 切期 pending 期间 categoryBarData 保持旧值，resolve 后 labels/data 同步', async () => {
+    getByCategory.mockResolvedValue({
+      items: [
+        { category_name: '餐饮', total: 300 },
+        { category_name: '出行', total: 120 },
+      ],
+    })
+    const wrapper = await mountPage()
+    expect(wrapper.vm.categoryBarData.labels).toEqual(['餐饮', '出行'])
+    expect(wrapper.vm.categoryBarData.datasets[0].data).toEqual([300, 120])
+
+    let resolvePending
+    getByCategory.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolvePending = resolve
+        })
+    )
+    wrapper.vm.nextPeriod()
+    await flushPromises()
+
+    // pending：未置空、过渡起点仍是当前显示值（不闪 0）
+    expect(wrapper.vm.categoryStats.length).toBe(2)
+    expect(wrapper.vm.categoryBarData.datasets[0].data).toEqual([300, 120])
+    expect(wrapper.find('.chart-empty-overlay').exists()).toBe(false)
+
+    // resolve：按索引重映射，数量差即时消化（4.2）
+    resolvePending({ items: [{ category_name: '购物', total: 500 }] })
+    await flushPromises()
+    expect(wrapper.vm.categoryBarData.labels).toEqual(['购物'])
+    expect(wrapper.vm.categoryBarData.datasets[0].data).toEqual([500])
+    expect(chartStub.barMounts).toBe(1)
+  })
+
+  // 2.4 空数据形状：labels 与 data 均为空，柱条动画缩到 0
+  it('用例M7-4: 空数据时 categoryBarData 为空 labels + 单数据集空 data（不卸载 canvas）', async () => {
+    getByCategory.mockResolvedValue({ items: [] })
+    const wrapper = await mountPage()
+    const data = wrapper.vm.categoryBarData
+
+    expect(data.labels).toEqual([])
+    expect(data.datasets.length).toBe(1)
+    expect(data.datasets[0].data).toEqual([])
+    expect(wrapper.vm.categoryStats).toEqual([])
+  })
+
+  // 4.4 + 红线：局部配置、不翻转轴向、不清空、无手工动画队列；2.1-2.3 覆盖层结构
+  it('用例M7-5: 动画配置仅落在 barChartOptions，Line 图不受影响（源码 + 运行时断言）', async () => {
+    // 收支趋势 Line 图有数据时才渲染，取不到 props 会让断言空转
+    getTrend.mockResolvedValue({
+      items: [{ period: '2026-01-01', income: 10, expense: 5 }],
+    })
+    const wrapper = await mountPage()
+    expect(wrapper.text()).toContain('收支趋势')
+    const lineOptions = wrapper.findComponent({ name: 'Line' }).props('options')
+    expect(lineOptions).toBeTruthy()
+    expect(lineOptions.animation).toBeUndefined()
+    expect('animation' in lineOptions).toBe(false)
+
+    // 无全局 Chart.js defaults 污染、不加 indexAxis 翻转方向
+    expect(statisticsPageSource).not.toMatch(/(ChartJS|Chart)\s*\.\s*defaults/)
+    expect(statisticsPageSource).not.toContain('indexAxis')
+    // 禁止「先清空再赋值」
+    expect(statisticsPageSource).not.toContain('categoryStats.value = []')
+    // 无手工 rAF/队列驱动动画（4.1：由 Chart.js update 自身打断重估）
+    expect(statisticsPageSource).not.toMatch(/requestAnimationFrame|setTimeout\([^)]*chart/i)
+
+    // 覆盖层结构：Bar 外层无 v-if，容器定位 + surface 底
+    const holder = statisticsPageSource.match(/<div class="chart-holder">[\s\S]*?<\/div>/)
+    expect(holder).not.toBeNull()
+    expect(holder[0]).toContain('<Bar')
+    expect(holder[0]).not.toMatch(/<Bar[^>]*v-if/)
+    expect(statisticsPageSource).toMatch(
+      /v-if="categoryStats\.length === 0"[^>]*chart-empty-overlay/
+    )
+    expect(statisticsPageSource).toMatch(/\.chart-holder\s*\{[^}]*position:\s*relative/s)
+    expect(statisticsPageSource).toMatch(
+      /\.chart-empty-overlay\s*\{[^}]*background:\s*rgb\(var\(--v-theme-surface\)\)/s
+    )
   })
 })

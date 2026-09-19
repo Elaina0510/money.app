@@ -78,28 +78,27 @@
         <span class="text-subtitle-2 font-weight-bold">分类统计</span>
         <v-chip size="x-small" variant="tonal" color="grey">支出</v-chip>
       </div>
-      <div v-if="categoryStats.length === 0" class="text-center pa-6 text-grey text-caption">
-        暂无数据
-      </div>
-      <div v-else>
-        <div style="height: 200px;" class="mb-3">
-          <Bar :data="categoryBarData" :options="barChartOptions" />
+      <!-- v1.4.2 M7：Bar 常驻（外层无 v-if），空态改覆盖层，消除 canvas 重建闪白 -->
+      <div class="chart-holder">
+        <Bar :data="categoryBarData" :options="barChartOptions" />
+        <div v-if="categoryStats.length === 0" class="chart-empty-overlay">
+          <span class="text-caption text-grey">暂无数据</span>
         </div>
-        <div class="category-list">
+      </div>
+      <div v-if="categoryStats.length" class="category-list">
+        <div
+          v-for="(item, index) in categoryStats"
+          :key="item.category_name"
+          class="d-flex align-center pa-2 category-list-item"
+        >
           <div
-            v-for="(item, index) in categoryStats"
-            :key="item.category_name"
-            class="d-flex align-center pa-2 category-list-item"
-          >
-            <div
-              class="color-dot mr-2"
-              :style="{ backgroundColor: chartColors[index % chartColors.length] }"
-            />
-            <div class="flex-grow-1 text-body-2">{{ item.category_name }}</div>
-            <div class="text-body-2 font-weight-medium mr-2">{{ formatAmount(item.total) }}</div>
-            <div class="text-caption text-grey" style="width: 40px; text-align: right;">
-              {{ ((item.total / categoryTotal) * 100).toFixed(1) }}%
-            </div>
+            class="color-dot mr-2"
+            :style="{ backgroundColor: chartColors[index % chartColors.length] }"
+          />
+          <div class="flex-grow-1 text-body-2">{{ item.category_name }}</div>
+          <div class="text-body-2 font-weight-medium mr-2">{{ formatAmount(item.total) }}</div>
+          <div class="text-caption text-grey" style="width: 40px; text-align: right;">
+            {{ ((item.total / categoryTotal) * 100).toFixed(1) }}%
           </div>
         </div>
       </div>
@@ -419,9 +418,17 @@ const categoryBarData = computed(() => ({
   }],
 }))
 
+// v1.4.2 M7：柱状图过渡动画配置（仅作用于 barChartOptions，不外溢全局 defaults）
+const CHART_ANIMATION = {
+  duration: 750,
+  easing: 'easeOutQuart',
+}
+
 const barChartOptions = {
   responsive: true,
   maintainAspectRatio: false,
+  animation: CHART_ANIMATION,
+  transitions: { active: CHART_ANIMATION },
   plugins: {
     legend: { display: false },
     tooltip: {
@@ -758,6 +765,22 @@ onMounted(async () => {
 
 .chart-card {
   border: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+/* v1.4.2 M7：canvas 常驻容器 + 空态覆盖层（明/暗均以 surface 底遮盖） */
+.chart-holder {
+  position: relative;
+  height: 200px;
+  margin-bottom: 12px;
+}
+
+.chart-empty-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgb(var(--v-theme-surface));
 }
 
 .category-list-item {
