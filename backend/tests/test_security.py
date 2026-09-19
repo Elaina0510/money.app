@@ -148,3 +148,17 @@ async def test_login_rate_limit(anon_client):
     # 前 5 次正常返回(401 凭证错误),第 6 次 429
     assert codes[:5] == [401] * 5
     assert codes[5] == 429
+
+
+async def test_index_html_served_no_cache(client):
+    """前端重建会删除旧 hash 资源:index.html 必须 no-cache,
+    否则浏览器复用缓存入口 → 引用 404 旧 bundle → 页面点击无响应。"""
+    import os
+
+    from app.main import FRONTEND_DIST
+
+    if not os.path.isdir(FRONTEND_DIST):
+        pytest.skip("前端构建产物不存在,根路由返回 JSON")
+    resp = await client.get("/")
+    assert resp.status_code == 200
+    assert resp.headers.get("cache-control") == "no-cache"

@@ -171,5 +171,12 @@ async def health() -> dict[str, str]:
 async def root() -> FileResponse | dict[str, str]:
     """Root endpoint - serve frontend if available."""
     if FRONTEND_DIST.exists():
-        return FileResponse(str(FRONTEND_DIST / "index.html"), media_type="text/html")
+        # index.html 绝不缓存：前端重建后旧带 hash 的资源即被删除，
+        # 浏览器若复用缓存的 index.html 会引用到 404 的旧 bundle（页面半失效）。
+        # 资源文件名自带 hash，可安全保持默认缓存策略。
+        return FileResponse(
+            str(FRONTEND_DIST / "index.html"),
+            media_type="text/html",
+            headers={"Cache-Control": "no-cache"},
+        )
     return {"message": "Money App API", "version": "1.0.0", "docs": "/docs"}
