@@ -11,7 +11,7 @@
 - [x] [M2 - 新增分类默认排序 +「其他」固定置尾](m2-category-default-sort.md) —— 需求二
 - [x] [M3 - 分类列表拖拽排序（含批量重排接口）](m3-category-drag-sort.md) —— 需求三
 - [x] [M4 - 设置二级页面统一卡片图层容器](m4-settings-page-card-container.md) —— 需求四
-- [ ] [M5 - 标签解除 20 条上限 + 分页展开](m5-tags-pagination.md) —— 需求五
+- [x] [M5 - 标签解除 20 条上限 + 分页展开](m5-tags-pagination.md) —— 需求五
 - [ ] [M6 - 快速记账删除模板修复（按签名忽略）](m6-quick-template-delete.md) —— 需求六
 - [x] [M7 - 统计页分类柱状图过渡动画](m7-bar-chart-animation.md) —— 需求七
 - [ ] [M8 - 设置页/统计页入口图标颜色与位置统一](m8-entry-icon-unify.md) —— 需求八
@@ -64,7 +64,7 @@
 | M2 | 全栈 | ✅ 完成 | f1af0ab | pytest 161/161；vitest 172/172；mypy 基线零新增（107 存量）；ruff 通过；手工项 1 条待抽检 |
 | M3 | 全栈 | ✅ 完成 | fffb606 | pytest 172/172；vitest 174/174；mypy 零新增；包体增量实测 **+79.0 kB gzip**（D2 估算 16KB 的约 5 倍，见备注，留待人工裁定）；手工项 2 条 |
 | M4 | 前端 | ✅ 完成 | cbb5936 | vitest 177/177（新增 M4 3 例）；lint/build 通过；X 汇合点成立；手工项 2 条 |
-| M5 | 全栈 | ☐ 未开始 | | |
+| M5 | 全栈 | ✅ 完成 | 0135497 | pytest 183/183；vitest 184/184；mypy 零新增；loadTags 红线 0 命中（主 Agent 亲测）；手工项 1 条 |
 | M6 | 全栈 | ☐ 未开始 | | 附迁移脚本，发布备忘需登记 |
 | M7 | 前端 | ✅ 完成 | c2e6e55 | vitest 155/155（M7 新增 5 例）；lint/build 通过；手工项 3 条待抽检 |
 | M8 | 前端 | ☐ 未开始 | | |
@@ -78,6 +78,7 @@
 | M2 提交前 | 161/161 | 172/172 | 基线零新增（107 存量） | 通过 | 通过 | 通过 |
 | M3 提交前 | 172/172 | 174/174 | 基线零新增（107 存量） | 通过 | 0 error | 通过 |
 | M4 提交前 | —（纯前端） | 177/177 | — | — | 0 error | 通过 |
+| M5 提交前 | 183/183 | 184/184 | 基线零新增（107 存量） | 通过 | 通过 | 通过 |
 
 ## 待人工抽检清单
 
@@ -101,6 +102,9 @@
 - [ ] 5.2 手工验收四组合（浅色/深色 × 375px/1280px）：分类/标签/快速记账/数据回溯四页，内容与设置主页观感一致——卡片浮于米白背景、四周留白与阴影可见，非文字直压背景
 - [ ] 5.3 深色模式下卡片与背景对比清晰、层级同样成立
 
+### M5（标签解除 20 条上限 + 分页展开）
+- [ ] 7.3 手工验收（造 30+ 标签）：设置页摘要显示真实数量（未进过任何标签页也正确）；标签页首屏 20 个 +「展开更多」增量加载并更新计数；快速记账弹窗选到第 21+ 个标签；记一笔页按名称搜出任意标签
+
 ## 阻塞清单
 
 （暂无）
@@ -111,6 +115,7 @@
 - M2 完成报告 notes 要点：① `_next_sort_order` 以 `min(base+1, other.sort_order-1)` 钳制实现（对设计 §2.2.2 字面式的裁定性偏离——字面式在 other.sort==base+1 时会让「其他」被决胜挤出末位，违反硬约束；已加专项自愈用例固化）；② 用例 2c 再改写为载荷去 sort_order（M1 面板断言全保留），另新增 2c-2 CoW 用例；③ 交接 M3：moveCategory 上移/下移按钮本期保留但后端已忽略单个 PUT 的 sort_order（M3 落地前两按钮实际不生效，属设计后果）；`_visible_categories`/`_is_other_category`/`_is_other_row` 已就位供 reorder 复用；前端 `isOther()` 归 M3。
 - M3 完成报告 notes 要点：① **包体增量（对照 D2 估算 gzip ≈16KB，实测约 5 倍，留待人工裁定是否接受；如需回落须改深导入或换库，属设计变更未自行处置）**：分类页 chunk gzip 4.39→65.56 kB（SortableJS 全量落此懒加载分片）；index chunk gzip +17.7 kB（rolldown 分片图重排，不含 vuedraggable 代码）；全站 JS gzip 328.22→407.22 kB（+79.0）。根因：vuedraggable@4.1.0 仅发 CJS/UMD 无 ESM 产物，无法 tree-shake。② 依赖核实：vuedraggable 4.1.0 + sortablejs 1.14.0，lock diff 仅两包；§5.3 未触发。③ 实现偏差：「其他」置尾取「其余保持相对次序+其他落 n」；预设行已在目标位时短路跳过 CoW；额外触碰 schemas/category.py（CategoryReorder，2.1.3 必落点）。④ 测试改写：2b 按 D8 反转为 2b/2b-2/2b-3；用例 6 清单移除 moveCategory（D8 全局删除，另加反向源码断言固化）。
 - M4 完成报告 notes 要点：① P2 断言落地：不用整串 not.toContain，改「按 div 深度配对截出 .page-card 卡壳区间」结构口径；分类页卡壳内恰 2 处 bg-transparent 作 M3 Draggable 合法保留正向计数固化。② M3 交接的卡壳×拖拽视觉回归已以结构断言固化在用例 M4-3（2 个 Draggable/6 行/6 个 data-draggable/改序仅一次 reorder PUT）。③ HistoryPage 空态直接挂 page-card（原 pa-8 由卡壳内边距承担）；数据回溯页=HistoryPage 核对项已覆盖，四页均有 .page-card。④ 未跑 prettier --write（基线文件非 prettier-clean，避免越界）。
+- M5 完成报告 notes 要点：① 1b 反转为「mount 后 getTags 恰一次 + 摘要即时响应不再新增请求」，用例 1 删手动 fetchTags、用例 3 因 chip 云源改本地 displayedTags 做数据铺垫改写（断言一字未减）；② 任务 5.7 页越界边界在设计原 hasMore 公式下不成立，加本地 pageExhausted 短路（total 仍取服务端真值），用例 M5-4 固化；③ mypy：新函数以 sqlmodel col() 包装避免 7 条新增 union-attr/arg-type，基线 107 零新增；④ SettingsPage 仅 onMounted 4 行，注释避开 loadTags 字面量（6b 红线 0 命中），M8 入口区未触碰。
 - 工作区遗留（未跟踪、不影响提交）：`frontend/dist/assets/` 下 21 个 build 新 hash 产物 + `frontend/mdi-valid-names.txt`（M1 核对临时文件）。清理命令被权限系统拦截，留待终验 dist 重建（P4）时一并处置。
 
 ## 质量门槛（沿既定口径）
