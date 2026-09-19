@@ -124,8 +124,8 @@
     <v-card class="pa-4 mb-3 settings-card" rounded="xl">
       <div class="d-flex justify-space-between align-center mb-3">
         <div class="d-flex align-center">
-          <v-avatar size="36" color="rgba(156, 39, 176, 0.1)" class="mr-2">
-            <v-icon color="purple" size="20">mdi-piggy-bank-outline</v-icon>
+          <v-avatar size="36" class="entry-avatar mr-2">
+            <v-icon color="primary" size="20">mdi-piggy-bank-outline</v-icon>
           </v-avatar>
           <span class="text-subtitle-2 font-weight-bold">预算管理</span>
         </div>

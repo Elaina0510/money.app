@@ -8,10 +8,10 @@
     <!-- Theme Mode Setting -->
     <v-card class="pa-4 mb-3 settings-card" rounded="xl">
       <div class="d-flex align-center mb-3">
-        <v-avatar size="36" color="rgba(139, 126, 116, 0.1)" class="mr-2">
+        <v-avatar size="36" class="entry-avatar mr-2">
           <v-icon color="primary" size="20">mdi-brightness-6</v-icon>
         </v-avatar>
-        <span class="text-subtitle-2 font-weight-bold">外观设置</span>
+        <span class="text-body-1 font-weight-medium">外观设置</span>
       </div>
 
       <v-btn-toggle
@@ -42,7 +42,7 @@
     <v-card class="mb-3 settings-card" rounded="xl">
       <v-list-item to="/settings/categories" rounded="xl">
         <template v-slot:prepend>
-          <v-avatar size="36" color="rgba(103, 80, 164, 0.1)" class="mr-2">
+          <v-avatar size="36" class="entry-avatar mr-2">
             <v-icon color="primary" size="20">mdi-shape</v-icon>
           </v-avatar>
         </template>
@@ -60,8 +60,8 @@
     <v-card class="mb-3 settings-card" rounded="xl">
       <v-list-item to="/settings/tags" rounded="xl">
         <template v-slot:prepend>
-          <v-avatar size="36" color="rgba(77, 171, 247, 0.1)" class="mr-2">
-            <v-icon color="info" size="20">mdi-tag-multiple</v-icon>
+          <v-avatar size="36" class="entry-avatar mr-2">
+            <v-icon color="primary" size="20">mdi-tag-multiple</v-icon>
           </v-avatar>
         </template>
         <v-list-item-title class="text-body-1 font-weight-medium">标签管理</v-list-item-title>
@@ -76,8 +76,8 @@
     <v-card class="mb-3 settings-card" rounded="xl">
       <v-list-item to="/settings/quick-templates" rounded="xl">
         <template v-slot:prepend>
-          <v-avatar size="36" color="rgba(0, 150, 136, 0.1)" class="mr-2">
-            <v-icon color="teal" size="20">mdi-lightning-bolt</v-icon>
+          <v-avatar size="36" class="entry-avatar mr-2">
+            <v-icon color="primary" size="20">mdi-lightning-bolt</v-icon>
           </v-avatar>
         </template>
         <v-list-item-title class="text-body-1 font-weight-medium">快速记账</v-list-item-title>
@@ -93,26 +93,30 @@
     <!-- Import/Export Section -->
     <v-card class="pa-4 mb-3 settings-card" rounded="xl">
       <div class="d-flex align-center mb-3">
-        <v-avatar size="36" color="rgba(33, 150, 243, 0.1)" class="mr-2">
-          <v-icon color="blue" size="20">mdi-swap-vertical</v-icon>
+        <v-avatar size="36" class="entry-avatar mr-2">
+          <v-icon color="primary" size="20">mdi-swap-vertical</v-icon>
         </v-avatar>
-        <span class="text-subtitle-2 font-weight-bold">导入导出</span>
+        <span class="text-body-1 font-weight-medium">导入导出</span>
       </div>
 
       <v-list density="compact" class="bg-transparent pa-0">
         <v-list-item @click="handleExportCsv" :disabled="exporting">
           <template v-slot:prepend>
-            <v-icon size="20" class="mr-3">mdi-file-delimited-outline</v-icon>
+            <v-avatar size="36" class="entry-avatar mr-2">
+              <v-icon color="primary" size="20">mdi-file-delimited-outline</v-icon>
+            </v-avatar>
           </template>
-          <v-list-item-title class="text-body-2">导出 CSV</v-list-item-title>
+          <v-list-item-title class="text-body-1 font-weight-medium">导出 CSV</v-list-item-title>
           <v-list-item-subtitle class="text-caption">导出账单为 CSV 文件</v-list-item-subtitle>
         </v-list-item>
 
         <v-list-item @click="triggerCsvImport">
           <template v-slot:prepend>
-            <v-icon size="20" class="mr-3">mdi-file-import-outline</v-icon>
+            <v-avatar size="36" class="entry-avatar mr-2">
+              <v-icon color="primary" size="20">mdi-file-import-outline</v-icon>
+            </v-avatar>
           </template>
-          <v-list-item-title class="text-body-2">导入 CSV</v-list-item-title>
+          <v-list-item-title class="text-body-1 font-weight-medium">导入 CSV</v-list-item-title>
           <v-list-item-subtitle class="text-caption">从 CSV 文件导入账单</v-list-item-subtitle>
         </v-list-item>
 
@@ -120,32 +124,36 @@
 
         <v-list-item @click="handleExportSql" :disabled="exporting">
           <template v-slot:prepend>
-            <v-icon size="20" class="mr-3">mdi-database-export-outline</v-icon>
+            <v-avatar size="36" class="entry-avatar mr-2">
+              <v-icon color="primary" size="20">mdi-database-export-outline</v-icon>
+            </v-avatar>
           </template>
-          <v-list-item-title class="text-body-2">导出 SQL</v-list-item-title>
+          <v-list-item-title class="text-body-1 font-weight-medium">导出 SQL</v-list-item-title>
           <v-list-item-subtitle class="text-caption">导出全量数据为 SQL 备份</v-list-item-subtitle>
         </v-list-item>
 
         <v-list-item @click="triggerSqlImport">
           <template v-slot:prepend>
-            <v-icon size="20" class="mr-3">mdi-database-import-outline</v-icon>
+            <v-avatar size="36" class="entry-avatar mr-2">
+              <v-icon color="primary" size="20">mdi-database-import-outline</v-icon>
+            </v-avatar>
           </template>
-          <v-list-item-title class="text-body-2">导入 SQL</v-list-item-title>
+          <v-list-item-title class="text-body-1 font-weight-medium">导入 SQL</v-list-item-title>
           <v-list-item-subtitle class="text-caption">从 SQL/SQLite 文件导入数据</v-list-item-subtitle>
         </v-list-item>
       </v-list>
     </v-card>
 
     <!-- Data History Entry -->
-    <v-card class="pa-4 mb-3 settings-card" rounded="xl">
+    <v-card class="mb-3 settings-card" rounded="xl">
       <v-list class="bg-transparent pa-0">
         <v-list-item @click="$router.push('/history')">
           <template v-slot:prepend>
-            <v-avatar size="36" color="rgba(255, 152, 0, 0.1)" class="mr-2">
-              <v-icon color="orange" size="20">mdi-history</v-icon>
+            <v-avatar size="36" class="entry-avatar mr-2">
+              <v-icon color="primary" size="20">mdi-history</v-icon>
             </v-avatar>
           </template>
-          <v-list-item-title class="text-body-2 font-weight-medium">数据回溯</v-list-item-title>
+          <v-list-item-title class="text-body-1 font-weight-medium">数据回溯</v-list-item-title>
           <v-list-item-subtitle class="text-caption">查看操作历史，支持撤销</v-list-item-subtitle>
           <template v-slot:append>
             <v-icon size="20" color="grey">mdi-chevron-right</v-icon>
@@ -217,10 +225,10 @@
     <!-- Account Section -->
     <v-card class="pa-4 mb-3 settings-card" rounded="xl">
       <div class="d-flex align-center mb-2">
-        <v-avatar size="36" color="rgba(255, 152, 0, 0.1)" class="mr-2">
-          <v-icon color="warning" size="20">mdi-account</v-icon>
+        <v-avatar size="36" class="entry-avatar mr-2">
+          <v-icon color="primary" size="20">mdi-account</v-icon>
         </v-avatar>
-        <span class="text-subtitle-2 font-weight-bold">账号</span>
+        <span class="text-body-1 font-weight-medium">账号</span>
       </div>
 
       <div v-if="isLoggedIn" class="d-flex align-center justify-space-between mt-2">
@@ -229,7 +237,7 @@
             <span class="text-body-2 text-white font-weight-bold">{{ username.charAt(0) }}</span>
           </v-avatar>
           <div>
-            <div class="text-body-2 font-weight-medium">{{ username }}</div>
+            <div class="text-body-1 font-weight-medium">{{ username }}</div>
             <div class="text-caption text-grey">已登录</div>
           </div>
         </div>

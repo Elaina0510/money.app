@@ -114,6 +114,13 @@ body {
   margin-bottom: 12px; /* 对齐设置主页 .mb-3 节奏 */
 }
 
+/* 入口头像统一底色（M8）：主题 primary 10% 透明底，明暗模式自动跟随
+   规范 §0.5：主题色半透明底一律走 CSS 类——Vuetify color props 不支持 alpha 后缀
+   基准 = 外观设置入口原内联 rgba(139,126,116,.1)（即 light primary #8B7E74 的 10%） */
+.entry-avatar {
+  background: rgba(var(--v-theme-primary), 0.1);
+}
+
 /* Page transition */
 .page-enter-active,
 .page-leave-active {

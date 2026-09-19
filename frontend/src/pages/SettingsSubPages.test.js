@@ -93,6 +93,8 @@ import categoriesPageSource from './SettingsCategoriesPage.vue?raw'
 import tagsPageSource from './SettingsTagsPage.vue?raw'
 import quickTemplatesPageSource from './SettingsQuickTemplatesPage.vue?raw'
 import historyPageSource from './HistoryPage.vue?raw'
+// M8 入口图标统一：统计页预算卡头红线断言所需（仅追加，不动既有导入）
+import statisticsPageSource from './StatisticsPage.vue?raw'
 
 // ── 测试数据 ────────────────────────────────────────────────────────
 const CATEGORIES = [
@@ -1023,5 +1025,180 @@ describe('M5 标签分页展开', () => {
     expect(useCategoriesStore().tags).toHaveLength(30)
     // 弹窗下拉与 store 同源：解除后端上限即全量可选
     expect(quickTemplatesPageSource).toMatch(/:items="tags"[\s\S]*?label="选择标签 \*"/)
+  })
+})
+
+// ── M8 设置页/统计页入口图标颜色与位置统一 ────────────────────────────
+// 任务 §5.1 红线收敛口径（易错点 9 / 全局 §7.3）：**不整文件扫 `rgba(`**——
+// StatisticsPage 的图表网格线/趋势填充/scoped 样式合法使用 rgba，属 M7 与红线外区域；
+// 故只扫「入口头像内联底色」与「v-icon 静态 Material 色名」两类可寻址模式。
+// `[^>]*` 禁止跨标签命中，`s` 允许单标签内属性换行。
+const AVATAR_INLINE_RGBA = /<v-avatar[^>]*color="rgba\(/s
+const STATIC_ICON_COLOR = /<v-icon[^>]*color="(teal|blue|orange|warning|info|purple)"/s
+// §2.1/§2.2 统一模板规范：v-avatar size=36 + .entry-avatar + mr-2，内层 v-icon primary/20
+const ENTRY_AVATAR_TPL =
+  /<v-avatar size="36" class="entry-avatar mr-2">\s*<v-icon color="primary" size="20">/g
+
+// 本文件挂载不装 Vuetify 插件，未知元素的**具名槽不落 DOM**（用例 2b 已确立同一事实），
+// 入口头像恰在 v-list-item 的 prepend 槽内 → 桩一个「具名槽也渲染」的宿主组件，
+// 使 §5.3 的 .entry-avatar 成为真实的渲染计数断言（fragment 根，无需 runtime template 编译）
+const EntrySlotHost = {
+  name: 'v-list-item',
+  // fragment 根无法自动继承透传属性 → 显式关闭并声明事件，避免本用例产生 dev 告警噪音
+  inheritAttrs: false,
+  emits: ['click'],
+  setup(props, { slots }) {
+    return () => [
+      ...(slots.prepend ? slots.prepend() : []),
+      ...(slots.default ? slots.default() : []),
+      ...(slots.append ? slots.append() : []),
+    ]
+  },
+}
+
+// 截出设置页「数据回溯」卡区间：§5.4 定点断言，避免误伤外观/导入导出/账号三张 pa-4 卡头
+function sliceHistoryCard(source) {
+  const start = source.indexOf('<!-- Data History Entry -->')
+  const end = source.indexOf('<!-- Hidden file inputs -->')
+  if (start < 0 || end < 0 || end < start) throw new Error('未定位到数据回溯卡区间')
+  return source.slice(start, end)
+}
+
+describe('M8 设置页/统计页入口图标统一', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    getCategories.mockResolvedValue(CATEGORIES.map((c) => ({ ...c })))
+    getTags.mockResolvedValue(TAGS.map((t) => ({ ...t })))
+    getQuickTemplates.mockResolvedValue(TEMPLATES.map((t) => ({ ...t })))
+  })
+
+  // 任务 §1.1 / §1.2 / §1.3（全局工具类）+ §6.3
+  it('用例M8-1: 全局 .entry-avatar 承载主题 primary 10% 透明底，明暗自动跟随', () => {
+    const styles = readGlobalStyles()
+    // §1.1/§1.3：半透明主题底一律走 CSS 类（Vuetify color props 不支持 alpha 后缀）
+    expect(styles).toMatch(
+      /\.entry-avatar \{[^}]*background: rgba\(var\(--v-theme-primary\), 0\.1\)/
+    )
+    // §1.2：基准 = 外观入口原 rgba(139,126,116,.1)（light primary #8B7E74 的 10%），
+    // 故新类不得回退成写死的静态色字面量
+    expect(styles).not.toMatch(/\.entry-avatar[^{]*\{[^}]*(#8B7E74|139, *126, *116)/)
+    // 深色模式无需分支（--v-theme-primary 运行时随主题切换，与 M4 .page-card 同口径）
+    expect(styles).not.toMatch(/\.v-theme--dark[^{]*\.entry-avatar/)
+    // M4 段落零污染
+    expect(styles).toMatch(/\.page-card \{[^}]*padding: 16px/)
+  })
+
+  // 任务 §5.1 + §5.2 + §2.1~§2.3 + §4.1
+  it('用例M8-2: 两页零内联 rgba 头像底与静态 Material 图标色，11+1 处同规格', () => {
+    for (const src of [settingsPageSource, statisticsPageSource]) {
+      expect(src).not.toMatch(AVATAR_INLINE_RGBA)
+      expect(src).not.toMatch(STATIC_ICON_COLOR)
+    }
+    // §5.2 SettingsPage 严口径：整文件零 rgba（原 7 处 v-avatar 内联底色已全部收敛到类）
+    expect(settingsPageSource).not.toContain('rgba(')
+    // §5.1 正向断言：入口头像类已落地
+    expect(settingsPageSource).toContain('entry-avatar')
+    expect(statisticsPageSource).toContain('entry-avatar')
+    // §2.3：外观/分类/标签/快速记账/导入导出/数据回溯/账号 7 卡头
+    //      + §3.1 导入导出 4 子条目 = 11 处完全同规格（36 圆底 + primary/20 图标）
+    expect(settingsPageSource.match(ENTRY_AVATAR_TPL)).toHaveLength(11)
+    // §4.1：统计页仅预算卡头一处（M8 范围收敛）
+    expect(statisticsPageSource.match(ENTRY_AVATAR_TPL)).toHaveLength(1)
+    // §3.1：裸 v-icon（无圆底）写法已消除
+    expect(settingsPageSource).not.toMatch(/<v-icon size="20" class="mr-3">/)
+  })
+
+  // 任务 §4.2 红线（易错点 9）：数据可视化语义色不入清理范围
+  it('用例M8-3: 统计页图表/预算行语义色零误伤，红线正则可寻址收敛', () => {
+    expect(statisticsPageSource).toContain('const chartColors =')
+    expect(statisticsPageSource).toContain('const BUDGET_COLORS =')
+    expect(statisticsPageSource).toContain('const balanceColor = computed(')
+    // 预算行头像仍是动态语义色（未被误改成 primary 圆底）
+    expect(statisticsPageSource).toMatch(
+      /<v-avatar size="32" :color="getBudgetColor\(index\) \+ '20'"/
+    )
+    expect(statisticsPageSource).toMatch(
+      /<v-icon size="small" :color="getBudgetColor\(index\)">/
+    )
+    // 收敛性自证：图表配置里的合法 rgba 确实存在，却不被两类可寻址红线命中
+    // （反证「不得整文件扫 rgba(」的必要性）
+    expect(statisticsPageSource).toContain("grid: { color: 'rgba(0,0,0,0.04)' }")
+    expect(statisticsPageSource).not.toMatch(AVATAR_INLINE_RGBA)
+    expect(statisticsPageSource).not.toMatch(STATIC_ICON_COLOR)
+    // M7 图表卡与动画零污染（本模块未触碰）
+    expect(statisticsPageSource).toContain('chart-card')
+  })
+
+  // 任务 §5.3（渲染）+ 需求 5 条（文案/顺序/功能不变）
+  it('用例M8-4: 挂载后 .entry-avatar 计数 ≥ 11 且其内图标均为 primary 色', async () => {
+    const wrapper = mount(SettingsPage, {
+      global: {
+        mocks: { $router: { push: mockPush, back: mockBack } },
+        components: { 'v-list-item': EntrySlotHost },
+      },
+    })
+    await flushPromises()
+
+    const avatars = wrapper.findAll('.entry-avatar')
+    expect(avatars.length).toBeGreaterThanOrEqual(11)
+    avatars.forEach((node) => {
+      // §2.1 容器与左偏移：36 圆底 + mr-2（卡头与子条目同规格）
+      expect(node.attributes('size')).toBe('36')
+      expect(node.attributes('class')).toBe('entry-avatar mr-2')
+      // 图标一律 primary / size 20
+      const icon = node.find('v-icon')
+      expect(icon.exists()).toBe(true)
+      expect(icon.attributes('color')).toBe('primary')
+      expect(icon.attributes('size')).toBe('20')
+    })
+    // 11 个入口图标齐全且无游离头像（顺序即模板顺序，需求 5 条不改文案与顺序）
+    expect(avatars.map((node) => node.find('v-icon').text())).toEqual([
+      'mdi-brightness-6',
+      'mdi-shape',
+      'mdi-tag-multiple',
+      'mdi-lightning-bolt',
+      'mdi-swap-vertical',
+      'mdi-file-delimited-outline',
+      'mdi-file-import-outline',
+      'mdi-database-export-outline',
+      'mdi-database-import-outline',
+      'mdi-history',
+      'mdi-account',
+    ])
+    // 文案与摘要功能未受影响
+    const text = wrapper.text()
+    ;['外观设置', '分类管理', '标签管理', '快速记账', '导入导出', '数据回溯', '账号'].forEach(
+      (title) => expect(text).toContain(title)
+    )
+    ;['导出 CSV', '导入 CSV', '导出 SQL', '导入 SQL'].forEach((title) =>
+      expect(text).toContain(title)
+    )
+    expect(text).toContain('支出 3 / 收入 1')
+    expect(text).toContain('5 个')
+    expect(text).toContain('2 个模板')
+  })
+
+  // 任务 §3.2 / §3.3 / §3.4 / §5.4（结构性修复；§3.5 骨架不归一 = 两类并存）
+  it('用例M8-5: 数据回溯卡去 pa-4 叠加、左偏移两类基线与字阶统一', () => {
+    const history = sliceHistoryCard(settingsPageSource)
+    // §5.4：不再出现 pa-4 卡壳与 v-list 的双层 padding 叠加写法
+    expect(history).not.toContain('class="pa-4 mb-3 settings-card"')
+    // §3.2：去 pa-4 后与摘要入口同构；v-list 的 bg-transparent pa-0 保留（深色白底已消除）
+    expect(history).toContain('<v-card class="mb-3 settings-card" rounded="xl">')
+    expect(history).toMatch(/<v-list class="bg-transparent pa-0">/)
+    expect(history).toMatch(/<v-list-item-title class="text-body-1 font-weight-medium">数据回溯/)
+    // §3.3：摘要类 4 入口（分类/标签/快速记账/数据回溯）统一 v-card 无 pa + 默认内衬
+    expect(settingsPageSource.match(/<v-card class="mb-3 settings-card" rounded="xl">/g)).toHaveLength(4)
+    // §3.3/§3.5：区块类 3 卡头（外观/导入导出/账号）flex pa-4 保持原骨架
+    expect(settingsPageSource.match(/<v-card class="pa-4 mb-3 settings-card" rounded="xl">/g)).toHaveLength(3)
+    expect(settingsPageSource.match(/<div class="d-flex align-center mb-[23]">/g)).toHaveLength(3)
+    // §3.4：字阶统一取 text-body-1 font-weight-medium（卡头原 text-subtitle-2 已覆盖升级）
+    expect(settingsPageSource).not.toContain('text-subtitle-2')
+    expect(settingsPageSource.match(/<v-list-item-title class="text-body-1 font-weight-medium">/g)).toHaveLength(8)
+    expect(settingsPageSource).toMatch(/<span class="text-body-1 font-weight-medium">外观设置/)
+    expect(settingsPageSource).toMatch(/<span class="text-body-1 font-weight-medium">导入导出/)
+    expect(settingsPageSource).toMatch(/<span class="text-body-1 font-weight-medium">账号/)
+    expect(settingsPageSource).toMatch(/<div class="text-body-1 font-weight-medium">\{\{ username \}\}/)
   })
 })
