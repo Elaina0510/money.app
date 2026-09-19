@@ -75,6 +75,7 @@ import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import router from '@/router'
 import SettingsPage from './SettingsPage.vue'
 import SettingsCategoriesPage from './SettingsCategoriesPage.vue'
+import CategoryIconPicker from '@/components/common/CategoryIconPicker.vue'
 import SettingsTagsPage from './SettingsTagsPage.vue'
 import SettingsQuickTemplatesPage from './SettingsQuickTemplatesPage.vue'
 import settingsPageSource from './SettingsPage.vue?raw'
@@ -223,29 +224,41 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     expect(getCategories).toHaveBeenCalledTimes(2) // 初始加载 + 搬移后刷新
   })
 
-  it('用例2c: 新增/编辑分类共用 Category Dialog，保存分别走 create/update', async () => {
+  it('用例2c: 新增/编辑分类共用 Category Dialog，icon 由精选面板回填（无文本输入框），保存分别走 create/update', async () => {
     const wrapper = await mountPage(SettingsCategoriesPage)
 
-    // 新增
+    // 弹窗图标字段的唯一入口是精选面板，默认值 mdi-cash（在精选集内）
     wrapper.vm.showCategoryDialog = true
     wrapper.vm.categoryForm.name = '娱乐'
+    await nextTick()
+    const picker = wrapper.findComponent(CategoryIconPicker)
+    expect(picker.exists()).toBe(true)
+    expect(picker.props('modelValue')).toBe('mdi-cash')
+
+    // 面板点选回填：categoryForm.icon 仅能由 update:modelValue 改变
+    picker.vm.$emit('update:modelValue', 'mdi-gamepad')
+    await nextTick()
+    expect(wrapper.vm.categoryForm.icon).toBe('mdi-gamepad')
+
     await wrapper.vm.saveCategory()
     await flushPromises()
     expect(createCategory).toHaveBeenCalledWith({
       name: '娱乐',
       type: 'expense',
-      icon: 'mdi-cash',
+      icon: 'mdi-gamepad',
       sort_order: 0,
     })
     expect(updateCategory).not.toHaveBeenCalled()
 
-    // 编辑：表单项回填、标题切换为「编辑分类」
+    // 编辑：表单项回填、标题切换为「编辑分类」，面板选中态同步为原图标
     const target = wrapper.vm.expenseCategories[0]
     wrapper.vm.editCategory(target)
+    await nextTick()
     expect(wrapper.vm.showCategoryDialog).toBe(true)
     expect({ ...wrapper.vm.editingCategory }).toEqual(CATEGORIES[0])
     expect(wrapper.vm.categoryForm.name).toBe('餐饮')
     expect(wrapper.vm.categoryForm.icon).toBe('mdi-food')
+    expect(picker.props('modelValue')).toBe('mdi-food')
 
     wrapper.vm.categoryForm.name = '餐饮美食'
     await wrapper.vm.saveCategory()
@@ -257,6 +270,11 @@ describe('M7 设置页三个管理区块改二级页面', () => {
       sort_order: 0,
     })
     expect(wrapper.vm.editingCategory).toBeNull()
+
+    // 源码断言：任意文本图标名入口已移除，改为接入 CategoryIconPicker
+    expect(categoriesPageSource).not.toContain('图标 (mdi-*)')
+    expect(categoriesPageSource).not.toContain('placeholder="mdi-food"')
+    expect(categoriesPageSource).toContain('<CategoryIconPicker')
   })
 
   it('用例2d: 删除分类先查关联账单数并弹确认框，确认后走 store.removeCategory', async () => {

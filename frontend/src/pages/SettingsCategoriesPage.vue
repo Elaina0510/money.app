@@ -151,14 +151,10 @@
           class="mb-3"
           variant="outlined"
         />
-        <v-text-field
-          v-model="categoryForm.icon"
-          label="图标 (mdi-*)"
-          placeholder="mdi-food"
-          hide-details
-          class="mb-3"
-          variant="outlined"
-        />
+        <div class="mb-3">
+          <div class="text-caption text-grey mb-1">图标</div>
+          <CategoryIconPicker v-model="categoryForm.icon" />
+        </div>
         <v-text-field
           v-model.number="categoryForm.sort_order"
           label="排序"
@@ -216,6 +212,7 @@ import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import { useAppStore } from '@/stores/useAppStore'
 import { getRecords } from '@/api/records'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import CategoryIconPicker from '@/components/common/CategoryIconPicker.vue'
 
 const categoriesStore = useCategoriesStore()
 const appStore = useAppStore()
