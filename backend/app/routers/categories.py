@@ -67,6 +67,8 @@ async def update_category(
         )
     except PermissionError as e:
         return error_response(Code.FORBIDDEN, str(e), status_code=403)
+    except ValueError as e:
+        return error_response(Code.PARAM_ERROR, str(e))
 
 
 @router.delete("/{category_id}")

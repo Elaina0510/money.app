@@ -155,14 +155,6 @@
           <div class="text-caption text-grey mb-1">图标</div>
           <CategoryIconPicker v-model="categoryForm.icon" />
         </div>
-        <v-text-field
-          v-model.number="categoryForm.sort_order"
-          label="排序"
-          type="number"
-          hide-details
-          class="mb-4"
-          variant="outlined"
-        />
         <div class="d-flex justify-end ga-2">
           <v-btn variant="text" @click="showCategoryDialog = false">取消</v-btn>
           <v-btn color="primary" :loading="savingCategory" @click="saveCategory" variant="tonal">
@@ -230,7 +222,6 @@ const categoryForm = reactive({
   name: '',
   type: 'expense',
   icon: 'mdi-cash',
-  sort_order: 0,
 })
 const typeOptions = [
   { title: '支出', value: 'expense' },
@@ -267,7 +258,6 @@ function editCategory(cat) {
     name: cat.name,
     type: cat.type,
     icon: cat.icon,
-    sort_order: cat.sort_order,
   })
   showCategoryDialog.value = true
 }
@@ -275,11 +265,19 @@ function editCategory(cat) {
 async function saveCategory() {
   savingCategory.value = true
   try {
-    const data = { ...categoryForm }
     if (editingCategory.value) {
-      await categoriesStore.editCategory(editingCategory.value.id, data)
+      // 编辑载荷不含 type（编辑不改类型）与 sort_order（单个 PUT 不改排序）
+      await categoriesStore.editCategory(editingCategory.value.id, {
+        name: categoryForm.name,
+        icon: categoryForm.icon,
+      })
     } else {
-      await categoriesStore.addCategory(data)
+      // sort_order 由服务端计算：追加到分组末尾、「其他」之前
+      await categoriesStore.addCategory({
+        name: categoryForm.name,
+        type: categoryForm.type,
+        icon: categoryForm.icon,
+      })
     }
     showCategoryDialog.value = false
     editingCategory.value = null
@@ -296,7 +294,6 @@ function resetCategoryForm() {
   categoryForm.name = ''
   categoryForm.type = 'expense'
   categoryForm.icon = 'mdi-cash'
-  categoryForm.sort_order = 0
 }
 
 async function confirmDeleteCategory(cat) {

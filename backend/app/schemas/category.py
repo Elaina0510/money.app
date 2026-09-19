@@ -9,7 +9,8 @@ class CategoryCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=50)
     type: str = Field(..., pattern=r"^(income|expense)$")
     icon: str = Field(default="mdi-cash", max_length=50)
-    sort_order: int = Field(default=0, ge=0)
+    # None → 服务端计算（追加到分组末尾、「其他」之前）；显式传入则原样写入（向后兼容）
+    sort_order: int | None = Field(default=None, ge=0)
 
 
 class CategoryUpdate(BaseModel):
@@ -17,6 +18,7 @@ class CategoryUpdate(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=50)
     icon: str | None = Field(default=None, max_length=50)
+    # 字段定义保留（避免旧客户端 422 语义变化），v1.4.2 起服务层一律忽略
     sort_order: int | None = Field(default=None, ge=0)
 
 

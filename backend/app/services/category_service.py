@@ -11,14 +11,29 @@ from app.models.record import Record
 from app.models.user import User
 from app.schemas.category import CategoryCreate, CategoryUpdate
 
+# 「其他」分类判定唯一真源（M2 create/update 与 M3 reorder 共用，禁止散落字面量）
+# 判据 = 类型对应且同名（决策 D3）：预设行与其 Copy-on-Write 用户副本同名，一并命中
+OTHER_CATEGORY_NAMES: dict[str, str] = {"expense": "其他支出", "income": "其他收入"}
 
-async def get_categories(
+
+def _is_other_category(cat: Category) -> bool:
+    """「其他」= 类型对应且同名（预设行与其 Copy-on-Write 用户副本同名，一并命中）。"""
+    return cat.name == OTHER_CATEGORY_NAMES.get(cat.type)
+
+
+def _is_other_row(type_: str, name: str) -> bool:
+    """按类型 + 名称判定是否「其他」分类行（尚未落库的行同样适用）。"""
+    return name == OTHER_CATEGORY_NAMES.get(type_)
+
+
+async def _visible_categories(
     db: AsyncSession, type_filter: str | None = None, current_user: User | None = None
 ) -> list[Category]:
-    """Get all categories visible to the user: presets + own custom ones.
+    """该用户（可选类型）可见的分类集合，按 (sort_order, id) 升序。
 
-    Presets that have a user-specific copy (same name+type) are excluded
-    to avoid duplicates — the user copy takes precedence.
+    与 get_categories 同一查询逻辑，供 create 的排序计算与 reorder 复用：
+    presets + own custom ones；已有用户副本（同 name+type）的预设被排除，
+    即副本生效、预设隐藏，不会重复计入。
     """
     query = select(Category).order_by(Category.sort_order, Category.id)
     if type_filter:
@@ -52,10 +67,43 @@ async def get_categories(
     return list(result.all())
 
 
+async def get_categories(
+    db: AsyncSession, type_filter: str | None = None, current_user: User | None = None
+) -> list[Category]:
+    """Get all categories visible to the user: presets + own custom ones.
+
+    Presets that have a user-specific copy (same name+type) are excluded
+    to avoid duplicates — the user copy takes precedence.
+    """
+    return await _visible_categories(db, type_filter, current_user)
+
+
+async def _next_sort_order(
+    db: AsyncSession, type_: str, current_user: User | None = None
+) -> int:
+    """新增分类的服务端排序：追加到该类型分组末尾、「其他」之前。
+
+    规则（设计 §2.2.2）：
+    1. base = 可见集合中非「其他」行的最大 sort_order（空集合按 0）；
+    2. 组内存在「其他」时结果钳制为严格小于其 sort——「其他」恒置尾是硬约束，
+       「其他」本身不在末尾的异常数据同样自愈；
+    3. 组内无「其他」时直接 max+1 追加末尾。
+    """
+    visible = await _visible_categories(db, type_, current_user)
+    base = max((c.sort_order for c in visible if not _is_other_category(c)), default=0)
+    other = next((c for c in visible if _is_other_category(c)), None)
+    if other is None:
+        return base + 1
+    return min(base + 1, other.sort_order - 1)
+
+
 async def create_category(
     db: AsyncSession, data: CategoryCreate, current_user: User | None = None
 ) -> Category:
-    """Create a new custom category."""
+    """Create a new custom category.
+
+    sort_order 未提供（None）时由服务端计算追加位置；显式传入则原样写入（向后兼容）。
+    """
     # Check for duplicate name+type for this user
     user_id = current_user.id if current_user else None
     dup_stmt = select(Category).where(
@@ -67,11 +115,15 @@ async def create_category(
     if dup_result.first():
         raise ValueError("该名称的分类已存在")
 
+    sort_order = data.sort_order
+    if sort_order is None:
+        sort_order = await _next_sort_order(db, data.type, current_user)
+
     category = Category(
         name=data.name,
         type=data.type,
         icon=data.icon,
-        sort_order=data.sort_order,
+        sort_order=sort_order,
         is_preset=0,
         user_id=user_id,
     )
@@ -91,13 +143,24 @@ async def update_category(
 
     For preset categories, implements copy-on-write: instead of modifying
     the global preset, creates (or updates) a user-specific copy.
+
+    v1.4.2 起：「其他」分类名称不可修改；单个分类 PUT 一律忽略 sort_order
+    （排序只经 M3 的批量重排接口变更）。
     """
     category = await db.get(Category, category_id)
     if not category:
         return None
 
+    # 禁改「其他」名（决策 D3）：校验置于 CoW 与普通更新两条路径之前
+    if _is_other_row(category.type, category.name):
+        new_name = data.name
+        if new_name and not _is_other_row(category.type, new_name):
+            raise ValueError("「其他」分类名称不可修改")
+
     user_id = current_user.id if current_user else None
     update_data = data.model_dump(exclude_unset=True)
+    # 排序不随单个 PUT 变化：剔除后 CoW 副本恒继承预设自身 sort_order
+    update_data.pop("sort_order", None)
 
     # Copy-on-Write: modifying a preset → create/update user copy
     if category.is_preset == 1 and user_id is not None:

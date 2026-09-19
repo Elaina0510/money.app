@@ -51,8 +51,12 @@ export const useCategoriesStore = defineStore('categories', () => {
     const app = useAppStore()
     try {
       const cat = await updateCategory(id, data)
-      const idx = categories.value.findIndex((c) => c.id === id)
-      if (idx >= 0) categories.value[idx] = cat
+      // 预设分类 CoW 后响应 id 与原 id 不同（旧 id 已不在可见集合），
+      // 跳过原地替换以免出现双份；由调用方 fetchCategories() 统一对齐
+      if (cat && cat.id === id) {
+        const idx = categories.value.findIndex((c) => c.id === id)
+        if (idx >= 0) categories.value[idx] = cat
+      }
       app.showToast('分类更新成功')
       return cat
     } catch (e) {

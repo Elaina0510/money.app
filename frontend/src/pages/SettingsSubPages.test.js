@@ -242,11 +242,11 @@ describe('M7 设置页三个管理区块改二级页面', () => {
 
     await wrapper.vm.saveCategory()
     await flushPromises()
+    // M2：新增载荷不再携带 sort_order（排序由服务端计算：追加组末、「其他」之前）
     expect(createCategory).toHaveBeenCalledWith({
       name: '娱乐',
       type: 'expense',
       icon: 'mdi-gamepad',
-      sort_order: 0,
     })
     expect(updateCategory).not.toHaveBeenCalled()
 
@@ -263,18 +263,49 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     wrapper.vm.categoryForm.name = '餐饮美食'
     await wrapper.vm.saveCategory()
     await flushPromises()
+    // M2：编辑载荷不含 type（编辑不改类型）也不含 sort_order（单个 PUT 不改排序）
     expect(updateCategory).toHaveBeenCalledWith(1, {
       name: '餐饮美食',
-      type: 'expense',
       icon: 'mdi-food',
-      sort_order: 0,
     })
     expect(wrapper.vm.editingCategory).toBeNull()
+
+    // 表单状态与模板均不再持有「排序」
+    expect(Object.keys(wrapper.vm.categoryForm).sort()).toEqual(['icon', 'name', 'type'])
+    expect(categoriesPageSource).not.toContain('label="排序"')
 
     // 源码断言：任意文本图标名入口已移除，改为接入 CategoryIconPicker
     expect(categoriesPageSource).not.toContain('图标 (mdi-*)')
     expect(categoriesPageSource).not.toContain('placeholder="mdi-food"')
     expect(categoriesPageSource).toContain('<CategoryIconPicker')
+  })
+
+  it('用例2c-2: 编辑预设分类返回 CoW 副本（id 变化）时 store 不原地替换，避免双份', async () => {
+    const store = useCategoriesStore()
+    await store.fetchCategories()
+    expect(store.categories.map((c) => c.id)).toContain(1)
+
+    // 预设「餐饮」被服务端 CoW，响应为新建的用户副本（id 101 ≠ 1）
+    updateCategory.mockResolvedValueOnce({
+      id: 101,
+      name: '餐饮美食',
+      type: 'expense',
+      icon: 'mdi-food',
+      sort_order: 0,
+    })
+    const updated = await store.editCategory(1, { name: '餐饮美食' })
+    expect(updated.id).toBe(101)
+
+    // 旧 id 的原地替换被跳过：列表长度不变、不出现「餐饮/餐饮美食」双份
+    expect(store.categories).toHaveLength(CATEGORIES.length)
+    expect(store.categories.find((c) => c.id === 1).name).toBe('餐饮')
+    expect(store.categories.some((c) => c.id === 101)).toBe(false)
+
+    // id 未变（用户自有分类）时仍走原地替换
+    updateCategory.mockResolvedValueOnce({ id: 3, name: '购物消费', type: 'expense' })
+    await store.editCategory(3, { name: '购物消费' })
+    expect(store.categories.find((c) => c.id === 3).name).toBe('购物消费')
+    expect(store.categories).toHaveLength(CATEGORIES.length)
   })
 
   it('用例2d: 删除分类先查关联账单数并弹确认框，确认后走 store.removeCategory', async () => {
