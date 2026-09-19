@@ -46,6 +46,8 @@ vi.mock('@/api/records', () => ({
   getQuickTemplates: vi.fn().mockResolvedValue([]),
   addQuickTemplate: vi.fn().mockResolvedValue({}),
   deleteQuickTemplate: vi.fn().mockResolvedValue({}),
+  // M6：自动模板按签名忽略（DELETE /records/quick-templates/auto）
+  ignoreAutoQuickTemplate: vi.fn().mockResolvedValue({}),
 }))
 
 vi.mock('@/api/export', () => ({
@@ -80,6 +82,7 @@ import {
   getQuickTemplates,
   addQuickTemplate,
   deleteQuickTemplate,
+  ignoreAutoQuickTemplate,
 } from '@/api/records'
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import router from '@/router'
@@ -88,6 +91,7 @@ import SettingsCategoriesPage from './SettingsCategoriesPage.vue'
 import CategoryIconPicker from '@/components/common/CategoryIconPicker.vue'
 import SettingsTagsPage from './SettingsTagsPage.vue'
 import SettingsQuickTemplatesPage from './SettingsQuickTemplatesPage.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import settingsPageSource from './SettingsPage.vue?raw'
 import categoriesPageSource from './SettingsCategoriesPage.vue?raw'
 import tagsPageSource from './SettingsTagsPage.vue?raw'
@@ -210,6 +214,7 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     deleteTag.mockResolvedValue({})
     addQuickTemplate.mockResolvedValue({})
     deleteQuickTemplate.mockResolvedValue({})
+    ignoreAutoQuickTemplate.mockResolvedValue({})
   })
 
   // ── 用例1：设置页摘要卡 ──────────────────────────────────────────
@@ -558,28 +563,126 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     expect(wrapper.vm.categories.map((c) => c.id)).toEqual([1, 2, 3, 9])
   })
 
-  // ── 用例4：快速记账二级页 ────────────────────────────────────────
-  it('用例4: 模板二级页渲染列表与来源展示，删除按钮调用 deleteQuickTemplate', async () => {
+  // ── 用例4：快速记账二级页（M6 口径反转：自动模板按签名忽略 + 删除确认弹窗） ──
+  it('用例4: 模板列表渲染；删除先弹确认，自动项按签名忽略、手动项按 id 删', async () => {
+    // 模拟后端语义：忽略/删除后的签名不再出现在 GET 结果里（每次返回新副本，
+    // 使「本地即时移除 + 后台静默重拉」可被分别断言）
+    const cents = (v) => Math.round(Number(v) * 100)
+    let serverTemplates = TEMPLATES.map((t) => ({ ...t }))
+    getQuickTemplates.mockImplementation(() =>
+      Promise.resolve(serverTemplates.map((t) => ({ ...t })))
+    )
+    ignoreAutoQuickTemplate.mockImplementation((params) => {
+      serverTemplates = serverTemplates.filter(
+        (t) => !(t.source === 'auto' && cents(t.amount) === params.amount_cents)
+      )
+      return Promise.resolve({})
+    })
+    deleteQuickTemplate.mockImplementation((id) => {
+      serverTemplates = serverTemplates.filter((t) => t.id !== id)
+      return Promise.resolve({})
+    })
+
     const wrapper = await mountPage(SettingsQuickTemplatesPage)
 
     const text = wrapper.text()
     expect(text).toContain('日常 · ¥25')
     expect(text).toContain('餐饮 · 使用 8 次')
     expect(text).toContain('打车 · ¥30')
-    // 自动模板无 id：不请求删除接口，只刷新列表
-    await wrapper.vm.removeQuickTemplate(TEMPLATES[0])
-    await flushPromises()
-    expect(deleteQuickTemplate).not.toHaveBeenCalled()
-    expect(getQuickTemplates).toHaveBeenCalledTimes(2)
+    // §6.2.1 列表 key 与后端手动/自动去重键同口径（分单位整数签名，D9 三处同口径）
+    expect(quickTemplatesPageSource).toContain(
+      ':key="`${tpl.source}-${tpl.tag_id}-${Math.round(Number(tpl.amount) * 100)}`"'
+    )
 
-    // 手动模板：走 deleteQuickTemplate(id)
-    await wrapper.vm.removeQuickTemplate(TEMPLATES[1])
+    // 自动模板点删除：只进确认弹窗（旧「无 id 不请求只刷新」口径作废）
+    const autoTpl = wrapper.vm.quickTemplates.find((t) => t.source === 'auto')
+    await wrapper.vm.removeQuickTemplate(autoTpl)
+    expect(wrapper.vm.showDeleteDialog).toBe(true)
+    expect(wrapper.vm.deletingTemplate).toBe(autoTpl)
+    expect(wrapper.vm.deleteMessage).toContain('该组合今后不再自动出现')
+    expect(ignoreAutoQuickTemplate).not.toHaveBeenCalled()
+    expect(deleteQuickTemplate).not.toHaveBeenCalled()
+
+    // 确认 → 按签名忽略恰一次；条目即时消失 + 一次成功 toast + 后台静默重拉
+    await wrapper.vm.handleDelete()
     await flushPromises()
+    expect(ignoreAutoQuickTemplate).toHaveBeenCalledTimes(1)
+    expect(ignoreAutoQuickTemplate).toHaveBeenCalledWith({
+      tag_id: 11,
+      type: 'expense',
+      amount_cents: 2500,
+    })
+    expect(deleteQuickTemplate).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('日常 · ¥25')
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith('模板已删除')
+    expect(getQuickTemplates).toHaveBeenCalledTimes(2)
+    expect(wrapper.vm.showDeleteDialog).toBe(false)
+    expect(wrapper.vm.deletingTemplate).toBe(null)
+    expect(wrapper.vm.deleting).toBe(false)
+
+    // 手动模板：确认后仍走 deleteQuickTemplate(id)，忽略接口不再被调
+    const manualTpl = wrapper.vm.quickTemplates.find((t) => t.source === 'manual')
+    await wrapper.vm.removeQuickTemplate(manualTpl)
+    expect(wrapper.vm.deleteMessage).not.toContain('自动模板')
+    await wrapper.vm.handleDelete()
+    await flushPromises()
+    expect(deleteQuickTemplate).toHaveBeenCalledTimes(1)
     expect(deleteQuickTemplate).toHaveBeenCalledWith(21)
+    expect(ignoreAutoQuickTemplate).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).not.toContain('打车 · ¥30')
+    expect(wrapper.vm.quickTemplates).toHaveLength(0)
+    expect(mockShowToast).toHaveBeenCalledTimes(2)
     expect(getQuickTemplates).toHaveBeenCalledTimes(3)
 
     await wrapper.findAll('v-btn')[0].trigger('click')
     expect(mockBack).toHaveBeenCalledTimes(1)
+  })
+
+  // M6 §7.3.2：取消不做任何请求
+  it('用例4c: 删除确认弹窗点取消 → 两接口均未调、列表原状', async () => {
+    const wrapper = await mountPage(SettingsQuickTemplatesPage)
+    const before = wrapper.vm.quickTemplates.slice()
+
+    await wrapper.vm.removeQuickTemplate(wrapper.vm.quickTemplates[1])
+    const dialog = wrapper.findComponent(ConfirmDialog)
+    expect(dialog.exists()).toBe(true)
+    expect(dialog.props('title')).toBe('删除模板')
+    expect(dialog.props('confirmText')).toBe('删除')
+
+    const cancelBtn = dialog.findAll('v-btn').find((node) => node.text() === '取消')
+    expect(cancelBtn, '确认弹窗取消按钮未渲染').toBeTruthy()
+    await cancelBtn.trigger('click')
+    await flushPromises()
+
+    expect(deleteQuickTemplate).not.toHaveBeenCalled()
+    expect(ignoreAutoQuickTemplate).not.toHaveBeenCalled()
+    expect(mockShowToast).not.toHaveBeenCalled()
+    expect(wrapper.vm.showDeleteDialog).toBe(false)
+    expect(wrapper.vm.quickTemplates).toEqual(before)
+    expect(wrapper.text()).toContain('打车 · ¥30')
+  })
+
+  // M6 §7.3.3：失败保持原状 + 错误 toast
+  it('用例4d: 忽略请求失败 → 错误 toast、列表保持原状、状态复位', async () => {
+    const wrapper = await mountPage(SettingsQuickTemplatesPage)
+    const before = wrapper.vm.quickTemplates.slice()
+    ignoreAutoQuickTemplate.mockRejectedValueOnce(new Error('network down'))
+
+    await wrapper.vm.removeQuickTemplate(wrapper.vm.quickTemplates[0])
+    await wrapper.vm.handleDelete()
+    await flushPromises()
+
+    expect(ignoreAutoQuickTemplate).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith('删除失败', 'error')
+    // 本地未动过：列表原状、无静默重拉
+    expect(wrapper.vm.quickTemplates).toEqual(before)
+    expect(wrapper.text()).toContain('日常 · ¥25')
+    expect(getQuickTemplates).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.deleting).toBe(false)
+    expect(wrapper.vm.showDeleteDialog).toBe(false)
+    expect(wrapper.vm.deletingTemplate).toBe(null)
   })
 
   it('用例4b: 模板列表为空时显示空态；新增模板走 addQuickTemplate', async () => {

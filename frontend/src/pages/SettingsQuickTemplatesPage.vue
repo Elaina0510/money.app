@@ -28,7 +28,7 @@
       <v-list v-else density="compact" class="pa-0">
         <v-list-item
           v-for="tpl in quickTemplates"
-          :key="(tpl.tag_id || '') + '-' + tpl.amount + '-' + tpl.source"
+          :key="`${tpl.source}-${tpl.tag_id}-${Math.round(Number(tpl.amount) * 100)}`"
           class="quick-template-item"
         >
           <template v-slot:prepend>
@@ -90,16 +90,34 @@
         </div>
       </v-card>
     </v-dialog>
+
+    <!-- Delete Template Confirm（M6：手动/自动均先确认，文案按来源区分） -->
+    <ConfirmDialog
+      v-model="showDeleteDialog"
+      title="删除模板"
+      :message="deleteMessage"
+      :loading="deleting"
+      confirm-text="删除"
+      @confirm="handleDelete"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
-import { getQuickTemplates, addQuickTemplate, deleteQuickTemplate } from '@/api/records'
+import { useAppStore } from '@/stores/useAppStore'
+import {
+  getQuickTemplates,
+  addQuickTemplate,
+  deleteQuickTemplate,
+  ignoreAutoQuickTemplate,
+} from '@/api/records'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const categoriesStore = useCategoriesStore()
+const appStore = useAppStore()
 
 // 弹窗「选择标签」下拉数据源（与迁移前同源）
 const { tags } = storeToRefs(categoriesStore)
@@ -110,6 +128,19 @@ const showQuickTemplateDialog = ref(false)
 const savingQuickTemplate = ref(false)
 const quickTemplateForm = ref({ tag_id: null, amount: 0 })
 
+// 删除确认（M6）：手动/自动都先弹确认，自动项按签名忽略而非重拉刷新
+const showDeleteDialog = ref(false)
+const deletingTemplate = ref(null)
+const deleting = ref(false)
+
+const deleteMessage = computed(() => {
+  const tpl = deletingTemplate.value
+  if (!tpl) return ''
+  return tpl.source === 'auto'
+    ? `确定删除自动模板「${tpl.tag_name} · ¥${tpl.amount}」吗？该组合今后不再自动出现。`
+    : `确定删除模板「${tpl.tag_name} · ¥${tpl.amount}」吗？`
+})
+
 async function loadQuickTemplates() {
   try {
     quickTemplates.value = (await getQuickTemplates()) || []
@@ -119,15 +150,40 @@ async function loadQuickTemplates() {
   }
 }
 
-async function removeQuickTemplate(tpl) {
+// 点删除按钮只进确认弹窗（自动模板无 id，不再「不发请求只重拉」）
+function removeQuickTemplate(tpl) {
+  deletingTemplate.value = tpl
+  showDeleteDialog.value = true
+}
+
+async function handleDelete() {
+  const tpl = deletingTemplate.value
+  if (!tpl) return
+  deleting.value = true
   try {
-    // Manual templates have an 'id' field, auto templates don't
     if (tpl.id) {
+      // 手动模板：维持现有 DELETE /quick-templates/{id}
       await deleteQuickTemplate(tpl.id)
+    } else {
+      // 自动模板：按签名忽略（金额换算为分单位整数，与后端去重键同口径 D9）
+      await ignoreAutoQuickTemplate({
+        tag_id: tpl.tag_id,
+        type: tpl.type,
+        amount_cents: Math.round(Number(tpl.amount) * 100),
+      })
     }
+    // 本地即时移除 + 成功反馈，随后后台静默对齐（重排/聚合变化）
+    quickTemplates.value = quickTemplates.value.filter((x) => x !== tpl)
+    appStore.showToast('模板已删除')
     await loadQuickTemplates()
   } catch (e) {
+    // 失败：本地未动过，列表保持原状
     console.error('Remove quick template error:', e)
+    appStore.showToast('删除失败', 'error')
+  } finally {
+    deleting.value = false
+    showDeleteDialog.value = false
+    deletingTemplate.value = null
   }
 }
 

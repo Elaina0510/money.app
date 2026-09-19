@@ -199,9 +199,12 @@ async def export_sql(
         lines.append("")
 
     # Export quick templates
+    # M6 隔离性核查：只导出 kind='manual' 的手动模板——auto_ignored 忽略行不得混入任何出口
+    # （导入侧按手动模板建行，若导出忽略行会还原成幽灵手动模板；忽略名单不进备份属设计范围外）
     qt_query = (
         select(QuickTemplate)
         .where(QuickTemplate.user_id == user_id)
+        .where(QuickTemplate.kind == "manual")
         .order_by(QuickTemplate.id)
     )
     qt_result = await db.exec(qt_query)

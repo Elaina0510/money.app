@@ -22,6 +22,9 @@ class QuickTemplate(SQLModel, table=True):
     )
     type: str = Field(nullable=False)  # "expense" / "income"
     amount: float = Field(nullable=False)
+    # v1.4.2 M6（D4）：manual=手动模板（默认，旧行经迁移脚本回填）
+    # auto_ignored=自动模板忽略签名（仅 tag_id/type/amount 三要素有效，category_id 恒为 None）
+    kind: str = Field(default="manual", max_length=20, nullable=False)
     created_at: str = Field(
         default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         nullable=False,

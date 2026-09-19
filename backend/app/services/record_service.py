@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlmodel import func, select
+from sqlmodel import col, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.attachment import Attachment
@@ -310,6 +310,15 @@ async def batch_delete_records(
     return len(deleted_records)
 
 
+def _amount_cents(amount: float) -> int:
+    """元 → 分单位整数（M6/D9）：一切金额相等性比较（签名、去重键）走此口径，禁浮点 `==`。
+
+    SQLite 可能把整元值存为 INTEGER，`amount == 25.0` 之类的浮点/整型比较易静默漏配，
+    故统一 `int(round(元 × 100))`；金额列本身仍存元（不改列语义）。
+    """
+    return int(round(float(amount) * 100))
+
+
 async def get_quick_templates(
     db: AsyncSession, limit: int = 10, current_user: User | None = None
 ) -> list[dict[str, Any]]:
@@ -340,15 +349,27 @@ async def get_quick_templates(
     auto_result = await db.exec(auto_query)
     auto_rows = auto_result.all()
 
+    # 忽略名单（M6/D4）：同用户下 kind='auto_ignored' 行的签名三要素，永久抑制自动项生成。
+    # 金额转分单位整数后比对（D9），忽略行本身不作为模板出口出现在任何返回里。
+    ignored_qt = (
+        await db.exec(
+            select(QuickTemplate).where(qt_user_filter, QuickTemplate.kind == "auto_ignored")
+        )
+    ).all()
+    ignored = {(r.tag_id, r.type, _amount_cents(r.amount)) for r in ignored_qt}
+
     templates = []
     seen_keys = set()
     for row in auto_rows:
+        # 被忽略的签名彻底消失（过滤在 .limit 之后的 Python 循环，不重排补位）
+        auto_key = (row.tag_id, row.type, _amount_cents(row.amount))
+        if auto_key in ignored:
+            continue
         tag = await db.get(Tag, row.tag_id)
         if not tag or tag.deleted_at:
             continue
         category = await db.get(Category, tag.category_id) if tag.category_id else None
-        key = (row.tag_id, row.type, row.amount)
-        seen_keys.add(key)
+        seen_keys.add(auto_key)
         templates.append({
             "tag_id": row.tag_id,
             "tag_name": tag.name,
@@ -361,10 +382,11 @@ async def get_quick_templates(
             "source": "auto",
         })
 
-    # Manual templates
+    # Manual templates（kind 过滤：auto_ignored 忽略行不得混入任何模板出口）
     manual_query = (
         select(QuickTemplate)
         .where(qt_user_filter)
+        .where(QuickTemplate.kind == "manual")
         .order_by(QuickTemplate.created_at.desc())
         .limit(limit)
     )
@@ -372,7 +394,8 @@ async def get_quick_templates(
     manual_rows = manual_result.all()
 
     for qt in manual_rows:
-        key = (qt.tag_id, qt.type, qt.amount)
+        # 与自动项同口径的分签名（D9）：浮点表示差异不再造成手动/自动重复展示
+        key = (qt.tag_id, qt.type, _amount_cents(qt.amount))
         if key in seen_keys:
             continue
         seen_keys.add(key)
@@ -432,6 +455,53 @@ async def delete_quick_template(
     if qt.user_id is not None and (current_user is None or qt.user_id != current_user.id):
         return False
     await db.delete(qt)
+    await db.commit()
+    return True
+
+
+async def ignore_auto_quick_template(
+    db: AsyncSession,
+    tag_id: int,
+    type_: str,
+    amount_cents: int,
+    current_user: User | None = None,
+) -> bool:
+    """按签名 (tag_id, type, amount) 永久抑制自动模板，并顺带删除同签名手动模板。
+
+    返回 False 表示标签不存在/已软删（路由层转 404）；成功返回 True（幂等）。
+    """
+    tag = await db.get(Tag, tag_id)
+    if not tag or tag.deleted_at:
+        return False
+
+    uid = current_user.id if current_user else None
+
+    # 绝不做 SQL 浮点相等（易错点 14）：amount 列可能被 SQLite 存为 INTEGER，
+    # SQL 只按 user+tag+type 收窄候选，金额在 Python 内比分单位整数（D9）。
+    query = select(QuickTemplate).where(QuickTemplate.tag_id == tag_id, QuickTemplate.type == type_)
+    if uid is None:
+        query = query.where(col(QuickTemplate.user_id).is_(None))
+    else:
+        query = query.where(QuickTemplate.user_id == uid)
+    rows = (await db.exec(query)).all()
+    same_sig = [r for r in rows if _amount_cents(r.amount) == amount_cents]
+
+    if any(r.kind == "auto_ignored" for r in same_sig):
+        return True  # 幂等：已有忽略行，不重复插入
+
+    for r in same_sig:  # 同签名手动模板一并删除（需求：删除后条目即时消失）
+        await db.delete(r)
+
+    db.add(
+        QuickTemplate(
+            user_id=uid,
+            tag_id=tag_id,
+            category_id=None,  # 分类由标签推导可变，不纳入签名
+            type=type_,
+            amount=round_money(amount_cents / 100),  # 列语义不变：仍存元
+            kind="auto_ignored",
+        )
+    )
     await db.commit()
     return True
 

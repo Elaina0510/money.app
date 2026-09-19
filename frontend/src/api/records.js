@@ -39,3 +39,8 @@ export function addQuickTemplate(data) {
 export function deleteQuickTemplate(id) {
   return request.delete(`/records/quick-templates/${id}`)
 }
+
+// 自动模板无 id：按签名 (tag_id, type, amount_cents) 永久忽略（金额单位：分，M6/D9 同口径）
+export function ignoreAutoQuickTemplate(params) {
+  return request.delete('/records/quick-templates/auto', { params })
+}

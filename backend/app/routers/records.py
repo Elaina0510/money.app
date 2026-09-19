@@ -94,6 +94,25 @@ async def add_quick_template(
     return success_response(message="快速记账模板添加成功")
 
 
+@router.delete("/quick-templates/auto")
+async def ignore_auto_quick_template(
+    tag_id: int = Query(..., gt=0, description="标签 ID"),
+    type: str = Query(..., pattern=r"^(income|expense)$", description="类型: income/expense"),
+    amount_cents: int = Query(..., gt=0, description="金额，单位：分"),
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_auth),
+) -> JSONResponse:
+    """Suppress an auto quick-template signature from ever appearing again."""
+    # 路由顺序强约束：本路由必须声明在 /quick-templates/{template_id} 之前，
+    # 否则 "auto" 会被 int 路径参数抢匹配 → 422（易错点 1）
+    ok = await record_service.ignore_auto_quick_template(
+        db, tag_id=tag_id, type_=type, amount_cents=amount_cents, current_user=current_user
+    )
+    if not ok:
+        return error_response(Code.NOT_FOUND, "标签不存在")
+    return success_response(message="自动模板已忽略")
+
+
 @router.delete("/quick-templates/{template_id}")
 async def delete_quick_template(
     template_id: int,
