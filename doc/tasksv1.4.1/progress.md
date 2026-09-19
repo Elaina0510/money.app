@@ -182,6 +182,11 @@
 - M2 任务文件「npm test」门槛项由主 Agent 代勾（全量 149/149 绿）。
 - 手工验收共 45 项，全部列于「待人工抽检清单」，未以任何自动化结果替代打勾（另有 m3 mypy 门槛 1 项待人工裁定，不计入手工项）。
 
+## 交付后修复记录
+
+- 2026-09-19 用户反馈「改日期后保存账单无反应」：复现定位为 **v-date-picker（Vuetify 3.12）回传 JS Date 对象**，`consume_time` 拼成 `"Tue Sep 15 2026…"` → 后端 422 → 前端静默 catch。属 v1.3 组件引入的历史遗留（M8 按「逐像素不变」红线原样承袭；vitest 桩回传字符串故未拦截）。修复：`DatePickerPopover.onDateSelected` 归一化 Date→`YYYY-MM-DD`，新增回归用例（vitest 150/150）；同修复作用于账单页日期筛选。端到端真机验证通过。
+- 2026-09-19 `index.html` 增加 `Cache-Control: no-cache`（b34b6df）：防前端重建后浏览器复用旧入口引用已删除的 hash 资源致页面失能。
+
 ## 备注
 
 - M8 notes：frontend/dist/ 构建产物变更未入模块提交（并行共用工作树），终验统一构建后处理；ExpandTransition.test.js 将无效的 vuetify components mock 改为 global.stubs 注册 VDialog stub（测试实现方式调整，非断言放宽）。

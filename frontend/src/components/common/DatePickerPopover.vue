@@ -124,9 +124,19 @@ function openPicker(event) {
   showPicker.value = true
 }
 
+// Vuetify 3.12 的 v-date-picker 选中后回传 JS Date 对象；
+// 直接透传会让 consume_time 拼成 "Tue Sep 15 2026…" 导致后端 422（表现为保存无反应）
+function toDateString(d) {
+  if (typeof d === 'string' || d == null) return d
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${d.getFullYear()}-${m}-${day}`
+}
+
 function onDateSelected(date) {
-  selectedDate.value = date
-  emit('update:modelValue', date)
+  const normalized = toDateString(date)
+  selectedDate.value = normalized
+  emit('update:modelValue', normalized)
   showPicker.value = false
 }
 

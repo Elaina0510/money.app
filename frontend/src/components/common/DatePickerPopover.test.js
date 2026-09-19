@@ -133,6 +133,17 @@ describe('DatePickerPopover', () => {
     expect(wrapper.emitted('update:modelValue')[0]).toEqual(['2026-06-06'])
   })
 
+  // 回归:v-date-picker(Vuetify 3.12)真实回传的是 JS Date 对象而非字符串,
+  // 未归一化会让 consume_time 拼成非法格式 → 后端 422 → 保存无反应
+  it('normalizes Date object emitted by v-date-picker to YYYY-MM-DD', async () => {
+    const wrapper = mountPopover()
+
+    wrapper.vm.onDateSelected(new Date(2026, 8, 15))
+    await nextTick()
+
+    expect(wrapper.emitted('update:modelValue')[0]).toEqual(['2026-09-15'])
+  })
+
   it('should emit update:modelValueTime on time confirm', async () => {
     const wrapper = mountPopover({ showTime: true })
 
