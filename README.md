@@ -14,6 +14,18 @@
 
 ## Features
 
+### 体验优化 (v1.4.1)
+
+- **登录页沉浸模式** — 未登录时隐藏底栏/FAB/侧栏，锁定滚动、卡片安全居中，登录后即时恢复
+- **账单年份切换** — 竖屏也可直接翻到任意历史年份查看 1–12 月账单，可翻边界 = 最早记录年份，两端到界箭头自动隐藏
+- **返回状态记忆** — 从账单详情返回列表，所选月份与滚动位置原样恢复，不闪回当前月、不重复请求
+- **宽屏滚动流畅** — 桌面缩放由 `transform: scale` 改为 `zoom`，首次下滚不再卡顿
+- **预算管理迁移** — 预算的查看/新增/编辑/删除移至统计页，跟随月视图/年视图周期切换，年视图可逐月下钻
+- **设置页瘦身** — 分类/标签/快速记账三个管理区块下沉为独立二级页，设置页仅展示摘要卡与数量
+- **月份切换无闪烁** — 筛选请求合并去重（含页码键），列表不再整块"加载中↔内容"闪没
+- **筛选精简** — 账单筛选仅保留开始/结束日期两项（store 字段与后端参数保留）
+- **表盘时钟** — 快速记账的日期/时间纵向两行，时间选择为圆形展开的 24 小时制表盘，展开/收起动画对称一致
+
 ### 核心功能
 
 - **收支记录** — 记录每一笔收入与支出，支持金额、分类、标签、备注、消费时间
@@ -169,7 +181,7 @@ money.app/
 │   │   └── utils/               # 工具（auth 鉴权, ratelimit 限流, money 金额取整,
 │   │                                response 响应封装, history 操作历史, cache, file_utils）
 │   ├── migrate_to_v1.4.py       # 存量数据库迁移脚本
-│   └── tests/                   # pytest 测试（139 个用例，含 IDOR/限流安全回归）
+│   └── tests/                   # pytest 测试（150 个用例，含 IDOR/限流安全回归）
 ├── frontend/
 │   └── src/
 │       ├── pages/               # 页面组件
@@ -201,6 +213,7 @@ money.app/
 | GET            | `/api/records`                      | 账单列表（支持筛选/分页）     |
 | POST           | `/api/records`                      | 创建账单                      |
 | POST           | `/api/records/batch-delete`         | 批量删除账单                  |
+| GET            | `/api/records/earliest-year`        | 最早记录年份（年份切换边界）  |
 | GET            | `/api/records/quick-templates`      | 快速记账模板（自动+手动）     |
 | POST           | `/api/records/quick-templates`      | 手动添加快速模板              |
 | DELETE         | `/api/records/quick-templates/{id}` | 删除快速模板                  |
@@ -212,6 +225,7 @@ money.app/
 | PUT/DELETE     | `/api/tags/{id}`                    | 标签编辑/软删除               |
 | GET/POST/PUT   | `/api/budgets`                      | 预算管理                      |
 | POST           | `/api/budgets/batch`                | 批量设置预算                  |
+| GET            | `/api/budgets/year-summary`         | 年度逐月预算概览（统计页）    |
 | GET            | `/api/statistics/summary`           | 统计总览                      |
 | GET            | `/api/statistics/category-stats`    | 分类统计                      |
 | GET            | `/api/statistics/trend`             | 月度趋势                      |
@@ -229,7 +243,7 @@ money.app/
 ## Testing & Code Quality
 
 ```bash
-# 后端测试（139 个用例，含 IDOR/限流安全回归）
+# 后端测试（150 个用例，含 IDOR/限流安全回归）
 cd backend
 pytest tests/ -v
 
@@ -240,7 +254,7 @@ mypy backend/app --strict
 ruff check backend/app
 ruff format --check backend/app
 
-# 前端测试（65 个用例）
+# 前端测试（149 个用例）
 cd frontend
 npm run test
 
@@ -256,6 +270,7 @@ npm run build
 
 | Version | Highlights                                                                                                |
 | ------- | --------------------------------------------------------------------------------------------------------- |
+| v1.4.1  | 体验优化：登录页沉浸模式、竖屏年份切换、返回状态记忆、宽屏滚动修复、预算迁移统计页、设置页二级页、请求合并防闪烁、表盘时钟                      |
 | v1.4    | CSV/SQL 导入导出、数据回溯、安全加固（鉴权统一/IDOR 修复/限流/CORS 白名单/密钥守卫/健康检查）、Docker、CI |
 | v1.3    | UI/UX 优化：未保存提醒、日历动画、详情展开动画、分类图标、模糊渐变、宽屏适配                              |
 | v1.2.2  | 移动端底部导航栏、设置页一体化管理、标签搜索联想、标签软删除、账单筛选自动触发、深色模式优化              |
