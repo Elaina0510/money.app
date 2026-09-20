@@ -13,7 +13,13 @@ import chardet
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.budget import Budget
+from app.models.budget import (
+    SCOPE_INCLUDE,
+    SCOPE_MODES,
+    UNKNOWN_CATEGORY_NAME,
+    Budget,
+    BudgetCategory,
+)
 from app.models.category import LEGACY_CATEGORY_TYPE, Category
 from app.models.quick_template import QuickTemplate
 from app.models.record import Record
@@ -621,6 +627,7 @@ async def _import_text_sql(
     imported_records: list[dict[str, Any]] = []
     category_map: dict[int, int] = {}  # old_id -> new_id
     tag_map: dict[int, int] = {}
+    budget_map: dict[int, int] = {}  # old budget id -> new id（v1.4.3 M12 关联表用）
 
     for stmt in statements:
         upper = stmt.upper().strip()
@@ -664,7 +671,14 @@ async def _import_text_sql(
                 imported_records.append(record_data)
                 records_imported += 1
         elif table_name == "budgets":
-            await _import_budget_stmt(db, user_id, stmt, category_map)
+            new_id = await _import_budget_stmt(db, user_id, stmt, category_map)
+            if new_id and old_id:
+                budget_map[old_id] = new_id
+            records_imported += 1
+        elif table_name == "budget_categories":
+            await _import_budget_category_stmt(
+                db, stmt, budget_map, category_map, user_id
+            )
             records_imported += 1
         elif table_name == "quick_templates":
             await _import_quick_template_stmt(
@@ -812,36 +826,156 @@ async def _import_record_stmt(
     }
 
 
+_MONTH_RE = re.compile(r"^\d{4}-\d{2}$")
+
+
+async def _resolve_import_category_id(
+    db: AsyncSession, raw_id: int | None, category_map: dict[int, int] | None
+) -> int | None:
+    """把备份里的 ``category_id`` 解析到本库真实存在的分类行。
+
+    1. 优先用导入过程建立的 old_id → new_id 映射；
+    2. 无映射时仅接受指向**预设行**的 id（预设 id 跨安装稳定）；
+    3. 否则返回 None——绝不把自定义分类的旧 id 挂到同 id 的无关分类上。
+    """
+    if raw_id is None:
+        return None
+    mapped = category_map.get(raw_id) if category_map else None
+    if mapped:
+        return mapped
+    row = await db.get(Category, raw_id)
+    if row is not None and row.is_preset == 1:
+        return raw_id
+    return None
+
+
+async def _resolve_import_category_by_name(
+    db: AsyncSession, name: str, user_id: int | None
+) -> int | None:
+    """按分类**名**落位（M8 口径「同名即同一分类」）：先本人自建同名，再同名预设。
+
+    预算关联行的分类 id 在跨库导入时几乎必然失配（categories 段不带 id、预设段
+    不导出），故导出侧双写了名字；两侧都解析不到才宁可丢这一条关联。
+    """
+    if not name:
+        return None
+    rows = list((await db.exec(select(Category).where(Category.name == name))).all())
+    target = next((c for c in rows if c.user_id == user_id), None) or next(
+        (c for c in rows if c.is_preset == 1), None
+    )
+    if target is None or target.id is None:
+        return None
+    return int(target.id)
+
+
+async def _create_budget_from_values(
+    db: AsyncSession,
+    user_id: int | None,
+    values: dict[str, str],
+    category_map: dict[int, int] | None = None,
+) -> int | None:
+    """按列值建预算行（文本 SQL 与 .db 文件两条导入路径共用）。
+
+    v1.4.3 M12 起预算为「名称 + 月份 + 金额 + 范围模式」+ 关联表；
+    M12 之前的旧备份行只有 ``category_id``，此处一并兼容：
+    分类可解析 → 建 include 单分类预算；不可解析 → 落成与迁移阶段 B 同款的
+    「未知分类」只读态（include + 空关联，可展示可删、重保存需补选分类）。
+    """
+    amount = _parse_float(values.get("amount"))
+    month = _unquote(values.get("month", ""))
+    if not amount or not _MONTH_RE.match(month):
+        return None
+
+    scope_raw = _unquote(values.get("scope_mode", SCOPE_INCLUDE)) or SCOPE_INCLUDE
+    scope_mode = scope_raw if scope_raw in SCOPE_MODES else SCOPE_INCLUDE
+    name = _unquote(values.get("name", "")).strip()
+
+    legacy_category_id: int | None = None
+    if not name:
+        legacy_category_id = await _resolve_import_category_id(
+            db, _parse_int(values.get("category_id")), category_map
+        )
+        if legacy_category_id is not None:
+            category = await db.get(Category, legacy_category_id)
+            name = category.name if category else UNKNOWN_CATEGORY_NAME
+        else:
+            name = UNKNOWN_CATEGORY_NAME
+
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    budget = Budget(
+        user_id=user_id,
+        name=name[:50],
+        month=month,
+        amount=round_money(amount),
+        scope_mode=scope_mode,
+        created_at=now,
+        updated_at=now,
+    )
+    db.add(budget)
+    await db.flush()
+    if legacy_category_id is not None and budget.id is not None:
+        db.add(BudgetCategory(budget_id=budget.id, category_id=legacy_category_id))
+        await db.flush()
+    return budget.id
+
+
 async def _import_budget_stmt(
     db: AsyncSession,
     user_id: int | None,
     stmt: str,
     category_map: dict[int, int] | None = None,
+) -> int | None:
+    """Import a budget from an INSERT statement。返回新行 id（供关联表重映射）。"""
+    values = _extract_values(stmt)
+    if not values:
+        return None
+    return await _create_budget_from_values(db, user_id, values, category_map)
+
+
+async def _link_budget_category(
+    db: AsyncSession, budget_id: int, category_id: int
 ) -> None:
-    """Import a budget from an INSERT statement."""
+    """写入一条预算关联（幂等：撞 UNIQUE (budget_id, category_id) 即跳过）。"""
+    existing = await db.exec(
+        select(BudgetCategory).where(
+            BudgetCategory.budget_id == budget_id,
+            BudgetCategory.category_id == category_id,
+        )
+    )
+    if existing.first():
+        return
+    db.add(BudgetCategory(budget_id=budget_id, category_id=category_id))
+    await db.flush()
+
+
+async def _import_budget_category_stmt(
+    db: AsyncSession,
+    stmt: str,
+    budget_map: dict[int, int],
+    category_map: dict[int, int] | None = None,
+    user_id: int | None = None,
+) -> None:
+    """Import a budget_categories link row（两侧 id 均需重映射）。
+
+    分类侧解析顺序：导入过程的 id 映射 → 备份里的 **同名**分类（本人自建优先、
+    其次同名预设）→ 仅指向预设行的裸 id（M12 之前的旧行无名字）。
+    预算侧映射不到即跳过——宁缺不悬：留下指向他人/不存在预算的关联行会污染卡片。
+    """
     values = _extract_values(stmt)
     if not values:
         return
-
-    category_id = _parse_int(values.get("category_id"))
-    amount = _parse_float(values.get("amount"))
-    period = _unquote(values.get("period", "monthly"))
-
-    # Map old category ID to new ID
-    if category_map and category_id:
-        category_id = category_map.get(category_id, category_id)
-
-    if not amount:
+    new_budget_id = budget_map.get(_parse_int(values.get("budget_id")) or 0)
+    raw_category_id = _parse_int(values.get("category_id"))
+    category_id = (category_map or {}).get(raw_category_id or 0)
+    if category_id is None:
+        category_id = await _resolve_import_category_by_name(
+            db, _unquote(values.get("category_name", "")), user_id
+        )
+    if category_id is None:
+        category_id = await _resolve_import_category_id(db, raw_category_id, None)
+    if not new_budget_id or not category_id:
         return
-
-    budget = Budget(
-        user_id=user_id,
-        category_id=category_id,
-        amount=amount,
-        period=period,
-    )
-    db.add(budget)
-    await db.flush()
+    await _link_budget_category(db, new_budget_id, category_id)
 
 
 async def _import_quick_template_stmt(
@@ -1007,20 +1141,47 @@ async def _import_sqlite_binary(
         except sqlite3.OperationalError:
             pass
 
-        # Import budgets
+        # Import budgets（v1.4.3 M12：命名预算 + 关联表，列值解析与文本 SQL 路径共用）
+        budget_map: dict[int, int] = {}  # 备份库原 id -> 本库新 id
         try:
             rows = conn.execute("SELECT * FROM budgets").fetchall()
             for row in rows:
-                budget = Budget(
-                    user_id=user_id,
-                    category_id=row["category_id"] if "category_id" in row.keys() else None,
-                    amount=round_money(row["amount"]),
-                    period=row["period"],
-                )
-                db.add(budget)
-                await db.flush()
+                values = {k: str(row[k]) for k in row.keys() if row[k] is not None}
+                old_id = _parse_int(values.get("id"))
+                new_id = await _create_budget_from_values(db, user_id, values)
+                if old_id and new_id:
+                    budget_map[old_id] = new_id
         except sqlite3.OperationalError:
             pass
+
+        try:
+            links = conn.execute("SELECT * FROM budget_categories").fetchall()
+            for link in links:
+                keys = link.keys()
+                if "budget_id" not in keys or "category_id" not in keys:
+                    continue
+                new_budget_id = budget_map.get(_parse_int(str(link["budget_id"])) or 0)
+                if not new_budget_id:
+                    continue
+                # 本路径的分类匹配沿 M8 口径「仅按 name」（源库仍在 conn 上可读）：
+                # 先取源分类名，再落到本用户同名分类，其次同名预设
+                src_cat = conn.execute(
+                    "SELECT name FROM categories WHERE id = ?", (link["category_id"],)
+                ).fetchone()
+                if src_cat is None:
+                    continue
+                same_name = (
+                    await db.exec(select(Category).where(Category.name == str(src_cat[0])))
+                ).all()
+                target = next(
+                    (c for c in same_name if c.user_id == user_id),
+                    None,
+                ) or next((c for c in same_name if c.is_preset == 1), None)
+                if target is None or target.id is None:
+                    continue
+                await _link_budget_category(db, new_budget_id, int(target.id))
+        except sqlite3.OperationalError:
+            pass  # M12 之前的备份库无此表
 
         # Import quick templates
         try:

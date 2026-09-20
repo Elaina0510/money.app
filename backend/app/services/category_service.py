@@ -1,11 +1,11 @@
 """Category business logic."""
 
-from typing import Any
+from typing import Any, cast
 
 from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.budget import Budget
+from app.models.budget import SCOPE_INCLUDE, Budget, BudgetCategory
 from app.models.category import LEGACY_CATEGORY_TYPE, Category
 from app.models.record import Record
 from app.models.user import User
@@ -275,6 +275,59 @@ async def reorder_categories(
     return await _visible_categories(db, current_user)
 
 
+async def _cascade_budgets_for_deleted_category(
+    db: AsyncSession, category_id: int
+) -> int:
+    """分类删除的预算级联（设计 §12.2.4，任务 4.1–4.3）；返回被整体删掉的预算条数。
+
+    v1.4.3 M12 起预算不再挂 ``category_id`` 列，改由 ``budget_categories`` 关联：
+
+    * 先显式删该分类的关联行——连接未启用 ``PRAGMA foreign_keys``，声明式的
+      ``ondelete=CASCADE`` 运行时不生效，删除必须由服务层完成（任务 4.1）；
+    * **include** 预算若因此不再关联任何分类 → 预算一并删除，对齐旧「级联删预算」
+      语义（任务 4.2）；
+    * **exclude** 预算仅移出排除集，预算覆盖范围自动扩大，不删（任务 4.3）。
+
+    ``delete_category`` 与 ``restore_default_categories`` 共用本函数（任务 4.4），
+    全程两条查询（关联行 + 受影响预算的剩余关联），无逐预算 N+1。
+    """
+    link_stmt = select(BudgetCategory).where(BudgetCategory.category_id == category_id)
+    links = list((await db.exec(link_stmt)).all())
+    affected = sorted({int(link.budget_id) for link in links})
+    for link in links:
+        await db.delete(link)
+    # DELETE 必须先落盘：SQLAlchemy 同一次 flush 先插后删，且下面的「剩余关联」
+    # 查询必须看不到刚被移除的行
+    await db.flush()
+    if not affected:
+        return 0
+
+    # cast(Any, ...)：SQLModel 类字段在 mypy 视角是普通 int 值，其 instrumented
+    # Column 身份（`.in_()` 等 Core 表达式操作）不可见；运行时传的就是原对象。
+    budget_stmt = select(Budget).where(cast("Any", Budget.id).in_(affected))
+    budgets = list((await db.exec(budget_stmt)).all())
+    include_ids = [
+        int(b.id) for b in budgets if b.scope_mode == SCOPE_INCLUDE and b.id is not None
+    ]
+    if not include_ids:
+        return 0  # 全是 exclude：只移出排除集
+
+    remain_stmt = select(BudgetCategory.budget_id, BudgetCategory.category_id).where(
+        cast("Any", BudgetCategory.budget_id).in_(include_ids)
+    )
+    still_linked = {int(row[0]) for row in (await db.exec(remain_stmt)).all()}
+
+    deleted = 0
+    for budget_id in include_ids:
+        if budget_id in still_linked:
+            continue
+        budget = next((b for b in budgets if b.id == budget_id), None)
+        if budget is not None:
+            await db.delete(budget)
+            deleted += 1
+    return deleted
+
+
 async def delete_category(
     db: AsyncSession, category_id: int, current_user: User | None = None
 ) -> dict[str, Any] | None:
@@ -305,11 +358,8 @@ async def delete_category(
     count_result = await db.exec(count_stmt)
     record_count: int = count_result.one() or 0
 
-    # Cascade delete: remove associated budgets first, then records, then category
-    budget_stmt = select(Budget).where(Budget.category_id == category_id)
-    budget_result = await db.exec(budget_stmt)
-    for budget in budget_result.all():
-        await db.delete(budget)
+    # Cascade delete: budgets（按 include/exclude 规则，见 §12.2.4）→ records → category
+    deleted_budgets = await _cascade_budgets_for_deleted_category(db, category_id)
 
     record_stmt = select(Record).where(Record.category_id == category_id)
     record_result = await db.exec(record_stmt)
@@ -318,7 +368,7 @@ async def delete_category(
 
     await db.delete(category)
     await db.commit()
-    return {"deleted_records": record_count}
+    return {"deleted_records": record_count, "deleted_budgets": deleted_budgets}
 
 
 async def restore_default_categories(
@@ -328,7 +378,8 @@ async def restore_default_categories(
 
     - Delete all is_preset=0 custom categories for the user
     - Associated records保留, category_id set to NULL
-    - Associated budgets deleted
+    - Associated budgets 走 §12.2.4 同一级联（任务 4.4）：include 预算失去最后一个
+      关联分类才删，exclude 预算仅移出排除集
     - Reset preset categories' sort_order to defaults
 
     v1.4.3 M8：预设复位改按新预设集 **name** 匹配（原按 (name,type)）。
@@ -347,25 +398,27 @@ async def restore_default_categories(
 
     deleted_count = 0
     affected_records = 0
+    deleted_budgets = 0
 
     for cat in custom_categories:
+        cat_id = cat.id
+        if cat_id is None:  # 理论不可达：已入库行必有主键
+            continue
+
         # Count associated records
-        count_stmt = select(func.count(Record.id)).where(Record.category_id == cat.id)
+        count_stmt = select(func.count(Record.id)).where(Record.category_id == cat_id)
         count_result = await db.exec(count_stmt)
         record_count = count_result.one() or 0
         affected_records += record_count
 
         # Set associated records' category_id to NULL (preserve records)
-        record_stmt = select(Record).where(Record.category_id == cat.id)
+        record_stmt = select(Record).where(Record.category_id == cat_id)
         record_result = await db.exec(record_stmt)
         for record in record_result.all():
             record.category_id = None
 
-        # Delete associated budgets
-        budget_stmt = select(Budget).where(Budget.category_id == cat.id)
-        budget_result = await db.exec(budget_stmt)
-        for budget in budget_result.all():
-            await db.delete(budget)
+        # Budget cascade（与 delete_category 同一函数，任务 4.4）
+        deleted_budgets += await _cascade_budgets_for_deleted_category(db, cat_id)
 
         # Delete the category
         await db.delete(cat)
@@ -384,4 +437,8 @@ async def restore_default_categories(
             category.icon = preset["icon"]
 
     await db.commit()
-    return {"deleted_categories": deleted_count, "affected_records": affected_records}
+    return {
+        "deleted_categories": deleted_count,
+        "affected_records": affected_records,
+        "deleted_budgets": deleted_budgets,
+    }

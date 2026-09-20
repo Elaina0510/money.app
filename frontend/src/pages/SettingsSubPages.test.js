@@ -1251,17 +1251,18 @@ describe('M8 设置页/统计页入口图标统一', () => {
   })
 
   // 任务 §4.2 红线（易错点 9）：数据可视化语义色不入清理范围
+  // 【v1.4.3 M12 口径反转改写】原两条「预算行头像动态语义色」锁定断言（`const BUDGET_COLORS =`
+  // + `<v-avatar size="32" :color="getBudgetColor(index) + '20'">` / `<v-icon ... :color="getBudgetColor(index)">`）
+  // 随 m12 任务 5.1/5.6 删除「每分类一条预算」行内列表而整体消失（改预算卡片列表，色档走
+  // Vuetify 语义色档函数），非放宽：改锁色档函数与其阈值分支，零误伤意图与正则收敛自证保持。
   it('用例M8-3: 统计页图表/预算行语义色零误伤，红线正则可寻址收敛', () => {
     expect(statisticsPageSource).toContain('const chartColors =')
-    expect(statisticsPageSource).toContain('const BUDGET_COLORS =')
     expect(statisticsPageSource).toContain('const balanceColor = computed(')
-    // 预算行头像仍是动态语义色（未被误改成 primary 圆底）
-    expect(statisticsPageSource).toMatch(
-      /<v-avatar size="32" :color="getBudgetColor\(index\) \+ '20'"/
-    )
-    expect(statisticsPageSource).toMatch(
-      /<v-icon size="small" :color="getBudgetColor\(index\)">/
-    )
+    // 预算卡进度色档仍是数据可视化语义色档（>80% error / >50% warning / 其余 primary），
+    // 未被改成写死静态色，也不残留旧行内列表的动态色
+    expect(statisticsPageSource).toMatch(/function budgetBarColor\(budget\) \{/)
+    expect(statisticsPageSource).toMatch(/if \(pct > 80\) return 'error'/)
+    expect(statisticsPageSource).not.toMatch(/BUDGET_COLORS|getBudgetColor/)
     // 收敛性自证：图表配置里的合法 rgba 确实存在，却不被两类可寻址红线命中
     // （反证「不得整文件扫 rgba(」的必要性）
     expect(statisticsPageSource).toContain("grid: { color: 'rgba(0,0,0,0.04)' }")

@@ -1,6 +1,15 @@
 """v1.4.3 迁移脚本测试（backend/migrate_to_v1.4.3.py）。
 
-M8 交付**阶段 A（分类合并）**断言 9.3 ①–⑦；M12 在本文件续写阶段 B 断言。
+M8 交付**阶段 A（分类合并）**断言 9.3 ①–⑦；M12 在本文件续写**阶段 B（预算重建）**断言
+（任务 11.3：1:1 转换 / 被合并分类引用重定向 / 「未知分类」只读态 / 二次 SKIP / 单事务回滚）。
+
+两阶段归一个脚本后的断言分工（D1「分类在前、预算在后」）：
+  * ``test_phase_a_merges_and_rewrites`` 跑的是**整脚本**，故其 ⑦ 段核对 A→B 串联结果
+    （旧预算行 1:1 转换、name 取保留分类**当前**名、month/amount/id/user_id 原样）；
+  * 「阶段 A 单独执行时 budgets 表逐字段原样不损」（M8 挂点契约）改由
+    ``test_phase_a_unit_leaves_budgets_untouched`` 直接调阶段 A 函数锁死——
+    整脚本里该不变量已不成立（阶段 B 就要重建它），故必须显式拆出而非删断言；
+  * 阶段 B 自有形态（loser 重定向、悬挂分类、无 user_id 的开发库旧形、回滚）各一例。
 
 手法要点（设计 §8.4 / prompt §7.2 / progress.md 审查记录 ④）：
   * 临时 SQLite 文件库 + **手写旧形 CREATE TABLE**——conftest 的 `create_all` 会直接
@@ -8,6 +17,9 @@ M8 交付**阶段 A（分类合并）**断言 9.3 ①–⑦；M12 在本文件�
     故本文件一律不用 conftest fixture，预设真源改 import `app.main.PRESET_CATEGORIES`；
   * 旧形覆盖两代：`UNIQUE (name, type)`（v1.2 前，无 user_id 列）与
     `UNIQUE (name, type, user_id)`（v1.4 起，与真实 money.db 现场一致）；
+    budgets 另覆盖开发库形制 `UNIQUE (category_id, month)` 无 user_id（任务 10.6）；
+  * 幂等判据一律读 `sqlite_master` 建表文本（`PRAGMA index_list` 判名是错的——
+    表级约束的支撑索引恒为 `sqlite_autoindex_*`）；
   * **禁止对真实 money.db 执行任何写操作或迁移**（红线 9）——只在 tmp_path 沙盒跑。
 """
 
@@ -19,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy.ext.asyncio import create_async_engine
 
 # ── 被测脚本（文件名含点号，只能按路径加载；单例加载以便回滚用例打桩）──────
 _SCRIPT_PATH = Path(__file__).resolve().parents[1] / "migrate_to_v1.4.3.py"
@@ -296,7 +309,8 @@ def _seed_v142_state(conn: sqlite3.Connection, shape: str) -> dict[str, int]:
     )
     ids["qt"] = cur.lastrowid
 
-    # budgets：阶段 B 未跑前必须原样不损（挂在 kept 行上，避免阶段 A 产生悬挂引用）
+    # budgets：阶段 A 单元不动它、阶段 B 按 merge_map 1:1 重建（挂在 kept 行上，
+    # 使阶段 A 不产生悬挂引用；loser 重定向与「未知分类」另用例专门造形）
     cur.execute(
         "INSERT INTO budgets (id, user_id, category_id, month, amount, created_at,"
         " updated_at) VALUES (NULL, 1, ?, '2026-02', 800.0,"
@@ -341,9 +355,28 @@ def _monthly_totals(db_path: Path) -> list[tuple[Any, ...]]:
 
 
 def _categories_ddl(db_path: Path) -> str:
-    return _query(
-        db_path, "SELECT sql FROM sqlite_master WHERE type='table' AND name='categories'"
-    )[0][0]
+    return _table_ddl(db_path, "categories")
+
+
+def _table_ddl(db_path: Path, table: str) -> str:
+    """任意表的建表文本（幂等判据/换形核对都读它，不读 PRAGMA index_list）。"""
+    rows = _query(
+        db_path,
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name = ?",
+        (table,),
+    )
+    return rows[0][0] if rows else ""
+
+
+def _budget_rows(db_path: Path, columns: str = "*") -> list[tuple[Any, ...]]:
+    return _query(db_path, f"SELECT {columns} FROM budgets ORDER BY id")
+
+
+def _tables(db_path: Path) -> set[str]:
+    return {
+        str(r[0])
+        for r in _query(db_path, "SELECT name FROM sqlite_master WHERE type='table'")
+    }
 
 
 # ── ①–⑦ 阶段 A 断言（两代旧形各跑一遍）────────────────────────────────────
@@ -451,8 +484,32 @@ def test_phase_a_merges_and_rewrites(tmp_path: Path, shape: str, capsys: Any) ->
     # ── ⑤ 迁移前后按月 group by type 的收支合计逐分不差
     assert _monthly_totals(db_path) == totals_before
 
-    # ── ⑦ 阶段 B 未跑前 budgets 数据原样不损
-    assert _query(db_path, "SELECT * FROM budgets ORDER BY id") == budgets_before
+    # ── ⑦ 整脚本 = 阶段 A + 阶段 B（D1「分类在前、预算在后」同事务）：
+    #       旧预算行 1:1 转换、name 取保留分类**当前**名、月份/金额/id 原样（任务 9.2）
+    legacy_row = budgets_before[0]  # (id, user_id, category_id, month, amount, created_at, updated_at)
+    kept_name = _query(db_path, "SELECT name FROM categories WHERE id = ?", (kept,))[0][0]
+    new_rows = _budget_rows(
+        db_path, "id, user_id, name, month, amount, scope_mode, created_at, updated_at"
+    )
+    assert len(new_rows) == len(budgets_before), "阶段 B 不得合并或丢行（任务 9.4）"
+    assert new_rows[0][0] == legacy_row[0], "id 原样保留"
+    assert new_rows[0][1] == legacy_row[1], "user_id 原样"
+    assert new_rows[0][2] == kept_name, "name = 保留分类行当前名（可能已被阶段 A 改名）"
+    assert new_rows[0][3] == legacy_row[3], "month 原样"
+    assert new_rows[0][4] == legacy_row[4], "amount 原样"
+    assert new_rows[0][5] == "include", "旧分类预算 → include 单分类命名预算"
+    assert (new_rows[0][6], new_rows[0][7]) == (legacy_row[5], legacy_row[6]), "时间戳原样"
+    # merge_map 接力：关联行落在保留分类 id 上（阶段 A 的 loser id 已不可见）
+    assert _query(
+        db_path, "SELECT budget_id, category_id FROM budget_categories ORDER BY budget_id"
+    ) == [(legacy_row[0], kept)]
+    # budgets 已换形（无 category_id 列）+ 中间表归位（与阶段 A 同法整表重建）
+    budgets_norm = re.sub(r"\s+", " ", _table_ddl(db_path, "budgets"))
+    assert "category_id" not in budgets_norm
+    assert "name VARCHAR NOT NULL" in budgets_norm and "scope_mode VARCHAR NOT NULL" in budgets_norm
+    assert "budgets_new" not in budgets_norm
+    assert "budget_categories" in _tables(db_path)
+    assert "[OK] 转换 1 条预算" in out
 
     # ── ⑥ 二次运行整体 SKIP（幂等），数据不再变化
     capsys.readouterr()
@@ -460,11 +517,23 @@ def test_phase_a_merges_and_rewrites(tmp_path: Path, shape: str, capsys: Any) ->
         db_path,
         "SELECT id, name, type, icon, sort_order, is_preset, user_id FROM categories ORDER BY id",
     )
+    budgets_after_first = _budget_rows(
+        db_path, "id, user_id, name, month, amount, scope_mode, created_at, updated_at"
+    )
+    links_after_first = _query(
+        db_path, "SELECT id, budget_id, category_id FROM budget_categories ORDER BY id"
+    )
     assert _migrate(db_path) == 0
     again = capsys.readouterr().out
     assert "[SKIP] categories 已是 v1.4.3 形制" in again
+    assert "[SKIP] budgets 已是 v1.4.3 形制" in again
     assert _monthly_totals(db_path) == totals_before
-    assert _query(db_path, "SELECT * FROM budgets ORDER BY id") == budgets_before
+    assert _budget_rows(
+        db_path, "id, user_id, name, month, amount, scope_mode, created_at, updated_at"
+    ) == budgets_after_first
+    assert _query(
+        db_path, "SELECT id, budget_id, category_id FROM budget_categories ORDER BY id"
+    ) == links_after_first
     assert _query(
         db_path,
         "SELECT id, name, type, icon, sort_order, is_preset, user_id FROM categories ORDER BY id",
@@ -529,10 +598,271 @@ def test_phase_a_skips_new_shape_and_missing_table(tmp_path: Path, capsys: Any) 
     conn.close()
 
     assert _migrate(db_path) == 0
-    assert "[SKIP] categories 已是 v1.4.3 形制" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "[SKIP] categories 已是 v1.4.3 形制" in out
     assert _query(db_path, "SELECT COUNT(*) FROM categories")[0][0] == 1
+    # 两阶段判据互相独立：categories 已 SKIP，budgets 仍是旧形（_OTHER_TABLES_DDL）
+    # → 阶段 B 照常整表重建（任务 9.1 的判据只属于 budgets 自己）
+    assert "[OK] 转换 0 条预算" in out
+    budgets_norm = re.sub(r"\s+", " ", _table_ddl(db_path, "budgets"))
+    assert "category_id" not in budgets_norm and "name VARCHAR NOT NULL" in budgets_norm
+    assert "budget_categories" in _tables(db_path)
 
     empty = tmp_path / "empty.db"
     sqlite3.connect(empty).close()
     assert _migrate(empty) == 0
-    assert "[SKIP] categories 表不存在" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "[SKIP] categories 表不存在" in out
+    assert "[SKIP] budgets 表不存在" in out
+    assert _tables(empty) == set()
+
+
+# ── 阶段 B：预算重建（M12 任务 11.3）───────────────────────────────────────
+
+# 新形 budgets 的读取列序（多处断言复用，避免逐处拼写漂移）
+_NEW_BUDGET_COLS = "id, user_id, name, month, amount, scope_mode, created_at, updated_at"
+
+# 开发库实测的 budgets 旧形（附录 A 第 5 条 / 任务 10.6）：**无 user_id 列** +
+# 表级 UNIQUE (category_id, month)，与模型声明不一致——阶段 B 按实际存在的列搬运，
+# 不据约束名分支、不假设库形制。
+_BUDGETS_DDL_DEVDB = """
+CREATE TABLE budgets (
+    id INTEGER NOT NULL PRIMARY KEY,
+    category_id INTEGER NOT NULL REFERENCES categories(id),
+    month VARCHAR NOT NULL,
+    amount FLOAT NOT NULL,
+    created_at VARCHAR NOT NULL,
+    updated_at VARCHAR NOT NULL,
+    CONSTRAINT idx_budget_category_month UNIQUE (category_id, month)
+)
+"""
+
+# v1.4.3 新形 budgets（脚本自己的 DDL 改表名而来）——用于「阶段 B 已跑过」的库形
+_BUDGETS_DDL_V143 = migration._BUDGETS_NEW_DDL.replace("budgets_new", "budgets")
+
+
+def _insert_legacy_budget(
+    conn: sqlite3.Connection,
+    budget_id: int,
+    category_id: int,
+    month: str,
+    amount: float,
+    user_id: int | None = 1,
+) -> None:
+    """旧形 budgets 造行（显式 id，便于核对「id 原样保留」）。"""
+    conn.execute(
+        "INSERT INTO budgets (id, user_id, category_id, month, amount, created_at,"
+        " updated_at) VALUES (?, ?, ?, ?, ?, '2026-01-02 00:00:00',"
+        " '2026-01-02 00:00:00')",
+        (budget_id, user_id, category_id, month, amount),
+    )
+
+
+def _migrate_categories_only(db_path: Path) -> dict[int, int]:
+    """只跑阶段 A（同一 `engine.begin()` 事务），返回 merge_map。
+
+    用途：锁 M8 挂点契约「阶段 A 单元不碰 budgets」——整脚本里该不变量已不成立
+    （阶段 B 本就要重建它），故必须按阶段粒度单独验。
+    """
+
+    async def _run() -> dict[int, int]:
+        engine = create_async_engine(f"sqlite+aiosqlite:///{db_path}")
+        try:
+            async with engine.begin() as conn:
+                return await migration.migrate_categories_phase_a(conn)
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(_run())
+
+
+def test_phase_a_unit_leaves_budgets_untouched(tmp_path: Path) -> None:
+    """阶段 A 单元：budgets 表逐字段原样不损、不新建关联表，且产出 merge_map。"""
+    db_path = tmp_path / "phase_a_only.db"
+    conn = _create_legacy_db(db_path, "v142")
+    ids = _seed_v142_state(conn, "v142")
+    conn.close()
+
+    budgets_before = _query(db_path, "SELECT * FROM budgets ORDER BY id")
+    ddl_before = _table_ddl(db_path, "budgets")
+
+    merge_map = _migrate_categories_only(db_path)
+
+    assert _query(db_path, "SELECT * FROM budgets ORDER BY id") == budgets_before
+    assert _table_ddl(db_path, "budgets") == ddl_before
+    assert "budget_categories" not in _tables(db_path)
+    # merge_map 是阶段 B 的唯一接力通道（§8.2 注意事项 2 / 任务 9.2）
+    assert merge_map[ids["a_food_income"]] == ids["a_food_expense"]
+
+
+def test_phase_b_converts_redirects_and_marks_unknown(tmp_path: Path, capsys: Any) -> None:
+    """阶段 B 全形制：1:1 转换 + loser 引用重定向 + 悬挂分类只读态 + 同月多条不合并."""
+    db_path = tmp_path / "phase_b.db"
+    conn = _create_legacy_db(db_path, "v142")
+    ids = _seed_v142_state(conn, "v142")  # 已含 1 条挂在 kept 上的旧预算（2026-02/800）
+    kept = ids["kept"]
+    loser = ids["loser"]
+    seed_budget_id = ids["budget"]
+    # 挂在 **loser** 上：阶段 A 已删该行，阶段 B 须按 merge_map 重定向到 kept（任务 9.2）
+    _insert_legacy_budget(conn, seed_budget_id + 1, loser, "2026-03", 300.0)
+    # 与上一条同月：多行独立，**不做任何合并**（任务 9.4）
+    _insert_legacy_budget(conn, seed_budget_id + 2, ids["a_refund_income"], "2026-03", 400.0)
+    # 引用根本不存在的分类：旧库无外键约束的极端数据 → 只读态「未知分类」（任务 9.3）
+    _insert_legacy_budget(conn, seed_budget_id + 3, 4242, "2026-04", 500.0)
+    # 挂在「其他收入」CoW 副本上：阶段 A 把它改名为「其他」→ name 须取**当前**名
+    _insert_legacy_budget(conn, seed_budget_id + 4, ids["a_other_income"], "2026-05", 600.0)
+    conn.commit()
+    conn.close()
+
+    assert _migrate(db_path) == 0
+    out = capsys.readouterr().out
+    assert "[OK] 转换 5 条预算（含 1 条重定向分类引用）" in out  # 任务 9.6 原文
+    assert "其中 1 条引用的分类已不存在" in out
+
+    rows = _budget_rows(db_path, _NEW_BUDGET_COLS)
+    assert [r[0] for r in rows] == [seed_budget_id + i for i in range(5)], "id 原样、不丢不并"
+    by_id = {r[0]: r for r in rows}
+    assert by_id[seed_budget_id][2] == "餐饮"          # kept 行当前名
+    assert by_id[seed_budget_id + 1][2] == "餐饮"      # loser 重定向后的保留行名
+    assert by_id[seed_budget_id + 2][2] == "报销"      # 仅收入侧行同样保留
+    assert by_id[seed_budget_id + 3][2] == "未知分类"  # 只读态
+    assert by_id[seed_budget_id + 4][2] == "其他"      # 阶段 A 改名后的当前名
+    # amount/month/user_id/时间戳原样；scope 恒 include（旧预算无排除语义）
+    assert [(r[1], r[3], r[4], r[5]) for r in rows] == [
+        (1, "2026-02", 800.0, "include"),
+        (1, "2026-03", 300.0, "include"),
+        (1, "2026-03", 400.0, "include"),
+        (1, "2026-04", 500.0, "include"),
+        (1, "2026-05", 600.0, "include"),
+    ]
+    assert all(r[6] == r[7] == "2026-01-02 00:00:00" for r in rows)
+
+    # 关联表：只读态零关联（spent 恒 0、可删、PUT 被 include≥1 拦），其余一条一关联
+    assert _query(
+        db_path, "SELECT budget_id, category_id FROM budget_categories ORDER BY budget_id"
+    ) == [
+        (seed_budget_id, kept),
+        (seed_budget_id + 1, kept),           # merge_map 重定向
+        (seed_budget_id + 2, ids["a_refund_income"]),
+        (seed_budget_id + 4, ids["a_other_income"]),
+    ]
+    # 阶段 B 后全局零悬挂（loser 已删、4242 本就不存在 → 关系行不落库）
+    assert _query(db_path, "PRAGMA foreign_key_check") == []
+    # 关联表按新 DDL 重建：命名 UNIQUE 约束文本落位（判据读文本，不读 index_list）
+    link_norm = re.sub(r"\s+", " ", _table_ddl(db_path, "budget_categories"))
+    assert "CONSTRAINT idx_budgetcat_budget_category UNIQUE (budget_id, category_id)" in link_norm
+    assert not [t for t in _tables(db_path) if t.endswith("_new")], "中间表未 RENAME 归位"
+
+    # 二次运行：阶段 B 亦 [SKIP]，预算与关联行不再变化（任务 9.1 / 11.3）
+    again_rows = _budget_rows(db_path, _NEW_BUDGET_COLS)
+    assert _migrate(db_path) == 0
+    again = capsys.readouterr().out
+    assert "[SKIP] budgets 已是 v1.4.3 形制" in again
+    assert _budget_rows(db_path, _NEW_BUDGET_COLS) == again_rows
+
+
+def test_phase_b_handles_shape_without_user_id(tmp_path: Path, capsys: Any) -> None:
+    """开发库形制（budgets 无 user_id + UNIQUE(category_id,month)）照样整表重建。"""
+    db_path = tmp_path / "devdb.db"
+    conn = _create_legacy_db(db_path, "ancient")
+    ids = _seed_v142_state(conn, "ancient")
+    conn.execute("DROP TABLE budgets")
+    conn.executescript(_script(_BUDGETS_DDL_DEVDB))
+    conn.execute(
+        "INSERT INTO budgets (id, category_id, month, amount, created_at, updated_at)"
+        " VALUES (11, ?, '2026-06', 222.5, '2026-01-02 00:00:00', '2026-01-02 00:00:00')",
+        (ids["kept"],),
+    )
+    conn.commit()
+    conn.close()
+
+    assert _migrate(db_path) == 0
+    out = capsys.readouterr().out
+    assert "UNIQUE (category_id, month)" in out  # 旧形登记（仅日志，不据此分支）
+    assert _budget_rows(db_path, _NEW_BUDGET_COLS) == [
+        (11, None, "其他", "2026-06", 222.5, "include", "2026-01-02 00:00:00",
+         "2026-01-02 00:00:00")
+    ]
+    assert _query(
+        db_path, "SELECT budget_id, category_id FROM budget_categories"
+    ) == [(11, ids["kept"])]
+    assert _query(db_path, "PRAGMA foreign_key_check") == []
+
+
+def test_phase_b_failure_rolls_back_phase_a(tmp_path: Path, capsys: Any) -> None:
+    """单事务（任务 11.3）：阶段 B 失败 → 阶段 A 的分类结果同样不落库。"""
+    db_path = tmp_path / "rollback_b.db"
+    conn = _create_legacy_db(db_path, "v142")
+    _seed_v142_state(conn, "v142")
+    conn.close()
+
+    cats_before = _query(
+        db_path, "SELECT id, name, type, icon, sort_order, user_id FROM categories ORDER BY id"
+    )
+    budgets_before = _query(db_path, "SELECT * FROM budgets ORDER BY id")
+    ddl_before = _categories_ddl(db_path)
+
+    original = migration._rebuild_budgets_table
+
+    async def _boom(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("injected phase-B failure")
+
+    migration._rebuild_budgets_table = _boom  # type: ignore[assignment]
+    try:
+        with pytest.raises(RuntimeError, match="injected phase-B failure"):
+            _migrate(db_path)
+    finally:
+        migration._rebuild_budgets_table = original  # type: ignore[assignment]
+    capsys.readouterr()
+
+    assert _query(
+        db_path, "SELECT id, name, type, icon, sort_order, user_id FROM categories ORDER BY id"
+    ) == cats_before, "阶段 B 失败必须把阶段 A 一起回滚（同事务）"
+    assert _categories_ddl(db_path) == ddl_before
+    assert _query(db_path, "SELECT * FROM budgets ORDER BY id") == budgets_before
+    tables = _tables(db_path)
+    assert "budget_categories" not in tables
+    assert "budgets_new" not in tables and "categories_new" not in tables
+
+
+def test_phase_b_skips_when_budgets_already_new(tmp_path: Path, capsys: Any) -> None:
+    """categories 旧 + budgets 新：阶段 A 照跑、阶段 B [SKIP] 且预算数据不被改写。"""
+    db_path = tmp_path / "budgets_already_new.db"
+    conn = sqlite3.connect(db_path)
+    conn.executescript(_script(_CATEGORIES_DDL_V142, _OTHER_TABLES_DDL))
+    conn.execute("DROP TABLE budgets")  # _OTHER_TABLES_DDL 给的是旧形，此库要模拟「B 已跑过」
+    conn.executescript(_script(_BUDGETS_DDL_V143, migration._BUDGET_CATEGORIES_DDL))
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO users (id, username, hashed_password, created_at, updated_at)"
+        " VALUES (1, 'alice', 'x', '2026-01-01 00:00:00', '2026-01-01 00:00:00')"
+    )
+    for cat_id, (name, cat_type) in enumerate([("餐饮", "expense"), ("餐饮", "income")], start=1):
+        _insert_category(
+            conn, cat_id, name, cat_type, "mdi-food", cat_id, 0, 1, with_user_column=True
+        )
+    cur.execute(
+        "INSERT INTO budgets (id, user_id, name, month, amount, scope_mode, created_at,"
+        " updated_at) VALUES (7, 1, '日常开销', '2026-06', 1234.5, 'exclude',"
+        " '2026-01-02 00:00:00', '2026-01-02 00:00:00')"
+    )
+    # 关联挂在**保留行**（expense 侧 id=1）上：阶段 A 删 income 侧 loser 后不得留悬挂
+    cur.execute("INSERT INTO budget_categories (budget_id, category_id) VALUES (7, 1)")
+    conn.commit()
+    conn.close()
+
+    rows_before = _budget_rows(db_path, _NEW_BUDGET_COLS)
+    links_before = _query(
+        db_path, "SELECT id, budget_id, category_id FROM budget_categories ORDER BY id"
+    )
+
+    assert _migrate(db_path) == 0
+    out = capsys.readouterr().out
+    assert "[OK] 合并 1 组同名分类" in out
+    assert "[SKIP] budgets 已是 v1.4.3 形制" in out
+    assert "[OK] 转换" not in out, "阶段 B 已 SKIP 时不得再改写 budgets"
+    assert _budget_rows(db_path, _NEW_BUDGET_COLS) == rows_before
+    assert _query(
+        db_path, "SELECT id, budget_id, category_id FROM budget_categories ORDER BY id"
+    ) == links_before
+    assert _query(db_path, "PRAGMA foreign_key_check") == []

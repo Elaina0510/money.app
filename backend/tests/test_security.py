@@ -62,45 +62,71 @@ async def test_idor_get_other_user_tag_404(auth_client_a, auth_client_b):
     assert resp.json()["code"] == 40002
 
 
+async def _create_category_for(client, category_name="默认分类"):
+    """M8 起 POST /api/categories 不收 type（单套分类），此处只建分类并回 id。"""
+    resp = await client.post(
+        "/api/categories", json={"name": category_name, "icon": "mdi-food"}
+    )
+    return resp.json()["data"]["id"]
+
+
+async def _create_budget_for(client, category_id, month="2026-06", amount=1000.0):
+    """v1.4.3 M12 命名预算契约（任务 2.2）：POST 纯创建，响应 data 为 BudgetDetail。"""
+    resp = await client.post(
+        "/api/budgets",
+        json={
+            "month": month,
+            "name": "A的预算",
+            "amount": amount,
+            "scope_mode": "include",
+            "category_ids": [category_id],
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]
+
+
 @pytest.mark.asyncio
 async def test_idor_update_other_user_budget_403(auth_client_a, auth_client_b):
-    """用户 B 修改用户 A 的预算 → 403。"""
-    resp = await auth_client_a.post(
-        "/api/categories",
-        json={"name": "A分类", "type": "expense", "icon": "mdi-food", "sort_order": 1},
-    )
-    cat_id = resp.json()["data"]["id"]
-    resp = await auth_client_a.post(
-        "/api/budgets",
-        json={"category_id": cat_id, "month": "2026-06", "amount": 1000.0},
-    )
-    budget_id = resp.json()["data"]["id"]
+    """用户 B 修改用户 A 的预算 → 403（M12 全字段 PUT 载荷）。"""
+    cat_id = await _create_category_for(auth_client_a, "A分类")
+    created = await _create_budget_for(auth_client_a, cat_id, month="2026-06")
+    budget_id = created["id"]
+    assert created["month"] == "2026-06" and created["amount"] == 1000.0
 
     resp = await auth_client_b.put(
         f"/api/budgets/{budget_id}",
-        json={"amount": 999.0},
+        json={
+            "name": "被篡改",
+            "amount": 999.0,
+            "scope_mode": "include",
+            "category_ids": [cat_id],
+        },
     )
     assert resp.status_code == 403
     assert resp.json()["code"] == 40005
+
+    # 越权失败不留痕：A 的预算仍是原名称与原金额
+    mine = await auth_client_a.get("/api/budgets", params={"month": "2026-06"})
+    data = mine.json()["data"]
+    assert [b["id"] for b in data] == [budget_id]
+    assert data[0]["name"] == "A的预算"
+    assert data[0]["amount"] == 1000.0
 
 
 @pytest.mark.asyncio
 async def test_idor_delete_other_user_budget_403(auth_client_a, auth_client_b):
     """用户 B 删除用户 A 的预算 → 403。"""
-    resp = await auth_client_a.post(
-        "/api/categories",
-        json={"name": "A分类2", "type": "expense", "icon": "mdi-food", "sort_order": 1},
-    )
-    cat_id = resp.json()["data"]["id"]
-    resp = await auth_client_a.post(
-        "/api/budgets",
-        json={"category_id": cat_id, "month": "2026-07", "amount": 500.0},
-    )
-    budget_id = resp.json()["data"]["id"]
+    cat_id = await _create_category_for(auth_client_a, "A分类2")
+    created = await _create_budget_for(auth_client_a, cat_id, month="2026-07", amount=500.0)
+    budget_id = created["id"]
 
     resp = await auth_client_b.delete(f"/api/budgets/{budget_id}")
     assert resp.status_code == 403
     assert resp.json()["code"] == 40005
+
+    mine = await auth_client_a.get("/api/budgets", params={"month": "2026-07"})
+    assert [b["id"] for b in mine.json()["data"]] == [budget_id]
 
 
 @pytest.mark.asyncio

@@ -3,11 +3,12 @@
 import csv
 import io
 from datetime import datetime
+from typing import Any, cast
 
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.budget import Budget
+from app.models.budget import Budget, BudgetCategory
 from app.models.category import Category
 from app.models.quick_template import QuickTemplate
 from app.models.record import Record
@@ -168,7 +169,7 @@ async def export_sql(
             )
         lines.append("")
 
-    # Export budgets
+    # Export budgets（v1.4.3 M12 命名预算：budgets + budget_categories 两段）
     budget_query = (
         select(Budget).where(Budget.user_id == user_id).order_by(Budget.id)
     )
@@ -176,27 +177,71 @@ async def export_sql(
     budgets = list(budget_result.all())
 
     if budgets:
+        # 预算行**带 id 导出**：budget_categories 需按原 budget_id 关联，
+        # 导入侧靠「先读 old id → strip → 建行 → 记 map」的既有机制重映射
         lines.append("CREATE TABLE IF NOT EXISTS budgets (")
         lines.append("    id INTEGER PRIMARY KEY AUTOINCREMENT,")
         lines.append("    user_id INTEGER,")
-        lines.append("    category_id INTEGER,")
+        lines.append("    name TEXT NOT NULL,")
+        lines.append("    month TEXT NOT NULL,")
         lines.append("    amount REAL NOT NULL,")
-        lines.append("    period TEXT NOT NULL,")
+        lines.append("    scope_mode TEXT NOT NULL,")
         lines.append("    created_at TEXT,")
         lines.append("    updated_at TEXT")
         lines.append(");")
         lines.append("")
         for b in budgets:
-            cat_val = b.category_id if b.category_id else "NULL"
             created = f"'{b.created_at}'" if b.created_at else "NULL"
             updated = f"'{b.updated_at}'" if b.updated_at else "NULL"
             lines.append(
-                "INSERT INTO budgets (user_id, category_id, amount, period, "
+                "INSERT INTO budgets (id, user_id, name, month, amount, scope_mode, "
                 "created_at, updated_at) "
-                f"VALUES ({b.user_id}, {cat_val}, {round_money(b.amount)}, '{b.period}', "
-                f"{created}, {updated});"
+                f"VALUES ({b.id}, {b.user_id}, '{_sql_escape(b.name)}', '{b.month}', "
+                f"{round_money(b.amount)}, '{b.scope_mode}', {created}, {updated});"
             )
         lines.append("")
+
+        budget_ids = [int(b.id) for b in budgets if b.id is not None]
+        links: list[BudgetCategory] = []
+        if budget_ids:
+            # cast(Any, ...)：SQLModel 类字段在 mypy 视角是普通 int 值，
+            # 其 Core 表达式身份（in_/order_by）不可见；运行时即原对象。
+            link_query = (
+                select(BudgetCategory)
+                .where(cast("Any", BudgetCategory.budget_id).in_(budget_ids))
+                .order_by(cast("Any", BudgetCategory.id))
+            )
+            link_result = await db.exec(link_query)
+            links = list(link_result.all())
+        if links:
+            # 关联行**双写 category_id + category_name**：categories 段不带 id、预设段
+            # 根本不导出，导入侧的 old_id→new_id 映射对分类常常是空的，只给 id 就会
+            # 整片丢关联（预算卡的覆盖范围静默清空）。名字兜底与 .db 路径同一规则
+            # （M8 口径「同名即同一分类」）。
+            linked_cat_ids = sorted({int(link.category_id) for link in links})
+            name_rows = await db.exec(
+                select(Category.id, Category.name).where(
+                    cast("Any", Category.id).in_(linked_cat_ids)
+                )
+            )
+            cat_names = {
+                int(row[0]): str(row[1]) for row in name_rows.all() if row[0] is not None
+            }
+            lines.append("CREATE TABLE IF NOT EXISTS budget_categories (")
+            lines.append("    id INTEGER PRIMARY KEY AUTOINCREMENT,")
+            lines.append("    budget_id INTEGER NOT NULL,")
+            lines.append("    category_id INTEGER NOT NULL,")
+            lines.append("    category_name TEXT")
+            lines.append(");")
+            lines.append("")
+            for link in links:
+                lines.append(
+                    "INSERT INTO budget_categories (id, budget_id, category_id,"
+                    " category_name) VALUES "
+                    f"({link.id}, {link.budget_id}, {link.category_id},"
+                    f" '{_sql_escape(cat_names.get(int(link.category_id), ''))}');"
+                )
+            lines.append("")
 
     # Export quick templates
     # M6 隔离性核查：只导出 kind='manual' 的手动模板——auto_ignored 忽略行不得混入任何出口

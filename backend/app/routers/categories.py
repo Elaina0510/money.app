@@ -113,10 +113,17 @@ async def delete_category(
         if result is None:
             return error_response(Code.NOT_FOUND, "分类不存在")
         record_count = result["deleted_records"]
-        if record_count > 0:
+        # v1.4.3 M12（任务 4.2）：include 预算失去最后一个关联分类时随之删除，需提示
+        budget_count = result.get("deleted_budgets", 0)
+        if record_count > 0 or budget_count > 0:
+            removed: list[str] = []
+            if record_count > 0:
+                removed.append(f"{record_count} 条关联账单")
+            if budget_count > 0:
+                removed.append(f"{budget_count} 条不再覆盖任何分类的预算")
             return success_response(
                 data=result,
-                message=f"分类删除成功，同时删除了 {record_count} 条关联账单",
+                message="分类删除成功，同时删除了 " + "与 ".join(removed),
             )
         return success_response(data=result, message="分类删除成功")
     except PermissionError as e:

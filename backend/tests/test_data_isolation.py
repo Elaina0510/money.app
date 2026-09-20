@@ -4,6 +4,7 @@ import pytest
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.models.budget import Budget, BudgetCategory
 from app.models.category import Category
 from app.models.record import Record
 from app.models.user import User
@@ -412,3 +413,173 @@ async def test_anonymous_cannot_delete_user_record(client, auth_client_a):
     resp = await client.delete(f"/api/records/{record_id}")
     assert resp.status_code == 403
     assert resp.json()["code"] == 40005
+
+
+# ---------------------------------------------------------------------------
+# 18–22：v1.4.3 M12 预算段（新表 budgets + budget_categories）
+#
+# 口径反转登记：旧预算段用例按「每 (分类,月) 一条」造数据（payload 带
+# category_id），新模型下分类关联改走 budget_categories，故以下用例全部按
+# 新契约 {month, name, amount, scope_mode, category_ids} 重写；22 为本版
+# 新增的 **spent 跨用户隔离** 锁（任务 3.1 审查修订 / §11.2）。
+# ---------------------------------------------------------------------------
+
+BUDGET_MONTH = "2026-06"
+
+
+async def preset_category_id(client, name: str) -> int:
+    """取预设分类 id（两用户共享同一行，故可各自在同一分类下记账）."""
+    resp = await client.get("/api/categories")
+    assert resp.status_code == 200
+    for cat in resp.json()["data"]:
+        if cat["name"] == name:
+            return int(cat["id"])
+    raise AssertionError(f"预设分类缺失：{name}")
+
+
+async def make_budget(client, category_ids: list[int], **overrides) -> dict:
+    payload = {
+        "month": BUDGET_MONTH,
+        "name": "隔离测试预算",
+        "amount": 1000.0,
+        "scope_mode": "include",
+        "category_ids": category_ids,
+    }
+    payload.update(overrides)
+    resp = await client.post("/api/budgets", json=payload)
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]
+
+
+async def expense(client, amount: float, category_id: int) -> None:
+    resp = await client.post(
+        "/api/records",
+        json={
+            "amount": amount,
+            "type": "expense",
+            "category_id": category_id,
+            "consume_time": f"{BUDGET_MONTH}-10 12:00",
+        },
+    )
+    assert resp.status_code == 200, resp.text
+
+
+@pytest.mark.asyncio
+async def test_user_b_cannot_see_user_a_budgets(auth_client_a, auth_client_b):
+    """18. 列表/年汇总均按 user_id 隔离：B 看不到 A 的命名预算."""
+    cat_a = await preset_category_id(auth_client_a, "餐饮")
+    created = await make_budget(auth_client_a, [cat_a], name="A的日常")
+
+    resp = await auth_client_a.get("/api/budgets", params={"month": BUDGET_MONTH})
+    assert resp.status_code == 200
+    assert [b["id"] for b in resp.json()["data"]] == [created["id"]]
+
+    resp = await auth_client_b.get("/api/budgets", params={"month": BUDGET_MONTH})
+    assert resp.status_code == 200
+    assert resp.json()["data"] == [], "B 不得看到 A 的预算"
+
+    resp = await auth_client_b.get("/api/budgets/year-summary", params={"year": 2026})
+    june = resp.json()["data"]["months"][5]
+    assert june["month"] == BUDGET_MONTH
+    assert june["budgets"] == []
+    assert june["total_amount"] == 0 and june["total_spent"] == 0
+
+
+@pytest.mark.asyncio
+async def test_user_b_cannot_update_user_a_budget(auth_client_a, auth_client_b):
+    """19. B 改 A 的预算 → 403/40005，且 A 的数据原样未动."""
+    cat_a = await preset_category_id(auth_client_a, "餐饮")
+    created = await make_budget(auth_client_a, [cat_a], amount=1000.0)
+
+    resp = await auth_client_b.put(
+        f"/api/budgets/{created['id']}",
+        json={"name": "被篡改", "amount": 1.0, "scope_mode": "include", "category_ids": [cat_a]},
+    )
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40005
+
+    mine = (await auth_client_a.get("/api/budgets", params={"month": BUDGET_MONTH})).json()["data"]
+    assert mine[0]["name"] == "隔离测试预算"
+    assert mine[0]["amount"] == 1000.0
+
+
+@pytest.mark.asyncio
+async def test_user_b_cannot_delete_user_a_budget(auth_client_a, auth_client_b, db_session):
+    """20. B 删 A 的预算 → 403/40005，预算行与关联行都还在."""
+    cat_a = await preset_category_id(auth_client_a, "餐饮")
+    created = await make_budget(auth_client_a, [cat_a])
+
+    resp = await auth_client_b.delete(f"/api/budgets/{created['id']}")
+    assert resp.status_code == 403
+    assert resp.json()["code"] == 40005
+
+    budget = (
+        await db_session.exec(select(Budget).where(Budget.id == created["id"]))
+    ).first()
+    assert budget is not None, "越权删除必须不留痕迹地失败"
+    assert budget.user_id is not None
+    links = (
+        await db_session.exec(
+            select(BudgetCategory.category_id).where(
+                BudgetCategory.budget_id == created["id"]
+            )
+        )
+    ).all()
+    assert [int(c) for c in links] == [cat_a]
+
+
+@pytest.mark.asyncio
+async def test_budget_spent_excludes_other_users_expenses(auth_client_a, auth_client_b):
+    """21. 预算列表的 spent 只聚合本人支出（任务 3.1 的 user_id 谓词）."""
+    cat_a = await preset_category_id(auth_client_a, "餐饮")
+    created = await make_budget(auth_client_a, [cat_a], amount=1000.0)
+    assert created["spent"] == 0
+
+    await expense(auth_client_a, 100.0, cat_a)
+    await expense(auth_client_b, 800.0, cat_a)  # 同一分类行、不同用户
+
+    mine = (await auth_client_a.get("/api/budgets", params={"month": BUDGET_MONTH})).json()["data"]
+    assert mine[0]["spent"] == 100.0, "B 的 800 不得并入 A 的 spent"
+    assert mine[0]["remaining"] == 900.0
+
+    theirs = (await auth_client_b.get("/api/budgets", params={"month": BUDGET_MONTH})).json()["data"]
+    assert theirs == []
+
+
+@pytest.mark.asyncio
+async def test_budget_exclude_base_total_is_own_month_only(auth_client_a, auth_client_b):
+    """22. exclude 的「当月全部支出」基数同样只取本人（含 details 与 year-summary）.
+
+    锁死审查记录②：旧实现缺 user_id 谓词，会把他人同分类支出并进基数，
+    导致 exclude 预算 spent 虚高。
+    """
+    food = await preset_category_id(auth_client_a, "餐饮")
+    transport = await preset_category_id(auth_client_a, "出行")
+
+    await expense(auth_client_a, 100.0, food)
+    await expense(auth_client_a, 20.0, transport)
+    await expense(auth_client_b, 999.0, food)
+    await expense(auth_client_b, 777.0, transport)
+
+    full = await make_budget(auth_client_a, [], scope_mode="exclude", name="全支出")
+    assert full["spent"] == 120.0, "基数只能是 A 自己的当月支出 120，非 1896"
+    assert {d["category_id"] for d in full["details"]} == {food, transport}
+    assert sum(d["spent"] for d in full["details"]) == 120.0
+
+    excluded = await make_budget(
+        auth_client_a, [transport], scope_mode="exclude", name="除出行外"
+    )
+    assert excluded["spent"] == 100.0
+    assert [d["category_id"] for d in excluded["details"]] == [food]
+
+    months = (
+        await auth_client_a.get("/api/budgets/year-summary", params={"year": 2026})
+    ).json()["data"]["months"]
+    june = months[5]
+    assert june["total_amount"] == 2000.0
+    assert june["total_spent"] == 220.0, "年汇总逐月 spent 亦为本人 Σ 各预算"
+
+    overview = (
+        await auth_client_a.get("/api/statistics/budget-overview", params={"month": BUDGET_MONTH})
+    ).json()["data"]
+    assert overview["total_spent"] == 220.0

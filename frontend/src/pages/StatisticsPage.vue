@@ -138,13 +138,13 @@
           @click="openBudgetAddDialog"
         >
           <v-icon start size="small">mdi-plus</v-icon>
-          设置
+          新增预算
         </v-btn>
       </div>
 
-      <!-- ─── 月视图：管理所选月（等价迁移自设置页）─── -->
+      <!-- ─── 月视图：管理所选月的多条命名预算（v1.4.3 M12）─── -->
       <template v-if="periodType === 'monthly'">
-        <!-- 月度预算概览 -->
+        <!-- 月度预算概览（total = Σ 各预算，口径 D4） -->
         <v-card variant="tonal" class="pa-4 mb-3" rounded="lg">
           <div class="text-caption text-grey mb-1">{{ budgetMonthLabel }} 预算</div>
           <div class="text-h5 font-weight-bold mb-2">¥{{ formatAmount(totalBudget) }}</div>
@@ -163,90 +163,101 @@
           </div>
         </v-card>
 
-        <!-- 分类预算列表 -->
+        <!-- 预算卡片列表：同月可多条，纵向堆叠，key=id（同月同名两条亦各自成卡） -->
         <div v-if="budgets.length === 0" class="text-center pa-4 text-grey text-caption">
-          暂无预算设置，点击上方按钮添加分类预算
+          暂无预算，点击右上角「新增预算」为该月创建第一条命名预算
         </div>
 
-        <div
-          v-for="(item, index) in enrichedBudgets"
-          :key="item.category_id"
-          class="budget-item mb-3"
+        <v-card
+          v-for="budget in budgets"
+          :key="budget.id"
+          variant="tonal"
+          rounded="lg"
+          class="pa-3 mb-3 budget-card"
         >
           <div class="d-flex justify-space-between align-center mb-1">
-            <div class="d-flex align-center">
-              <v-avatar size="32" :color="getBudgetColor(index) + '20'" class="mr-2">
-                <v-icon size="small" :color="getBudgetColor(index)">{{ item.icon }}</v-icon>
-              </v-avatar>
-              <span class="text-body-2 font-weight-medium">{{ item.category_name }}</span>
+            <div class="d-flex align-center ga-2 budget-card-title">
+              <span class="text-body-2 font-weight-medium budget-name">{{ budget.name }}</span>
+              <v-chip
+                size="x-small"
+                variant="tonal"
+                :color="budget.scope_mode === 'exclude' ? 'warning' : 'primary'"
+                class="budget-scope-chip"
+              >
+                {{ budget.scope_mode === 'exclude' ? '排除' : '包含' }}
+              </v-chip>
             </div>
             <div class="d-flex align-center">
-              <template v-if="editingBudget === item.category_id">
-                <v-text-field
-                  v-model.number="editBudgetAmount"
-                  type="number"
-                  density="compact"
-                  hide-details
-                  variant="outlined"
-                  prefix="¥"
-                  style="width: 120px"
-                  class="mr-1"
-                  autofocus
-                  @keyup.enter="saveBudgetEdit(item)"
-                  @keyup.escape="cancelBudgetEdit"
-                />
-                <v-btn
-                  icon
-                  size="x-small"
-                  variant="text"
-                  color="primary"
-                  @click="saveBudgetEdit(item)"
-                  :loading="savingBudget"
-                >
-                  <v-icon size="small">mdi-check</v-icon>
-                </v-btn>
-                <v-btn icon size="x-small" variant="text" @click="cancelBudgetEdit">
-                  <v-icon size="small">mdi-close</v-icon>
-                </v-btn>
-              </template>
-              <template v-else>
-                <span class="text-body-2 font-weight-bold">{{ formatAmount(item.spent) }}</span>
-                <span class="text-grey"> / {{ formatAmount(item.amount) }}</span>
-                <v-btn
-                  icon
-                  size="x-small"
-                  variant="text"
-                  class="ml-1"
-                  @click="startBudgetEdit(item)"
-                >
-                  <v-icon size="small" color="grey">mdi-pencil</v-icon>
-                </v-btn>
-                <v-btn
-                  icon
-                  size="x-small"
-                  variant="text"
-                  class="ml-1"
-                  title="删除预算"
-                  @click="confirmDeleteBudget(item)"
-                >
-                  <v-icon size="small" color="grey">mdi-delete-outline</v-icon>
-                </v-btn>
-              </template>
+              <span class="text-body-2 font-weight-bold budget-spent">
+                {{ formatAmount(budget.spent) }}
+              </span>
+              <span class="text-grey budget-amount"> / {{ formatAmount(budget.amount) }}</span>
+              <v-btn
+                icon
+                size="x-small"
+                variant="text"
+                class="ml-1 budget-edit-btn"
+                title="编辑预算"
+                @click="openBudgetEditDialog(budget)"
+              >
+                <v-icon size="small" color="grey">mdi-pencil</v-icon>
+              </v-btn>
+              <v-btn
+                icon
+                size="x-small"
+                variant="text"
+                class="ml-1 budget-delete-btn"
+                title="删除预算"
+                @click="confirmDeleteBudget(budget)"
+              >
+                <v-icon size="small" color="grey">mdi-delete-outline</v-icon>
+              </v-btn>
             </div>
           </div>
           <v-progress-linear
-            :model-value="item.amount > 0 ? (item.spent / item.amount) * 100 : 0"
-            :color="
-              item.amount > 0 && item.spent / item.amount > 0.8
-                ? 'error'
-                : item.amount > 0 && item.spent / item.amount > 0.5
-                  ? 'warning'
-                  : 'primary'
-            "
+            :model-value="budgetPercent(budget)"
+            :color="budgetBarColor(budget)"
             height="6"
             rounded
           />
-        </div>
+          <!-- 卡片副行：覆盖简述（纯函数 scopeSummary）+ 已用百分比 -->
+          <div class="d-flex justify-space-between align-center mt-1">
+            <span class="text-caption text-grey budget-scope">
+              覆盖：{{ scopeSummary(budget, categories) }}
+            </span>
+            <span class="text-caption text-grey budget-percent">{{ budgetPercentText(budget) }}</span>
+          </div>
+          <!-- 语义提示恒呈现一次（需求 12.3） -->
+          <div class="text-caption text-grey budget-scope-hint">{{ scopeHint(budget) }}</div>
+
+          <!-- 展开明细：仅列计入分类（include 含 0 花费项 / exclude 仅有花费的未排除项） -->
+          <div v-if="budget.details && budget.details.length" class="mt-1">
+            <v-btn
+              size="x-small"
+              variant="text"
+              class="budget-detail-toggle"
+              @click="toggleBudgetDetails(budget.id)"
+            >
+              {{ isBudgetExpanded(budget.id) ? '收起明细' : '展开明细' }}
+              <v-icon size="x-small" class="ml-1">
+                {{ isBudgetExpanded(budget.id) ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
+              </v-icon>
+            </v-btn>
+            <v-slide-y-transition>
+              <div v-if="isBudgetExpanded(budget.id)" class="budget-detail-list">
+                <div
+                  v-for="row in budget.details"
+                  :key="row.category_id"
+                  class="d-flex align-center py-1 budget-detail-row"
+                >
+                  <v-icon size="x-small" color="grey" class="mr-2">{{ row.icon }}</v-icon>
+                  <span class="text-body-2 flex-grow-1">{{ row.category_name }}</span>
+                  <span class="text-body-2">{{ formatAmount(row.spent) }}</span>
+                </div>
+              </div>
+            </v-slide-y-transition>
+          </div>
+        </v-card>
       </template>
 
       <!-- ─── 年视图：逐月概览 + 点击下钻（决策 D2）─── -->
@@ -297,20 +308,24 @@
       </template>
     </v-card>
 
-    <!-- Budget Add Dialog -->
-    <v-dialog v-model="showBudgetAddDialog" max-width="400">
+    <!-- 新增/编辑命名预算对话框（v1.4.3 M12：两态共用同对话框回填全部字段） -->
+    <v-dialog v-model="showBudgetDialog" max-width="480">
       <v-card class="pa-4" rounded="xl">
-        <v-card-title class="text-h6 pa-0 mb-3">设置分类预算</v-card-title>
-        <div class="text-caption text-grey mb-2">{{ budgetMonthLabel }}</div>
-        <v-select
-          v-model="budgetForm.category_id"
-          :items="availableBudgetCategories"
-          item-title="name"
-          item-value="id"
-          label="选择分类"
+        <v-card-title class="text-h6 pa-0 mb-1">
+          {{ budgetForm.id ? '编辑预算' : '新增预算' }}
+        </v-card-title>
+        <div class="text-caption text-grey mb-3 budget-dialog-month">
+          {{ budgetFormMonthLabel }}{{ budgetForm.id ? '（编辑不改所属月份）' : '' }}
+        </div>
+
+        <v-text-field
+          v-model="budgetForm.name"
+          label="预算名称"
+          maxlength="50"
+          placeholder="如 日常开销"
           hide-details
-          class="mb-3"
           variant="outlined"
+          class="mb-3 budget-name-field"
         />
         <v-text-field
           v-model.number="budgetForm.amount"
@@ -318,12 +333,52 @@
           type="number"
           prefix="¥"
           hide-details
-          class="mb-3"
           variant="outlined"
+          class="mb-3 budget-amount-field"
         />
+
+        <div class="text-caption text-grey mb-1">统计范围</div>
+        <v-btn-toggle
+          v-model="budgetForm.scope_mode"
+          mandatory
+          density="compact"
+          class="mb-2 budget-scope-toggle"
+        >
+          <v-btn value="include" size="small">包含</v-btn>
+          <v-btn value="exclude" size="small">排除</v-btn>
+        </v-btn-toggle>
+
+        <v-select
+          v-model="budgetForm.category_ids"
+          :items="budgetCategoryOptions"
+          item-title="name"
+          item-value="id"
+          :label="budgetForm.scope_mode === 'exclude' ? '排除分类（可留空）' : '包含分类'"
+          multiple
+          chips
+          closable-chips
+          clearable
+          density="compact"
+          variant="outlined"
+          hide-details
+          class="mb-2 budget-category-select"
+        />
+        <div class="text-caption text-grey mb-2 budget-dialog-hint">{{ budgetScopeTip }}</div>
+        <div v-if="budgetScopeError" class="text-caption text-error mb-2 budget-dialog-error">
+          {{ budgetScopeError }}
+        </div>
+
         <div class="d-flex justify-end ga-2">
-          <v-btn variant="text" @click="showBudgetAddDialog = false">取消</v-btn>
-          <v-btn color="primary" :loading="savingBudget" @click="saveBudget">保存</v-btn>
+          <v-btn variant="text" @click="showBudgetDialog = false">取消</v-btn>
+          <v-btn
+            color="primary"
+            :loading="savingBudget"
+            :disabled="!budgetFormValid"
+            class="budget-save-btn"
+            @click="saveBudget"
+          >
+            保存
+          </v-btn>
         </div>
       </v-card>
     </v-dialog>
@@ -332,7 +387,7 @@
     <ConfirmDialog
       v-model="showDeleteBudgetDialog"
       title="删除预算"
-      :message="`确定要删除「${deletingBudget?.category_name}」的预算吗？`"
+      :message="`确定要删除「${deletingBudget?.name}」预算吗？`"
       confirm-text="删除"
       @confirm="handleDeleteBudget"
     />
@@ -345,7 +400,8 @@ import { getSummary, getByCategory, getTrend } from '@/api/statistics'
 import {
   getBudgets,
   getBudgetYearSummary,
-  batchSetBudgets,
+  createBudget,
+  updateBudget,
   deleteBudget,
 } from '@/api/budgets'
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
@@ -524,39 +580,30 @@ function getDateRange() {
   }
 }
 
-// ── 预算管理（v1.4.1 M6：由设置页迁移，跟随周期选择器）────────────────
-// 易错点：新增/编辑写入的月份 = 当前所选月 budgetMonth，而非系统当前月
+// ── 预算管理（v1.4.1 M6 由设置页迁入；v1.4.3 M12 改「每月多条命名预算」）──────
+// 易错点：新增写入的月份 = 当前所选月 budgetMonth，而非系统当前月；编辑不改月份（PUT 契约）
 const categoriesStore = useCategoriesStore()
 const appStore = useAppStore()
+
+const UNKNOWN_CATEGORY_NAME = '未知分类'
 
 const budgets = ref([])
 const yearMonths = ref([])
 const budgetLoading = ref(false)
-const showBudgetAddDialog = ref(false)
+const showBudgetDialog = ref(false)
 const savingBudget = ref(false)
-const editingBudget = ref(null)
-const editBudgetAmount = ref(0)
-const budgetForm = ref({ category_id: null, amount: 0 })
+const budgetForm = ref({ id: null, month: '', name: '', amount: 0, scope_mode: 'include', category_ids: [] })
 const showDeleteBudgetDialog = ref(false)
 const deletingBudget = ref(null)
+const expandedBudgetIds = ref([])
 
-const BUDGET_COLORS = [
-  '#FF6B6B',
-  '#4DABF7',
-  '#9775FA',
-  '#51CF66',
-  '#FF922B',
-  '#22B8CF',
-  '#F06595',
-  '#845EF7',
-  '#20C997',
-  '#FD7E14',
-]
+const categories = computed(() => categoriesStore.categories || [])
 
 const budgetMonth = computed(() => dayjs().add(periodOffset.value, 'month').format('YYYY-MM'))
 const budgetYear = computed(() => dayjs().add(periodOffset.value, 'year').format('YYYY'))
 const budgetMonthLabel = computed(() => dayjs(`${budgetMonth.value}-01`).format('YYYY年M月'))
 
+// 月度总览 = Σ 各预算（决策 D4：范围重叠时逐预算直加，属预期口径）
 const totalBudget = computed(() => budgets.value.reduce((sum, b) => sum + b.amount, 0))
 const totalSpent = computed(() => budgets.value.reduce((sum, b) => sum + b.spent, 0))
 const budgetUsagePercent = computed(() => {
@@ -564,19 +611,34 @@ const budgetUsagePercent = computed(() => {
   return (totalSpent.value / totalBudget.value) * 100
 })
 
-const enrichedBudgets = computed(() => {
-  return budgets.value.map((b) => {
-    const cat = categoriesStore.categories.find((c) => c.id === b.category_id)
-    return { ...b, icon: cat?.icon || 'mdi-cash' }
-  })
-})
+// 对话框分类候选：M8 起分类收支共用单套全量列表——不按 type 过滤、不排除已设预算的分类
+// （同月可多条预算，同一分类可被多条预算覆盖）
+const budgetCategoryOptions = computed(() =>
+  categories.value.map((c) => ({ id: c.id, name: c.name }))
+)
 
-const availableBudgetCategories = computed(() => {
-  const budgetCategoryIds = budgets.value.map((b) => b.category_id)
-  return categoriesStore.categories.filter(
-    (c) => c.type === 'expense' && !budgetCategoryIds.includes(c.id)
-  )
-})
+const budgetFormMonthLabel = computed(() =>
+  budgetForm.value.month ? dayjs(`${budgetForm.value.month}-01`).format('YYYY年M月') : ''
+)
+const budgetNameMissing = computed(() => !budgetForm.value.name || !budgetForm.value.name.trim())
+const budgetAmountInvalid = computed(() => !(Number(budgetForm.value.amount) > 0))
+// 1.3 / 6.2 校验联动：include → 至少 1 类；exclude 允许 0 选（= 全部分类）
+const budgetIncludeEmpty = computed(
+  () =>
+    budgetForm.value.scope_mode === 'include' &&
+    (budgetForm.value.category_ids || []).length === 0
+)
+const budgetFormValid = computed(
+  () => !budgetNameMissing.value && !budgetAmountInvalid.value && !budgetIncludeEmpty.value
+)
+const budgetScopeTip = computed(() =>
+  budgetForm.value.scope_mode === 'exclude'
+    ? '选中分类不计入本预算；一个都不选即统计全部分类支出'
+    : '仅计入所选分类的支出'
+)
+const budgetScopeError = computed(() =>
+  budgetIncludeEmpty.value ? '包含模式至少需要选择 1 个分类' : ''
+)
 
 // 年视图摘要（Σ yearMonths totals）
 const yearTotalBudget = computed(() =>
@@ -587,12 +649,66 @@ const yearTotalSpent = computed(() =>
 )
 const yearHasBudget = computed(() => yearMonths.value.some((m) => (m.budgets || []).length > 0))
 
-function getBudgetColor(index) {
-  return BUDGET_COLORS[index % BUDGET_COLORS.length]
-}
-
 function getBudgetMonthLabel(month) {
   return dayjs(`${month}-01`).format('M月')
+}
+
+// 进度色档沿用现口径（三处同型 >80% error / >50% warning / 其余 primary），无 100% 独立档
+function budgetPercent(budget) {
+  const amt = Number(budget?.amount) || 0
+  if (amt <= 0) return 0
+  return ((Number(budget?.spent) || 0) / amt) * 100
+}
+
+function budgetBarColor(budget) {
+  const pct = budgetPercent(budget)
+  if (pct > 80) return 'error'
+  if (pct > 50) return 'warning'
+  return 'primary'
+}
+
+function budgetPercentText(budget) {
+  return `${budgetPercent(budget).toFixed(1)}%`
+}
+
+// 覆盖简述（需求 12.3 无歧义口径，纯函数）：
+//   include ≤2 类全列；>2 类前 2 + 计数；exclude 空集 = 全部分类、非空 = 除 X 外全部支出
+function resolveScopeNames(budget, categoryList) {
+  const ids = Array.isArray(budget?.category_ids) ? budget.category_ids : []
+  const fromApi = budget?.category_names
+  if (Array.isArray(fromApi) && fromApi.length === ids.length) return [...fromApi]
+  const list = Array.isArray(categoryList) ? categoryList : []
+  return ids.map(
+    (id) => list.find((c) => c.id === id)?.name || UNKNOWN_CATEGORY_NAME
+  )
+}
+
+function scopeSummary(budget, categoryList) {
+  const names = resolveScopeNames(budget, categoryList)
+  if (budget?.scope_mode === 'exclude') {
+    return names.length ? `除 ${names.join('、')} 外全部支出` : '全部分类'
+  }
+  if (!names.length) return UNKNOWN_CATEGORY_NAME
+  if (names.length <= 2) return names.join('、')
+  return `${names.slice(0, 2).join('、')}等 ${names.length} 类`
+}
+
+// 语义提示：恒在卡片副行呈现一次
+function scopeHint(budget) {
+  return budget?.scope_mode === 'exclude' ? '选中分类不计入本预算' : '仅计入所选分类'
+}
+
+function isBudgetExpanded(id) {
+  return expandedBudgetIds.value.includes(id)
+}
+
+function toggleBudgetDetails(id) {
+  const idx = expandedBudgetIds.value.indexOf(id)
+  if (idx >= 0) {
+    expandedBudgetIds.value.splice(idx, 1)
+  } else {
+    expandedBudgetIds.value.push(id)
+  }
 }
 
 async function loadCategories() {
@@ -620,51 +736,57 @@ async function loadBudgets() {
   }
 }
 
-function startBudgetEdit(item) {
-  editingBudget.value = item.category_id
-  editBudgetAmount.value = item.amount
-}
-
-function cancelBudgetEdit() {
-  editingBudget.value = null
-  editBudgetAmount.value = 0
-}
-
-async function saveBudgetEdit(item) {
-  if (editBudgetAmount.value <= 0) return
-  savingBudget.value = true
-  try {
-    await batchSetBudgets({
-      month: budgetMonth.value,
-      budgets: [{ category_id: item.category_id, amount: editBudgetAmount.value }],
-    })
-    editingBudget.value = null
-    await loadBudgets()
-  } catch (e) {
-    console.error('Save budget error:', e)
-  } finally {
-    savingBudget.value = false
+function resetBudgetForm() {
+  budgetForm.value = {
+    id: null,
+    month: budgetMonth.value,
+    name: '',
+    amount: 0,
+    scope_mode: 'include',
+    category_ids: [],
   }
 }
 
 function openBudgetAddDialog() {
-  budgetForm.value = { category_id: null, amount: 0 }
-  showBudgetAddDialog.value = true
+  resetBudgetForm()
+  showBudgetDialog.value = true
+}
+
+// 编辑复用同对话框，回填全部字段（month 只读展示、不入 PUT 载荷）
+function openBudgetEditDialog(budget) {
+  budgetForm.value = {
+    id: budget.id,
+    month: budget.month,
+    name: budget.name,
+    amount: budget.amount,
+    scope_mode: budget.scope_mode || 'include',
+    category_ids: [...(budget.category_ids || [])],
+  }
+  showBudgetDialog.value = true
 }
 
 async function saveBudget() {
-  if (!budgetForm.value.category_id || budgetForm.value.amount <= 0) return
+  if (!budgetFormValid.value) return
+  const form = budgetForm.value
+  const payload = {
+    name: form.name.trim(),
+    amount: Number(form.amount),
+    scope_mode: form.scope_mode,
+    category_ids: Array.from(new Set(form.category_ids || [])),
+  }
   savingBudget.value = true
   try {
-    await batchSetBudgets({
-      month: budgetMonth.value,
-      budgets: [{ category_id: budgetForm.value.category_id, amount: budgetForm.value.amount }],
-    })
-    showBudgetAddDialog.value = false
-    budgetForm.value = { category_id: null, amount: 0 }
+    if (form.id) {
+      await updateBudget(form.id, payload)
+    } else {
+      await createBudget({ month: form.month, ...payload })
+    }
+    showBudgetDialog.value = false
     await loadBudgets()
+    appStore.showToast('预算已保存')
   } catch (e) {
     console.error('Save budget error:', e)
+    appStore.showToast(e.message || '保存失败', 'error')
   } finally {
     savingBudget.value = false
   }
@@ -796,6 +918,35 @@ onMounted(async () => {
   height: 10px;
   border-radius: 50%;
   flex-shrink: 0;
+}
+
+/* v1.4.3 M12：预算卡片列表（每月多条命名预算，纵向堆叠） */
+.budget-card {
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+.budget-card-title {
+  min-width: 0;
+}
+
+.budget-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.budget-detail-row + .budget-detail-row {
+  border-top: 1px solid rgba(0, 0, 0, 0.04);
+}
+
+/* 明细展开动画走 --expand-duration / --expand-easing 口径。
+   220ms / cubic-bezier(0.25, 0.8, 0.5, 1) 为该两变量的字面量同值占位，
+   M14 落 :root 变量后统一回填为 var() 引用（两模块解耦的显式约定）。
+   Vuetify 的 slide-y 过渡自带 !important 时长，故此处同用 !important 提级覆盖。 */
+.budget-detail-list.slide-y-transition-enter-active,
+.budget-detail-list.slide-y-transition-leave-active {
+  transition-duration: 220ms !important;
+  transition-timing-function: cubic-bezier(0.25, 0.8, 0.5, 1) !important;
 }
 
 .budget-month-label {
