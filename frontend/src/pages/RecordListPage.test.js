@@ -839,3 +839,193 @@ describe('RecordListPage - 详情返回状态记忆', () => {
     wrapper.unmount()
   })
 })
+
+// ---------------------------------------------------------------------------
+// M3 需求三：账单页月份条放大 + 选中月滚动居中 + 往年选中态失色修复
+//   居中手法为容器自身 scrollTo（设计 §3.2.3 红线：禁 scrollIntoView）；
+//   jsdom 无布局 → 「调用参数断言（含自设布局度量）+ ?raw 源码断言」组合（设计 §3.4）
+// ---------------------------------------------------------------------------
+import recordListSource from './RecordListPage.vue?raw'
+
+// 给月份条容器与某个 chip 包装器伪造布局度量，使居中数学可被精确断言
+function stubLayout(wrapper, chipIndex, { clientWidth, offsetLeft, offsetWidth }) {
+  const scroller = wrapper.find('.month-scroller').element
+  Object.defineProperty(scroller, 'clientWidth', { value: clientWidth, configurable: true })
+  const chip = wrapper.findAll('.month-scroller > div')[chipIndex].element
+  Object.defineProperty(chip, 'offsetLeft', { value: offsetLeft, configurable: true })
+  Object.defineProperty(chip, 'offsetWidth', { value: offsetWidth, configurable: true })
+  return scroller
+}
+
+describe('RecordListPage - 月份条居中与放大（M3）', () => {
+  /** [{ el, opts }] —— el 用于断言滚动只作用于月份条容器 */
+  let scrollCalls
+
+  beforeEach(() => {
+    getRecords.mockReset()
+    getEarliestYear.mockReset()
+    getRecords.mockResolvedValue(pageResult([], 1, 1))
+    getEarliestYear.mockResolvedValue({ earliest_year: currentYear - 5 })
+    mockFilters.start_date = ''
+    mockFilters.end_date = ''
+    mockListViewHolder.state = null
+    setViewport(375)
+
+    scrollCalls = []
+    // jsdom 未实现 Element.scrollTo：按任务 6.1 打桩并记录调用参数（window.Element 即 Element）
+    window.Element.prototype.scrollTo = vi.fn(function (opts) {
+      scrollCalls.push({ el: this, opts })
+    })
+  })
+
+  afterEach(() => {
+    delete window.Element.prototype.scrollTo
+  })
+
+  it('用例1: 首屏挂载即以 behavior:auto 定位当前月（进入页面不播放滚动动画）', async () => {
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+
+    expect(scrollCalls.length).toBeGreaterThanOrEqual(1)
+    expect(scrollCalls[0].opts).toMatchObject({ behavior: 'auto' })
+    expect(typeof scrollCalls[0].opts.left).toBe('number')
+    expect(scrollCalls[0].opts.left).toBeGreaterThanOrEqual(0)
+    // 滚动只发生在月份条容器上，不涉及 window / 其他祖先
+    expect(scrollCalls[0].el).toBe(wrapper.find('.month-scroller').element)
+    wrapper.unmount()
+  })
+
+  it('用例2: selectMonth 按「chip.offsetLeft −（容器宽 − chip 宽)/2」居中且 behavior:smooth', async () => {
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    scrollCalls.length = 0
+
+    // 容器可视宽 300，第 12 月左偏移 640、宽 64 → 期望 left = 640 − (300−64)/2 = 522
+    stubLayout(wrapper, 11, { clientWidth: 300, offsetLeft: 640, offsetWidth: 64 })
+    await wrapper.vm.selectMonth(12)
+
+    expect(scrollCalls).toHaveLength(1)
+    expect(scrollCalls[0].opts).toEqual({ left: 522, behavior: 'smooth' })
+    wrapper.unmount()
+  })
+
+  it('用例3: 居中偏移不为负（首个月份左侧不出现负滚动值）', async () => {
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    scrollCalls.length = 0
+
+    stubLayout(wrapper, 0, { clientWidth: 800, offsetLeft: 0, offsetWidth: 64 })
+    await wrapper.vm.selectMonth(1)
+
+    expect(scrollCalls[0].opts).toEqual({ left: 0, behavior: 'smooth' })
+    wrapper.unmount()
+  })
+
+  it('用例4: prevYear/nextYear 后 selectedMonth=null → 月份条回卷左端（left:0, smooth）', async () => {
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+
+    await wrapper.vm.prevYear()
+    expect(wrapper.vm.selectedMonth).toBeNull()
+    expect(scrollCalls.at(-1).opts).toEqual({ left: 0, behavior: 'smooth' })
+
+    await wrapper.vm.nextYear()
+    expect(scrollCalls.at(-1).opts).toEqual({ left: 0, behavior: 'smooth' })
+    wrapper.unmount()
+  })
+
+  it('用例5: 翻到往年后点选月份 → 该月恢复选中并居中（往年选中态不再失色）', async () => {
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    await wrapper.vm.prevYear()
+    scrollCalls.length = 0
+
+    stubLayout(wrapper, 4, { clientWidth: 300, offsetLeft: 320, offsetWidth: 64 })
+    await wrapper.vm.selectMonth(5)
+
+    expect(wrapper.vm.selectedMonth).toBe(5)
+    expect(scrollCalls.at(-1).opts).toEqual({ left: 202, behavior: 'smooth' })
+    // 选中色只取决于 selectedMonth：往年年份下 chip 仍为 primary + flat
+    const chip = wrapper.findAll('v-chip')[4]
+    expect(chip.attributes('color')).toBe('primary')
+    expect(chip.attributes('variant')).toBe('flat')
+    wrapper.unmount()
+  })
+
+  it('用例6: 详情页返回现场恢复月份后同样居中定位（首屏语义 → auto）', async () => {
+    mockListViewHolder.state = { year: currentYear - 1, month: 3, scrollTop: 0 }
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+
+    expect(wrapper.vm.selectedMonth).toBe(3)
+    expect(wrapper.vm.selectedYear).toBe(currentYear - 1)
+    const calls = scrollCalls.filter((c) => c.el === wrapper.find('.month-scroller').element)
+    expect(calls.length).toBeGreaterThanOrEqual(1)
+    expect(calls[0].opts.behavior).toBe('auto')
+    wrapper.unmount()
+  })
+
+  it('用例6b: 连续快速点选两端月份（任务 5.3）→ 每次都派发 smooth scrollTo 且不报错', async () => {
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    scrollCalls.length = 0
+
+    stubLayout(wrapper, 0, { clientWidth: 300, offsetLeft: 0, offsetWidth: 64 })
+    await wrapper.vm.selectMonth(1)
+    await wrapper.vm.selectMonth(12)
+    await wrapper.vm.selectMonth(1)
+
+    expect(scrollCalls).toHaveLength(3)
+    expect(scrollCalls.every((c) => c.opts.behavior === 'smooth')).toBe(true)
+    expect(scrollCalls.every((c) => c.opts.left >= 0)).toBe(true)
+    expect(wrapper.vm.selectedMonth).toBe(1) // 末态 = 最后一次点选
+    wrapper.unmount()
+  })
+
+  it('用例7: 月份条渲染 12 个 chip，文本为 1月…12月', async () => {
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+
+    expect(wrapper.findAll('.month-scroller > div')).toHaveLength(12)
+    expect(wrapper.findAll('v-chip').map((c) => c.text())).toEqual(
+      Array.from({ length: 12 }, (_, i) => `${i + 1}月`)
+    )
+    wrapper.unmount()
+  })
+
+  it('用例8: 放大口径与容器类收敛（?raw 源码断言）', () => {
+    // 月份条容器：工具类整体替换为 .month-scroller scoped 类
+    expect(recordListSource).toMatch(/<div ref="monthScroller" class="month-scroller">/)
+    const scrollerRule = recordListSource.match(/\.month-scroller \{[^}]*\}/)
+    expect(scrollerRule, '.month-scroller 类未定义').toBeTruthy()
+    expect(scrollerRule[0]).toMatch(/display:\s*flex/)
+    expect(scrollerRule[0]).toMatch(/flex-grow:\s*1/)
+    expect(scrollerRule[0]).toMatch(/overflow-x:\s*auto/)
+    expect(scrollerRule[0]).toMatch(/gap:\s*8px/)
+    expect(scrollerRule[0]).toMatch(/padding-bottom:\s*8px/)
+    expect(scrollerRule[0]).toMatch(/scrollbar-width:\s*none/)
+    // 旧工具类与内联 scrollbar-width 不再残留于模板
+    expect(recordListSource).not.toMatch(/overflow-x-auto/)
+    expect(recordListSource).not.toMatch(/style="scrollbar-width: none"/)
+    // chip 包装器 48px → 64px；chip small → default 并加大字号类
+    expect(recordListSource).toMatch(/min-width:\s*64px/)
+    expect(recordListSource).not.toMatch(/min-width:\s*48px/)
+    expect(recordListSource).toMatch(/class="text-subtitle-2 font-weight-medium"\s+size="default"/)
+    // 外层卡片 pa-2 → pa-3；年份箭头 x-small/small → small/20
+    expect(recordListSource).toMatch(/<v-card class="pa-3 mb-3" rounded="xl">/)
+    expect(recordListSource).toMatch(/size="small"\s+@click="prevYear"[\s\S]{0,60}<v-icon size="20">/)
+    expect(recordListSource).toMatch(/size="small"\s+@click="nextYear"[\s\S]{0,60}<v-icon size="20">/)
+    expect(recordListSource).not.toMatch(/variant="text"\s+size="x-small"/)
+  })
+
+  it('用例9: 选中态失色修复 + 居中红线（?raw 不含 selectedYear === currentYear 限定、零 scrollIntoView）', () => {
+    expect(recordListSource).toMatch(
+      /:color="selectedMonth === m \? 'primary' : ''"/
+    )
+    expect(recordListSource).not.toContain('selectedMonth === m && selectedYear === currentYear')
+    expect(recordListSource).not.toMatch(/selectedYear === currentYear\s*\?\s*'primary'/)
+    // 模块红线：居中禁用 scrollIntoView（会连带垂直滚动祖先，打断 M11 与详情页返回滚动）
+    // 源码注释会合法提及该 API 名，故断言"无调用点"
+    expect(recordListSource).not.toMatch(/\.scrollIntoView\s*\(/)
+  })
+})

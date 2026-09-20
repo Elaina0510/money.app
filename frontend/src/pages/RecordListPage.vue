@@ -17,24 +17,31 @@
       </v-row>
     </v-card>
 
-    <!-- Month Switcher -->
-    <v-card class="pa-2 mb-3" rounded="xl">
+    <!-- Month Switcher：需求三——整体放大 + 选中月滚动居中（居中逻辑见 centerSelectedMonth） -->
+    <v-card class="pa-3 mb-3" rounded="xl">
       <div class="d-flex align-center">
         <v-btn
           v-if="selectedYear > minYear"
           icon
           variant="text"
-          size="x-small"
+          size="small"
           @click="prevYear"
         >
-          <v-icon size="small">mdi-chevron-left</v-icon>
+          <v-icon size="20">mdi-chevron-left</v-icon>
         </v-btn>
-        <div class="d-flex ga-1 overflow-x-auto flex-grow-1 pb-1" style="scrollbar-width: none">
-          <div v-for="m in 12" :key="m" class="text-center flex-shrink-0" style="min-width: 48px">
+        <div ref="monthScroller" class="month-scroller">
+          <div
+            v-for="m in 12"
+            :key="m"
+            :ref="(el) => (chipRefs[m - 1] = el)"
+            class="text-center flex-shrink-0"
+            style="min-width: 64px"
+          >
             <v-chip
-              :color="selectedMonth === m && selectedYear === currentYear ? 'primary' : ''"
+              :color="selectedMonth === m ? 'primary' : ''"
               :variant="selectedMonth === m ? 'flat' : 'text'"
-              size="small"
+              class="text-subtitle-2 font-weight-medium"
+              size="default"
               rounded="xl"
               @click="selectMonth(m)"
             >
@@ -53,10 +60,10 @@
           v-if="selectedYear < currentYear"
           icon
           variant="text"
-          size="x-small"
+          size="small"
           @click="nextYear"
         >
-          <v-icon size="small">mdi-chevron-right</v-icon>
+          <v-icon size="20">mdi-chevron-right</v-icon>
         </v-btn>
       </div>
     </v-card>
@@ -193,6 +200,28 @@ const selectedYear = ref(new Date().getFullYear())
 const currentYear = new Date().getFullYear()
 const minYear = ref(null) // null = 未加载；加载后为当前用户最早记录年份
 
+// 需求三：选中月滚动居中。monthScroller = 月份条横滚容器，chipRefs[m-1] = 第 m 个月的外层 wrapper
+const monthScroller = ref(null)
+const chipRefs = ref([])
+
+// 居中只作用于月份条容器自身。红线：不用 scrollIntoView——它会连带垂直滚动祖先一起滚，
+// 打断详情页返回现场滚动恢复；scrollTo 可选调用兼容无布局环境（jsdom 未实现 Element.scrollTo）
+async function centerSelectedMonth({ smooth = true } = {}) {
+  const scroller = monthScroller.value
+  if (!scroller) return
+  const behavior = smooth ? 'smooth' : 'auto'
+  if (selectedMonth.value == null) {
+    // 翻年后无选中月（全年视图）：条回卷左端，显示 1 月侧
+    scroller.scrollTo?.({ left: 0, behavior })
+    return
+  }
+  await nextTick()
+  const chip = chipRefs.value[selectedMonth.value - 1]
+  if (!chip) return
+  const left = chip.offsetLeft - (scroller.clientWidth - chip.offsetWidth) / 2
+  scroller.scrollTo?.({ left: Math.max(left, 0), behavior })
+}
+
 // 年份可往前翻到的边界 = 用户最早有记录的年份（无记录则为当前年）
 async function loadEarliestYear() {
   try {
@@ -205,24 +234,27 @@ async function loadEarliestYear() {
 }
 
 // 只写日期区间：请求由防抖 watch 统一驱动（同参再被去重兜底），避免一次点击两次请求
-function selectMonth(month) {
+async function selectMonth(month, { smooth = true } = {}) {
   selectedMonth.value = month
   const start = `${selectedYear.value}-${String(month).padStart(2, '0')}-01`
   const endDate = new Date(selectedYear.value, month, 0)
   const end = `${selectedYear.value}-${String(month).padStart(2, '0')}-${String(endDate.getDate()).padStart(2, '0')}`
   filters.start_date = start
   filters.end_date = end
+  await centerSelectedMonth({ smooth })
 }
 
-function prevYear() {
+async function prevYear() {
   if (minYear.value !== null && selectedYear.value - 1 < minYear.value) return
   selectedYear.value--
   selectedMonth.value = null
+  await centerSelectedMonth() // 无选中月 → 回卷左端显示 1 月侧
 }
-function nextYear() {
+async function nextYear() {
   if (selectedYear.value < currentYear) {
     selectedYear.value++
     selectedMonth.value = null
+    await centerSelectedMonth() // 同上：翻年即全年视图，条回卷左端
   }
 }
 
@@ -316,8 +348,11 @@ onMounted(async () => {
     await nextTick()
     // 列表撑开前 scrollTo 会被钳制，故等一帧再恢复滚动位置
     window.requestAnimationFrame(() => window.scrollTo({ top: saved.scrollTop }))
+    // 需求三：返回现场同样居中（首屏语义 → 即时定位，不播放滚动动画）
+    await centerSelectedMonth({ smooth: false })
   } else {
-    selectMonth(new Date().getMonth() + 1)
+    // 需求三：首屏即时定位到当前月（smooth:false → 进入页面不出现"自己滑过去"）
+    await selectMonth(new Date().getMonth() + 1, { smooth: false })
     // 首屏显式一次：filters 恰好同值时 watch 不触发；与 watch 的防抖调用同参 → 去重合并为一次请求
     await search()
   }
@@ -327,6 +362,17 @@ onMounted(async () => {
 <style scoped>
 .records-page {
   padding-bottom: 20px;
+}
+
+/* 需求三：月份条横滚容器（收敛原 flex/间距/横滚/底部留白工具类与内联 scrollbar-width）。
+   本类同时是 M11 追加 overscroll-behavior-x 的挂载点。 */
+.month-scroller {
+  display: flex;
+  flex-grow: 1;
+  overflow-x: auto;
+  gap: 8px;
+  padding-bottom: 8px;
+  scrollbar-width: none;
 }
 
 .record-card {
