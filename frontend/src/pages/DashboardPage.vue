@@ -314,13 +314,13 @@ onMounted(async () => {
   color: #FFC7C7;
 }
 
-/* 需求二切换动画。220ms / cubic-bezier(0.25, 0.8, 0.5, 1) 为 --expand-duration /
-   --expand-easing 的字面量同值占位（M14 落 :root 变量后统一回填为 var() 引用） */
+/* 需求二切换动画。M14（任务 7.4 / §2.2.3 预留动作）回填：
+   时长/缓动引用全站展开口径变量 --expand-duration / --expand-easing（D10，含 reduced-motion 1ms） */
 .amount-switch-enter-active,
 .amount-switch-leave-active {
   transition:
-    opacity 220ms cubic-bezier(0.25, 0.8, 0.5, 1),
-    transform 220ms cubic-bezier(0.25, 0.8, 0.5, 1);
+    opacity var(--expand-duration) var(--expand-easing),
+    transform var(--expand-duration) var(--expand-easing);
 }
 
 .amount-switch-enter-from,

@@ -68,21 +68,24 @@
       </div>
     </v-card>
 
-    <!-- Batch Actions Bar -->
-    <div v-if="selected.length > 0" class="batch-bar mb-3">
-      <v-card rounded="xl" class="pa-2">
-        <div class="d-flex align-center justify-space-between px-2">
-          <v-chip color="primary" size="small" class="mr-2"> 已选 {{ selected.length }} </v-chip>
-          <div class="d-flex ga-1">
-            <v-btn color="error" variant="tonal" size="small" @click="showDeleteDialog = true">
-              <v-icon start size="small">mdi-delete</v-icon>
-              删除
-            </v-btn>
-            <v-btn variant="text" size="small" @click="selected = []"> 取消 </v-btn>
+    <!-- Batch Actions Bar（M14 任务 7.2：包 Transition name="batch-bar"，enter/leave 对称，
+         替换旧「仅 enter 有动画、leave 瞬删」的单向 keyframes；贴列表顶部不接原点） -->
+    <Transition name="batch-bar">
+      <div v-if="selected.length > 0" class="batch-bar mb-3">
+        <v-card rounded="xl" class="pa-2">
+          <div class="d-flex align-center justify-space-between px-2">
+            <v-chip color="primary" size="small" class="mr-2"> 已选 {{ selected.length }} </v-chip>
+            <div class="d-flex ga-1">
+              <v-btn color="error" variant="tonal" size="small" @click="showDeleteDialog = true">
+                <v-icon start size="small">mdi-delete</v-icon>
+                删除
+              </v-btn>
+              <v-btn variant="text" size="small" @click="selected = []"> 取消 </v-btn>
+            </div>
           </div>
-        </div>
-      </v-card>
-    </div>
+        </v-card>
+      </div>
+    </Transition>
 
     <!-- Refreshing：已有列表时仅顶部细进度条，列表内容不闪没 -->
     <v-progress-linear
@@ -384,19 +387,18 @@ onMounted(async () => {
   cursor: pointer;
 }
 
-.batch-bar {
-  animation: slideDown 0.2s ease;
+/* M14（任务 7.2）：批量操作条进出对称动画，时长/缓动引用全站展开口径变量 */
+.batch-bar-enter-active,
+.batch-bar-leave-active {
+  transition:
+    transform var(--expand-duration) var(--expand-easing),
+    opacity var(--expand-duration) var(--expand-easing);
 }
 
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.batch-bar-enter-from,
+.batch-bar-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 
 .empty-state-wrapper {

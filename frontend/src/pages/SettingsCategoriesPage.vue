@@ -92,7 +92,7 @@
     </div>
 
     <!-- Category Dialog -->
-    <v-dialog v-model="showCategoryDialog" max-width="400" transition="dialog-bottom-transition">
+    <AppDialog v-model="showCategoryDialog" max-width="400">
       <v-card class="pa-4" rounded="xl">
         <v-card-title class="text-h6 pa-0 mb-4">
           {{ editingCategory ? '编辑分类' : '新增分类' }}
@@ -116,7 +116,7 @@
           </v-btn>
         </div>
       </v-card>
-    </v-dialog>
+    </AppDialog>
 
     <!-- Delete Category Confirm -->
     <ConfirmDialog
@@ -128,7 +128,7 @@
     />
 
     <!-- Restore Defaults Confirm Dialog -->
-    <v-dialog v-model="showRestoreConfirm" max-width="400">
+    <AppDialog v-model="showRestoreConfirm" max-width="400">
       <v-card class="pa-4" rounded="xl">
         <v-card-title class="text-h6 pa-0 mb-2">恢复默认分类</v-card-title>
         <v-card-text class="pa-0 mb-4">
@@ -147,7 +147,7 @@
           </v-btn>
         </div>
       </v-card>
-    </v-dialog>
+    </AppDialog>
   </div>
 </template>
 
@@ -160,6 +160,7 @@ import { useAppStore } from '@/stores/useAppStore'
 import { getRecords } from '@/api/records'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import CategoryIconPicker from '@/components/common/CategoryIconPicker.vue'
+import AppDialog from '@/components/common/AppDialog.vue'
 
 const categoriesStore = useCategoriesStore()
 const appStore = useAppStore()

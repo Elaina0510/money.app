@@ -86,7 +86,7 @@
     />
 
     <!-- SQL Import Preview Dialog -->
-    <v-dialog v-model="showSqlConfirm" max-width="400">
+    <AppDialog v-model="showSqlConfirm" max-width="400">
       <v-card class="pa-4" rounded="xl">
         <v-card-title class="text-h6 pa-0 mb-2">确认导入 SQL</v-card-title>
         <v-card-text class="pa-0 mb-4">
@@ -111,7 +111,7 @@
           <v-btn color="primary" :loading="importing" @click="handleSqlNext">下一步</v-btn>
         </div>
       </v-card>
-    </v-dialog>
+    </AppDialog>
 
     <!-- SQL Mapping Dialog (reuse CsvMappingDialog) -->
     <CsvMappingDialog
@@ -130,6 +130,7 @@ import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import { useAppStore } from '@/stores/useAppStore'
 import dayjs from 'dayjs'
 import CsvMappingDialog from '@/components/common/CsvMappingDialog.vue'
+import AppDialog from '@/components/common/AppDialog.vue'
 import {
   exportCsv,
   exportSql,

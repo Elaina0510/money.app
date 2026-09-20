@@ -1,8 +1,10 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { createPinia, setActivePinia } from 'pinia'
 
 import CategoryIconPicker from './CategoryIconPicker.vue'
+import AppDialog from './AppDialog.vue'
 import { CATEGORY_ICONS } from '@/constants/categoryIcons'
 // v1.4.3 M13：jsdom 无布局引擎 → 居中弹窗结构/尺寸口径走仓库既定的 ?raw 源码断言（§1.2）
 import pickerSource from './CategoryIconPicker.vue?raw'
@@ -34,6 +36,14 @@ const globalStubs = {
   'v-card': { name: 'VCard', template: '<div class="v-card-stub"><slot /></div>' },
 }
 
+// v1.4.3 M14：AppDialog 统一壳下「关闭」先播反向收缩、播完才真正卸载画面
+// （收起时长走 --expand-duration 口径，jsdom 无全局样式时回落 EXPAND_DURATION=220ms）。
+// 断言「已关闭」需等收起动画播完，意图与原「即时卸载」锁一致、不放宽。
+async function settleCollapse(wrapper) {
+  await new Promise((resolve) => setTimeout(resolve, 320))
+  await wrapper.vm.$nextTick()
+}
+
 function setViewport(width) {
   Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width })
 }
@@ -62,6 +72,11 @@ function doneButton(wrapper) {
     .findAll('.icon-dialog__foot .v-btn-stub')
     .find((btn) => btn.text() === '完成')
 }
+
+beforeEach(() => {
+  // M14：AppDialog 的触发点来源是 appStore.lastClickOrigin → 挂载需活动 Pinia
+  setActivePinia(createPinia())
+})
 
 afterEach(() => {
   vi.clearAllMocks()
@@ -134,10 +149,13 @@ describe('CategoryIconPicker 分类图标选择独立居中弹窗（M13 重写�
     expect(doneButton(wrapper)).toBeTruthy()
     expect(content.find('.icon-dialog__close').exists()).toBe(true)
 
-    // 尺寸口径（设计 §13.2 裁定值 92vw，非需求示例 90vw）与初版过渡（M14 收编前）
+    // 尺寸口径（设计 §13.2 裁定值 92vw，非需求示例 90vw）
     const dialog = wrapper.findComponent({ name: 'VDialog' })
     expect(dialog.props('maxWidth')).toBe('min(560px, 92vw)')
-    expect(dialog.props('transition')).toBe('dialog-bottom-transition')
+    // M14 收编（任务 6.7）：外壳换成 AppDialog → v-dialog 自带位移关掉（null），
+    // 展开动画由 AppDialog 的原点缩放机制接管（.app-dialog__content 上有内联 transform）
+    expect(dialog.props('transition')).toBeNull()
+    expect(wrapper.find('.app-dialog__content').exists()).toBe(true)
     expect(dialog.props('modelValue')).toBe(true)
     expect(wrapper.find('.icon-activator').attributes('aria-expanded')).toBe('true')
     expect(wrapper.find('.icon-activator').classes()).toContain('icon-activator--open')
@@ -150,15 +168,20 @@ describe('CategoryIconPicker 分类图标选择独立居中弹窗（M13 重写�
       await wrapper.find('.icon-activator').trigger('click')
       await nextTick()
       expect(wrapper.findAll('.v-dialog-stub')).toHaveLength(1)
-      // 偶数次点击落在打开态、奇数次落在关闭态，始终只有一份弹窗
-      expect(wrapper.findAll('.v-dialog__content')).toHaveLength(i % 2 === 0 ? 1 : 0)
+      // 偶数次点击落在展开态、奇数次落在「反向收缩」进行中（M14：收起播完才卸载），始终只有一份弹窗
+      const style = wrapper.find('.app-dialog__content').attributes('style') || ''
+      expect(style).toContain(i % 2 === 0 ? 'transform: scale(1)' : 'transform: scale(0)')
     }
     expect(wrapper.find('.icon-activator').classes()).not.toContain('icon-activator--open')
+    // 收起动画播完 → 画面真正卸载（重开取消收起机制见 AppDialog/ExpandTransition 用例）
+    await settleCollapse(wrapper)
+    expect(dialogContent(wrapper).exists()).toBe(false)
 
     // 遮罩/ESC 的重复关闭信号同样幂等（受控 modelValue，状态不倒挂）
+    await wrapper.find('.icon-activator').trigger('click')
     wrapper.findComponent({ name: 'VDialog' }).vm.$emit('update:modelValue', false)
     wrapper.findComponent({ name: 'VDialog' }).vm.$emit('update:modelValue', false)
-    await nextTick()
+    await settleCollapse(wrapper)
     expect(dialogContent(wrapper).exists()).toBe(false)
     expect(wrapper.emitted('update:modelValue')).toBeFalsy()
   })
@@ -196,7 +219,7 @@ describe('CategoryIconPicker 分类图标选择独立居中弹窗（M13 重写�
     const emitsBefore = wrapper.emitted('update:modelValue').length
 
     await doneButton(wrapper).trigger('click')
-    await nextTick()
+    await settleCollapse(wrapper)
 
     expect(dialogContent(wrapper).exists()).toBe(false)
     expect(wrapper.emitted('update:modelValue')).toHaveLength(emitsBefore)
@@ -209,7 +232,7 @@ describe('CategoryIconPicker 分类图标选择独立居中弹窗（M13 重写�
     await wrapper.setProps({ modelValue: CATEGORY_ICONS[12] })
 
     await wrapper.find('.icon-dialog__close').trigger('click')
-    await nextTick()
+    await settleCollapse(wrapper)
 
     expect(dialogContent(wrapper).exists()).toBe(false)
     expect(wrapper.emitted('update:modelValue')).toBeFalsy()
@@ -222,7 +245,7 @@ describe('CategoryIconPicker 分类图标选择独立居中弹窗（M13 重写�
     await wrapper.find('.icon-activator').trigger('click')
 
     wrapper.findComponent({ name: 'VDialog' }).vm.$emit('update:modelValue', false)
-    await nextTick()
+    await settleCollapse(wrapper)
 
     expect(dialogContent(wrapper).exists()).toBe(false)
     expect(wrapper.find('.icon-activator').classes()).not.toContain('icon-activator--open')
@@ -271,7 +294,9 @@ describe('CategoryIconPicker 分类图标选择独立居中弹窗（M13 重写�
     expect(dialogContent(wrapper).exists()).toBe(true)
     expect(wrapper.find('.icon-panel').exists()).toBe(false)
     expect(wrapper.findAll('.v-dialog-stub')).toHaveLength(1)
-    expect(wrapper.findComponent({ name: 'VDialog' }).props('transition')).toBe('dialog-bottom-transition')
+    // M14 收编后：外壳统一走 AppDialog（v-dialog 自带位移关掉），不再有底部上浮过渡
+    expect(wrapper.findComponent({ name: 'VDialog' }).props('transition')).toBeNull()
+    expect(wrapper.findComponent(AppDialog).exists()).toBe(true)
   })
 
   // ---------- 任务 4.4：非精选集（存量图标）行为回归 ----------
@@ -314,10 +339,10 @@ describe('CategoryIconPicker 分类图标选择独立居中弹窗（M13 重写�
     await nextTick()
     expect(focusSpy).toHaveBeenCalledTimes(1)
 
-    // 「完成」关闭路径：先置 open=false（收起动画开始），动画结束的 after:leave 才回焦
+    // 「完成」关闭路径：先置 open=false（原点反向收缩开始），动画结束的 after:leave 才回焦
     focusSpy.mockClear()
     await doneButton(wrapper).trigger('click')
-    await nextTick()
+    await settleCollapse(wrapper)
     expect(dialogContent(wrapper).exists()).toBe(false)
     expect(focusSpy).not.toHaveBeenCalled()
     wrapper.findComponent({ name: 'VDialog' }).vm.$emit('after:leave')
@@ -340,7 +365,7 @@ describe('CategoryIconPicker 分类图标选择独立居中弹窗（M13 重写�
     expect(wrapper.find('.icon-dialog__preview-name').text()).toBe(CATEGORY_ICONS[2])
 
     await doneButton(wrapper).trigger('click')
-    await nextTick()
+    await settleCollapse(wrapper)
     expect(wrapper.find('.v-dialog__content').exists()).toBe(false)
     expect(wrapper.vm.icon).toBe(CATEGORY_ICONS[2])
   })
@@ -365,7 +390,11 @@ describe('CategoryIconPicker 分类图标选择独立居中弹窗（M13 重写�
 
     // 2.1 非全屏 dialog + 裁定宽度值 + 卡片 80vh 上限
     expect(pickerSource).toMatch(/max-width="min\(560px, 92vw\)"/)
-    expect(pickerSource).toMatch(/transition="dialog-bottom-transition"/)
+    // M14（任务 6.7）：过渡收编为 AppDialog 原点展开，组件内不再自带 dialog 位移过渡
+    expect(pickerSource).toMatch(/<AppDialog\b/)
+    expect(pickerSource).toMatch(/@after:leave="onAfterLeave"/)
+    expect(pickerSource).not.toMatch(/dialog-bottom-transition/)
+    expect(pickerSource).not.toMatch(/<v-dialog/)
     expect(styleBlock).toMatch(/\.icon-dialog\s*\{[^}]*max-height:\s*80vh/)
     // 2.2 弹窗体列向 flex
     expect(styleBlock).toMatch(/\.icon-dialog\s*\{[^}]*display:\s*flex;[^}]*flex-direction:\s*column/)

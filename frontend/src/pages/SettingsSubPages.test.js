@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { cwd } from 'node:process'
 
@@ -92,6 +92,8 @@ import CategoryIconPicker from '@/components/common/CategoryIconPicker.vue'
 import SettingsTagsPage from './SettingsTagsPage.vue'
 import SettingsQuickTemplatesPage from './SettingsQuickTemplatesPage.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+// v1.4.3 M14：全站对话框收编到 AppDialog 统一壳（收编计数锁所需）
+import AppDialog from '@/components/common/AppDialog.vue'
 // v1.4.3 M8 §10.5：CSV 映射弹窗去 type 后缀
 import CsvMappingDialog from '@/components/common/CsvMappingDialog.vue'
 import settingsPageSource from './SettingsPage.vue?raw'
@@ -2272,13 +2274,15 @@ describe('v1.4.3 M13 分类图标选择独立居中弹窗', () => {
 
       await picker.find('.icon-activator').trigger('click')
 
-      // 组件内恰一份弹窗、非全屏、裁定宽度口径 92vw、初版过渡 dialog-bottom-transition
+      // 组件内恰一份弹窗、非全屏、裁定宽度口径 92vw；M14 收编后外壳为 AppDialog（自带位移关掉）
       const inner = picker.findAllComponents(DialogStub)
       expect(inner).toHaveLength(1)
       expect(inner[0].props('fullscreen')).toBe(false)
       expect(inner[0].element.getAttribute('data-fullscreen')).toBe('false')
       expect(inner[0].props('maxWidth')).toBe('min(560px, 92vw)')
-      expect(inner[0].props('transition')).toBe('dialog-bottom-transition')
+      expect(inner[0].props('transition')).toBeNull()
+      expect(picker.findComponent(AppDialog).exists()).toBe(true)
+      expect(picker.find('.app-dialog__content').exists()).toBe(true)
       expect(inner[0].props('modelValue')).toBe(true)
 
       // 全量精选图标落在这一层弹窗里；内联展开区两档均零命中
@@ -2317,6 +2321,8 @@ describe('v1.4.3 M13 分类图标选择独立居中弹窗', () => {
     expect(done.exists()).toBe(true)
     expect(done.text()).toBe('完成')
     await done.trigger('click')
+    // M14 收编：关闭 = 先播原点反向收缩，播完（--expand-duration 口径，jsdom 回落 220ms）才真正卸载
+    await new Promise((resolve) => setTimeout(resolve, 320))
     await nextTick()
 
     expect(picker.find('.m13-dialog-content').exists()).toBe(false)
@@ -2360,14 +2366,18 @@ describe('v1.4.3 M13 分类图标选择独立居中弹窗', () => {
     // 保留项：居中 dialog（非全屏）+ 92vw 裁定值 + 卡片 80vh + 网格撑满可用高度
     const styleBlock = categoryIconPickerSource.slice(categoryIconPickerSource.indexOf('<style scoped>'))
     expect(categoryIconPickerSource).toMatch(/max-width="min\(560px, 92vw\)"/)
-    expect(categoryIconPickerSource).toMatch(/transition="dialog-bottom-transition"/)
     expect(styleBlock).toMatch(/\.icon-dialog\s*\{[^}]*max-height:\s*80vh/)
     expect(styleBlock).toMatch(/\.icon-grid-scroll\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto/)
     expect(styleBlock).toMatch(/grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(44px,\s*1fr\)\)/)
 
-    // M14 收编清单：本组件恰一处 <v-dialog（原点点开替换点，过渡为初版 dialog-bottom-transition）
-    expect(categoryIconPickerSource.match(/<v-dialog/g)).toHaveLength(1)
-    expect(categoryIconPickerSource.match(/dialog-bottom-transition/g)).toHaveLength(2) // 属性 + 注释
+    // M14 收编（任务 6.7 / 6.8）：本组件不再直持 <v-dialog（0 处，原点点开改由 AppDialog 承载），
+    // 初版底部上浮过渡字面量全站清零（含注释）；回焦链 after:leave 仍透传（M13 用例 3.3 依赖）
+    expect((categoryIconPickerSource.match(/<v-dialog/g) || [])).toHaveLength(0)
+    expect((categoryIconPickerSource.match(/dialog-bottom-transition/g) || [])).toHaveLength(0)
+    expect((categoryIconPickerSource.match(/<AppDialog/g) || [])).toHaveLength(1)
+    expect(categoryIconPickerSource).toMatch(/@after:leave="onAfterLeave"/)
+    // 滚动结构未被原点缩放动画破坏：flex 容器 + 80vh 上限 + 独立滚动层原样
+    expect(categoryIconPickerSource).toMatch(/<v-card class="icon-dialog" rounded="xl">/)
 
     // 对外签名与调用方零改动：表单侧仍是裸 v-model，未新增可见态/场景 prop
     expect(categoriesPageSource).toMatch(/<CategoryIconPicker v-model="categoryForm\.icon" \/>/)
@@ -2405,5 +2415,174 @@ describe('v1.4.3 M1 顶栏标题统一为「主页」', () => {
       /path: '\/',\s*\n\s*name: 'Dashboard',\s*\n\s*component: \(\) => import\('@\/pages\/DashboardPage\.vue'\),\s*\n\s*meta: \{ title: '主页'/
     )
     expect(routerSource).toContain("meta: { title: '主页', icon: 'mdi-view-dashboard-outline', nav: true }")
+  })
+})
+
+// ── v1.4.3 M14 全站展开画面统一「从触发点展开」（全站锁，终串行独占追加）───────────────
+// 手法：任务 6.8 / 9.4 以 `grep -rn "<v-dialog" frontend/src --include=*.vue` 实时结果为准，
+// 故此处按同等口径直读源码目录做计数断言（不写死静态清单，新增宿主漏收编即红）。
+describe('v1.4.3 M14 全站展开动画统一（全站锁）', () => {
+  function resolveSrcDir() {
+    let dir = cwd()
+    for (let i = 0; i < 5; i += 1) {
+      if (existsSync(join(dir, 'src')) && existsSync(join(dir, 'package.json'))) return join(dir, 'src')
+      const parent = dirname(dir)
+      if (parent === dir) break
+      dir = parent
+    }
+    throw new Error(`未定位 src 目录（cwd=${cwd()}）`)
+  }
+
+  const SRC = resolveSrcDir()
+
+  function walk(dir, out = []) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name === 'node_modules' || entry.name === 'dist') continue
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) walk(full, out)
+      else out.push(full)
+    }
+    return out
+  }
+
+  const rel = (file) => file.slice(SRC.length + 1).replace(/\\/g, '/')
+  const read = (file) => readFileSync(file, 'utf8')
+  const allFiles = walk(SRC)
+  const vueFiles = allFiles.filter((f) => f.endsWith('.vue'))
+  // 非测试源码（.vue/.js/.scss）：字面量与硬编码时长口径锁的范围
+  const prodFiles = allFiles.filter((f) => /\.(vue|js|scss)$/.test(f) && !f.endsWith('.test.js'))
+  const byRel = (wanted) => {
+    const hit = prodFiles.find((f) => rel(f) === wanted)
+    expect(hit, `源码文件缺失：${wanted}`).toBeTruthy()
+    return hit
+  }
+
+  // §2.1 红线 8：v-dialog 全站锁的合法持有者仅 AppDialog / ExpandTransition 两文件；
+  // 审查记录③：BudgetPage.vue 为无路由引用死文件（范围外红线保留不动）→ 显式豁免。
+  const LEGAL_HOLDERS = ['components/common/AppDialog.vue', 'components/common/ExpandTransition.vue']
+  const EXEMPT_DEAD_FILE = 'pages/BudgetPage.vue'
+
+  it('用例M14-锁1: <v-dialog 直持者恰为 AppDialog/ExpandTransition 两文件（死文件 BudgetPage 豁免）', () => {
+    const holders = vueFiles.filter((f) => read(f).includes('<v-dialog')).map(rel).sort()
+    expect(holders).toEqual([...LEGAL_HOLDERS, EXEMPT_DEAD_FILE].sort())
+    // 两个合法壳内各恰一处；豁免文件原样未动（收编清单显式排除）
+    for (const holder of LEGAL_HOLDERS) {
+      expect(read(byRel(holder)).match(/<v-dialog/g)).toHaveLength(1)
+    }
+    expect(read(byRel(EXEMPT_DEAD_FILE))).toMatch(/<v-dialog v-model="showAddDialog" max-width="400">/)
+  })
+
+  it('用例M14-锁2: dialog-bottom-transition 字面量全站零命中（属性与注释一并收编）', () => {
+    const hits = prodFiles.filter((f) => read(f).includes('dialog-bottom-transition')).map(rel)
+    expect(hits).toEqual([])
+  })
+
+  it('用例M14-锁3: 收编清单快照——九处宿主对话框改用 AppDialog（原 v-dialog 处数一一对应）', () => {
+    const expectCounts = {
+      'components/common/ConfirmDialog.vue': 1, // 6.1 内部换壳（全站确认弹窗一次惠及）
+      'components/common/CategoryIconPicker.vue': 1, // 6.7 M13 初版过渡替换
+      'components/common/CsvMappingDialog.vue': 1, // 6.5 CSV/SQL 映射
+      'pages/SettingsCategoriesPage.vue': 2, // 6.2 新增/编辑分类 + 恢复默认
+      'pages/SettingsImportExportPage.vue': 1, // 6.5 SQL 确认
+      'pages/SettingsQuickTemplatesPage.vue': 1, // 6.4 快速记账模板
+      'pages/SettingsTagsPage.vue': 1, // 6.3 标签新增/编辑
+      'pages/StatisticsPage.vue': 1, // 6.6 M12 预算新增/编辑
+    }
+    let total = 0
+    for (const [file, count] of Object.entries(expectCounts)) {
+      const src = read(byRel(file))
+      const found = (src.match(/<AppDialog\b/g) || []).length
+      expect(found, `${file} 的 AppDialog 处数`).toBe(count)
+      total += count
+      // 收编后各宿主不再直持 v-dialog，也不再自带 dialog 位移过渡
+      expect(src).not.toMatch(/<v-dialog/)
+      expect(src).not.toMatch(/transition="dialog-/)
+      // 且已 import 统一壳（同目录组件走相对路径，页面走 @ 别名）
+      expect(src).toMatch(
+        /import AppDialog from '@\/components\/common\/AppDialog\.vue'|import AppDialog from '\.\/AppDialog\.vue'/,
+      )
+    }
+    expect(total).toBe(9)
+    // DatePickerPopover 本体不动（M4 口径：机制换壳在 ExpandTransition 内）
+    expect(read(byRel('components/common/DatePickerPopover.vue'))).toMatch(/<ExpandTransition/)
+  })
+
+  it('用例M14-锁4: global.scss :root 变量（220ms/缓动）+ reduced-motion 1ms + slide-y 一处覆写', () => {
+    const styles = readGlobalStyles()
+    expect(styles).toMatch(/--expand-duration:\s*220ms/)
+    expect(styles).toMatch(/--expand-easing:\s*cubic-bezier\(0\.25,\s*0\.8,\s*0\.5,\s*1\)/)
+    expect(styles).toMatch(
+      /@media\s*\(prefers-reduced-motion:\s*reduce\)\s*\{[\s\S]{0,120}:root\s*\{[\s\S]*?--expand-duration:\s*1ms/,
+    )
+    // 任务 7.3：区内展开（v-slide-y）时长/缓动单点收敛，且以重复类名提级压过 Vuetify !important
+    expect(styles).toMatch(
+      /\.slide-y-transition-enter-active\.slide-y-transition-enter-active[\s\S]{0,600}transition-duration:\s*var\(--expand-duration\)\s*!important/,
+    )
+    expect(styles).toMatch(/transition-timing-function:\s*var\(--expand-easing\)\s*!important/)
+    // 原点缩放只在 overlay 内层容器，不新建横向滚动上下文（M11 红线）
+    expect(styles).toMatch(/\.app-dialog__content\s*>\s*\.v-card/)
+  })
+
+  it('用例M14-锁5: 触发点来源落 store 与 AppLayout pointerdown 捕获；main.js 落 VMenu defaults', () => {
+    const appStore = read(byRel('stores/useAppStore.js'))
+    expect(appStore).toMatch(/const lastClickOrigin = ref\(null\)/)
+    expect(appStore).toMatch(/function setLastClickOrigin\(origin\)/)
+    expect(appStore).toMatch(/return \{[\s\S]*lastClickOrigin,[\s\S]*setLastClickOrigin,/)
+
+    const layout = read(byRel('components/layout/AppLayout.vue'))
+    expect(layout).toMatch(/function onPointerDownCapture\(e\)\s*\{\s*appStore\.setLastClickOrigin\(\{ x: e\.clientX, y: e\.clientY \}\)/)
+    expect(layout).toMatch(
+      /document\.addEventListener\('pointerdown', onPointerDownCapture, \{ capture: true, passive: true \}\)/,
+    )
+    expect(layout).toMatch(/document\.removeEventListener\('pointerdown', onPointerDownCapture/)
+
+    // 任务 7.1：菜单类展开画面 defaults（与 M4 locale 段落互不侵犯）
+    const main = read(byRel('main.js'))
+    expect(main).toMatch(/defaults:\s*\{[\s\S]*?VMenu:\s*\{[\s\S]*?transition:\s*'fab-transition'/)
+    expect(main).toMatch(/locale:\s*\{\s*locale:\s*'zhHans'/)
+    // 实测 VSelect 把自己的 transition 直传 VMenu（defaults 不继承）→ 调用点显式兜底
+    for (const file of [
+      'components/common/CsvMappingDialog.vue',
+      'pages/RecordFormPage.vue',
+      'pages/SettingsQuickTemplatesPage.vue',
+      'pages/SettingsTagsPage.vue',
+      'pages/StatisticsPage.vue',
+    ]) {
+      expect(read(byRel(file)), `${file} 的下拉未落 fab-transition`).toMatch(/transition="fab-transition"/)
+    }
+  })
+
+  it('用例M14-锁6: 展开类动画无逐处硬编码时长/缓动残留（M2/M12 字面量已回填为变量口径）', () => {
+    // 去注释后扫描：220ms 与统一缓动字面量只允许出现在 global.scss 的变量定义处
+    const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+    const isVarDefFile = (file) => rel(file) === join('styles', 'global.scss').replace(/\\/g, '/')
+    const durationHits = prodFiles
+      .filter((f) => !isVarDefFile(f))
+      .filter((f) => stripComments(read(f)).includes('220ms'))
+      .map(rel)
+    expect(durationHits).toEqual([])
+    const easingHits = prodFiles
+      .filter((f) => !isVarDefFile(f))
+      // JS 侧同步常量（composables/useExpandAnimation.js 的 EXPAND_EASING）是同源的另一个单点，不算逐处硬编码
+      .filter((f) => rel(f) !== join('composables', 'useExpandAnimation.js').replace(/\\/g, '/'))
+      .filter((f) => stripComments(read(f)).replace(/\s+/g, ' ').includes('cubic-bezier(0.25, 0.8, 0.5, 1)'))
+      .map(rel)
+    expect(easingHits).toEqual([])
+    expect((readGlobalStyles().match(/--expand-duration:\s*220ms/g) || [])).toHaveLength(1)
+    const composable = read(byRel('composables/useExpandAnimation.js'))
+    expect(composable).toMatch(/export const EXPAND_DURATION = 220/)
+    expect(composable).toMatch(/export const EXPAND_EASING = 'cubic-bezier\(0\.25, 0\.8, 0\.5, 1\)'/)
+    expect(composable).toMatch(/--expand-duration/) // 注释互注防漂移
+    // M2 大数字切换 / M12 预算明细展开：均引用变量
+    expect(read(byRel('pages/DashboardPage.vue'))).toMatch(
+      /opacity var\(--expand-duration\) var\(--expand-easing\)/,
+    )
+    // M12 页内 slide-y 覆写已上收全局，旧 keyframes 与页内 !important 零残留
+    expect(read(byRel('pages/StatisticsPage.vue'))).not.toMatch(/transition-duration:\s*220ms/)
+    // 批量操作条：旧 slideDown（仅 enter 有动画、leave 瞬删）已被对称 Transition 取代
+    const recordList = read(byRel('pages/RecordListPage.vue'))
+    expect(recordList).not.toMatch(/slideDown/)
+    expect(recordList).toMatch(/<Transition name="batch-bar">/)
+    expect(recordList).toMatch(/\.batch-bar-enter-active,\s*\.batch-bar-leave-active/)
   })
 })

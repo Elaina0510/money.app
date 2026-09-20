@@ -309,7 +309,8 @@
     </v-card>
 
     <!-- 新增/编辑命名预算对话框（v1.4.3 M12：两态共用同对话框回填全部字段） -->
-    <v-dialog v-model="showBudgetDialog" max-width="480">
+    <!-- M14（任务 6.6）：外壳收编为 AppDialog（原点展开），M12 的表单字段与保存链路零改动 -->
+    <AppDialog v-model="showBudgetDialog" max-width="480">
       <v-card class="pa-4" rounded="xl">
         <v-card-title class="text-h6 pa-0 mb-1">
           {{ budgetForm.id ? '编辑预算' : '新增预算' }}
@@ -350,6 +351,7 @@
 
         <v-select
           v-model="budgetForm.category_ids"
+          transition="fab-transition"
           :items="budgetCategoryOptions"
           item-title="name"
           item-value="id"
@@ -381,7 +383,7 @@
           </v-btn>
         </div>
       </v-card>
-    </v-dialog>
+    </AppDialog>
 
     <!-- Delete Budget Confirm -->
     <ConfirmDialog
@@ -407,6 +409,7 @@ import {
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import { useAppStore } from '@/stores/useAppStore'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import AppDialog from '@/components/common/AppDialog.vue'
 import { formatAmount } from '@/utils/format'
 import dayjs from 'dayjs'
 import { Bar, Line } from 'vue-chartjs'
@@ -939,15 +942,9 @@ onMounted(async () => {
   border-top: 1px solid rgba(0, 0, 0, 0.04);
 }
 
-/* 明细展开动画走 --expand-duration / --expand-easing 口径。
-   220ms / cubic-bezier(0.25, 0.8, 0.5, 1) 为该两变量的字面量同值占位，
-   M14 落 :root 变量后统一回填为 var() 引用（两模块解耦的显式约定）。
-   Vuetify 的 slide-y 过渡自带 !important 时长，故此处同用 !important 提级覆盖。 */
-.budget-detail-list.slide-y-transition-enter-active,
-.budget-detail-list.slide-y-transition-leave-active {
-  transition-duration: 220ms !important;
-  transition-timing-function: cubic-bezier(0.25, 0.8, 0.5, 1) !important;
-}
+/* 明细展开动画口径统一（M14 任务 7.3）：时长/缓动由 global.scss 一处 slide-y 覆写承载
+   （`--expand-duration` / `--expand-easing`），本页不再逐组件配置——M12 时期的
+   220ms 字面量双类 !important 覆写已上收全局。 */
 
 .budget-month-label {
   width: 48px;

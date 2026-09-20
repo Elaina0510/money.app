@@ -129,6 +129,7 @@
         <v-autocomplete
           v-model="selectedTagId"
           v-model:search="tagSearchQuery"
+          transition="fab-transition"
           :items="tagSearchResults"
           item-title="name"
           item-value="id"

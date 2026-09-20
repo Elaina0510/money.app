@@ -35,12 +35,11 @@
       max-width 取 min(560px, 92vw)（需求示例 90vw，按「具体设计定」条款取 92vw 与内边距节奏统一）；
       卡片 max-height 80vh 保证竖屏不超视口且底部「完成」常驻可见。
       嵌套在「新增分类」对话框之上：Vuetify overlay 默认后开者置上，无需手动 z-index。
-      过渡：初版 dialog-bottom-transition（非瞬现即合规），M14 收编为 AppDialog 原点点开。
+      过渡：M14 收编为 AppDialog 原点展开（初版底部上浮过渡已退役，after:leave 透传保回焦）。
     -->
-    <v-dialog
+    <AppDialog
       :model-value="open"
       max-width="min(560px, 92vw)"
-      transition="dialog-bottom-transition"
       @update:model-value="onDialogModelValue"
       @after:leave="onAfterLeave"
     >
@@ -74,13 +73,14 @@
           <v-btn class="icon-dialog__done" color="primary" variant="tonal" @click="closePanel">完成</v-btn>
         </div>
       </v-card>
-    </v-dialog>
+    </AppDialog>
   </div>
 </template>
 
 <script setup>
 import { computed, h, ref, resolveComponent } from 'vue'
 import { CATEGORY_ICONS } from '@/constants/categoryIcons'
+import AppDialog from './AppDialog.vue'
 
 // 表单默认图标（在精选集内），仅用于 modelValue 为空时的预览兜底
 const FALLBACK_ICON = 'mdi-cash'

@@ -55,7 +55,7 @@
     </div>
 
     <!-- Tag Dialog -->
-    <v-dialog v-model="showTagDialog" max-width="360" transition="dialog-bottom-transition">
+    <AppDialog v-model="showTagDialog" max-width="360">
       <v-card class="pa-4" rounded="xl">
         <v-card-title class="text-h6 pa-0 mb-4">新增标签</v-card-title>
         <v-text-field
@@ -68,6 +68,7 @@
         />
         <v-select
           v-model="tagForm.category_id"
+          transition="fab-transition"
           :items="categories"
           item-title="name"
           item-value="id"
@@ -82,7 +83,7 @@
           <v-btn color="primary" :loading="savingTag" @click="saveTag" variant="tonal">创建</v-btn>
         </div>
       </v-card>
-    </v-dialog>
+    </AppDialog>
 
     <!-- Delete Tag Confirm -->
     <ConfirmDialog
@@ -101,6 +102,7 @@ import { storeToRefs } from 'pinia'
 import { useCategoriesStore } from '@/stores/useCategoriesStore'
 import { getTagsPaged } from '@/api/tags'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import AppDialog from '@/components/common/AppDialog.vue'
 
 const categoriesStore = useCategoriesStore()
 

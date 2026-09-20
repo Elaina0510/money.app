@@ -74,6 +74,13 @@ const vuetify = createVuetify({
       variant: 'outlined',
       density: 'compact',
     },
+    // v1.4.3 M14（需求十四 任务 7.1）：菜单/下拉类展开画面统一「自触发点缩放浮现」过渡。
+    // 实测 Vuetify 3.12 的 VSelect 把自己的 transition（默认 VDialogTransition 对象）直传 VMenu，
+    // 故 defaults.VMenu 对 v-select 不生效 → 站内 v-select/v-autocomplete 调用点同步显式传
+    // transition="fab-transition"（设计 §14.2.3 预留的兜底分支，站点使用量小可枚举）。
+    VMenu: {
+      transition: 'fab-transition',
+    },
     VNavigationDrawer: {
       rounded: 'xl',
     },

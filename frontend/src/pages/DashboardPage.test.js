@@ -275,15 +275,20 @@ describe('DashboardPage - 总收支三视图点按切换（M2）', () => {
     wrapper.unmount()
   })
 
-  it('用例9: 点按区结构（role=button + user-select）与动画字面量口径（§1.2 待 M14 回填）', () => {
+  it('用例9: 点按区结构（role=button + user-select）与动画变量口径（M14 已回填 :root 变量）', () => {
     expect(dashboardSource).toMatch(/class="overview-cycle-area[^"]*"\s+role="button"/)
     expect(dashboardSource).toMatch(/@click="cycleView"/)
     expect(dashboardSource).toMatch(/user-select:\s*none/)
-    // 切换动画：out-in + :key="view"，时长/缓动为与 --expand-duration/--expand-easing 同值的字面量
+    // 切换动画：out-in + :key="view"；M14（任务 7.4 / §2.2.3）把 M2 的字面量占位回填为
+    // --expand-duration / --expand-easing 引用——意图不放宽：仍锁「引用存在 + 无硬编码残留」
     expect(dashboardSource).toMatch(/<Transition name="amount-switch" mode="out-in">/)
     expect(dashboardSource).toMatch(/:key="view"/)
-    expect(dashboardSource).toMatch(/opacity 220ms cubic-bezier\(0\.25, 0\.8, 0\.5, 1\)/)
-    expect(dashboardSource).toMatch(/transform 220ms cubic-bezier\(0\.25, 0\.8, 0\.5, 1\)/)
+    expect(dashboardSource).toMatch(/opacity var\(--expand-duration\) var\(--expand-easing\)/)
+    expect(dashboardSource).toMatch(/transform var\(--expand-duration\) var\(--expand-easing\)/)
+    expect(dashboardSource).not.toMatch(/220ms/)
+    expect(dashboardSource).not.toMatch(/cubic-bezier\(0\.25/)
+    // 本页只消费变量、不定义变量（单点定义在 global.scss :root，M14 全站锁另测）
+    expect(dashboardSource).not.toMatch(/--expand-(duration|easing)\s*:/)
     expect(dashboardSource).toMatch(/translateY\(6px\)/)
     // 结余负数色为 D5 裁定值
     expect(dashboardSource).toMatch(/\.amount-number--negative \{[^}]*color: #FFC7C7/)

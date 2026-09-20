@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises, enableAutoUnmount } from '@vue/test-utils'
-import { nextTick, reactive } from 'vue'
+import { nextTick, reactive, Transition } from 'vue'
 
 // 用例隔离：每个用例一份全新时钟（丢弃上一用例遗留的防抖定时器），
 // 并自动卸载组件（残留实例的 watch 停用，共享 filters 变化不会再排新定时器）
@@ -1170,5 +1170,57 @@ describe('RecordListPage - 行图标 primary 色系统一（M10）', () => {
     expect(recordListSource).toMatch(
       /\{\{\s*record\.type === 'expense'\s*\?\s*'-'\s*:\s*'\+'\s*\}\}\s*\{\{\s*record\.amount\s*\}\}/,
     )
+  })
+})
+
+// ---------------------------------------------------------------------------
+// v1.4.3 M14（任务 7.2 / 9.5）：批量操作条收编为 <Transition name="batch-bar">
+//   —— 进出对称动画（旧 slideDown 只有 enter、leave 瞬删），时长走 --expand-duration 口径
+// ---------------------------------------------------------------------------
+describe('RecordListPage - 批量操作条进出对称动画（M14）', () => {
+  it('用例M14-批1: 批量条由 Transition(name="batch-bar") 托管，出现/消失均经它（快照类名变化）', async () => {
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+
+    // 未选中时不渲染批量条，也无过渡托管
+    expect(wrapper.find('.batch-bar').exists()).toBe(false)
+
+    wrapper.vm.selected = [1, 2]
+    await nextTick()
+
+    const shells = wrapper.findAllComponents(Transition)
+    const barShell = shells.find((s) => s.props('name') === 'batch-bar')
+    expect(barShell, '批量操作条未被 Transition name="batch-bar" 托管').toBeTruthy()
+    expect(barShell.find('.batch-bar').exists()).toBe(true)
+    // 进入瞬间的可观测类名序列（jsdom 无真实过渡 → 至少 from/active 类由 Vue 同步落上）
+    expect(wrapper.find('.batch-bar').classes()).toContain('batch-bar')
+
+    vi.advanceTimersByTime(80)
+    await nextTick()
+    expect(wrapper.find('.batch-bar').exists()).toBe(true)
+
+    wrapper.vm.selected = []
+    await nextTick()
+    expect(wrapper.find('.batch-bar').exists()).toBe(false)
+    // 过渡托管本身常驻（leave 也走同一 Transition，非旧实现的瞬删）
+    expect(wrapper.findAllComponents(Transition).some((s) => s.props('name') === 'batch-bar')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('用例M14-批2: ?raw 源码锁——Transition 包裹 v-if 条 + 对称样式引用 --expand-* + slideDown 零残留', () => {
+    expect(recordListSource).toMatch(
+      /<Transition name="batch-bar">\s*<div v-if="selected\.length > 0" class="batch-bar mb-3">/,
+    )
+    expect(recordListSource).toMatch(/<\/Transition>/)
+    expect(recordListSource).toMatch(
+      /\.batch-bar-enter-active,\s*\.batch-bar-leave-active\s*\{[\s\S]*?transform var\(--expand-duration\) var\(--expand-easing\)[\s\S]*?opacity var\(--expand-duration\) var\(--expand-easing\)/,
+    )
+    // enter-from 与 leave-to 同型（位移 ±10px + 透明），即进出对称
+    expect(recordListSource).toMatch(
+      /\.batch-bar-enter-from,\s*\.batch-bar-leave-to\s*\{[^}]*opacity:\s*0;[^}]*transform:\s*translateY\(-10px\)/,
+    )
+    expect(recordListSource).not.toMatch(/slideDown|@keyframes/)
+    // 不接原点：条贴列表顶部，位移方向即触发语境（任务 7.2）
+    expect(recordListSource).not.toMatch(/batch-bar[\s\S]{0,80}transformOrigin/)
   })
 })

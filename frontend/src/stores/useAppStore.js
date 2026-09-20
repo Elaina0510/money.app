@@ -9,6 +9,10 @@ export const useAppStore = defineStore('app', () => {
   const loading = ref(false)
   const toast = ref({ show: false, message: '', color: 'success' })
   const transitionOrigin = ref(null)
+  // v1.4.3 M14（任务 4.1 / D7）：最近一次 pointerdown 的视口坐标——全站展开画面的触发点来源。
+  // 由 AppLayout.vue onMounted 的 document pointerdown 捕获监听写入（键盘触发无 pointer 时
+  // 维持上一次，AppDialog 内再按「未设/{0,0} → 中心」退化）。
+  const lastClickOrigin = ref(null)
 
   function resolveDarkMode() {
     if (themeMode.value === 'auto') {
@@ -57,12 +61,17 @@ export const useAppStore = defineStore('app', () => {
     transitionOrigin.value = origin
   }
 
+  function setLastClickOrigin(origin) {
+    lastClickOrigin.value = origin
+  }
+
   return {
     darkMode,
     themeMode,
     loading,
     toast,
     transitionOrigin,
+    lastClickOrigin,
     toggleDarkMode,
     setDarkMode,
     setThemeMode,
@@ -71,5 +80,6 @@ export const useAppStore = defineStore('app', () => {
     showToast,
     hideToast,
     setTransitionOrigin,
+    setLastClickOrigin,
   }
 })

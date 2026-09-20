@@ -1,5 +1,5 @@
 <template>
-  <v-dialog :model-value="modelValue" max-width="480" @update:model-value="$emit('update:modelValue', $event)">
+  <AppDialog :model-value="modelValue" max-width="480" @update:model-value="$emit('update:modelValue', $event)">
     <v-card class="pa-4" rounded="xl">
       <v-card-title class="text-h6 pa-0 mb-2">CSV 导入映射</v-card-title>
 
@@ -16,6 +16,7 @@
             <v-icon size="small" class="mr-2">mdi-arrow-right</v-icon>
             <v-select
               :model-value="getCategoryMapping(catName)"
+              transition="fab-transition"
               :items="categoryOptions"
               item-title="label"
               item-value="value"
@@ -37,6 +38,7 @@
             <v-icon size="small" class="mr-2">mdi-arrow-right</v-icon>
             <v-select
               :model-value="getTagMapping(tagName)"
+              transition="fab-transition"
               :items="tagOptions"
               item-title="label"
               item-value="value"
@@ -70,11 +72,12 @@
         </v-btn>
       </div>
     </v-card>
-  </v-dialog>
+  </AppDialog>
 </template>
 
 <script setup>
 import { ref, computed, watch } from 'vue'
+import AppDialog from './AppDialog.vue'
 
 const props = defineProps({
   modelValue: Boolean,

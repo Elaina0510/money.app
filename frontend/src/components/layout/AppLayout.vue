@@ -259,6 +259,13 @@ function handleAuthLogin() {
 let authLogoutHandler
 let authLoginHandler
 
+// v1.4.3 M14（任务 4.2 / D7）：全站展开画面的触发点来源——document 捕获阶段记录最近一次
+// pointerdown 坐标，所有对话框（含路由级/程序化打开）天然取到「那一次点击」。
+// passive 只读不改事件流；capture 保证内层 stopPropagation 也不丢点。
+function onPointerDownCapture(e) {
+  appStore.setLastClickOrigin({ x: e.clientX, y: e.clientY })
+}
+
 onMounted(() => {
   checkLogin()
   authLogoutHandler = () => handleAuthLogout()
@@ -266,12 +273,14 @@ onMounted(() => {
   window.addEventListener('auth:logout', authLogoutHandler)
   window.addEventListener('auth:login', authLoginHandler)
   window.addEventListener('resize', onResize)
+  document.addEventListener('pointerdown', onPointerDownCapture, { capture: true, passive: true })
 })
 
 onUnmounted(() => {
   window.removeEventListener('auth:logout', authLogoutHandler)
   window.removeEventListener('auth:login', authLoginHandler)
   window.removeEventListener('resize', onResize)
+  document.removeEventListener('pointerdown', onPointerDownCapture, { capture: true })
 })
 
 // 点击菜单按钮切换侧边栏

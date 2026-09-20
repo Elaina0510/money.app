@@ -87,4 +87,16 @@ describe('useAppStore', () => {
     store.setTransitionOrigin(null)
     expect(store.transitionOrigin).toBeNull()
   })
+
+  // v1.4.3 M14（任务 4.1 / D7）：全站展开画面的触发点来源
+  it('用例M14-store: lastClickOrigin 初值 null（AppDialog 据此退化中心展开），setLastClickOrigin 写入最近点击坐标', () => {
+    const store = useAppStore()
+    expect(store.lastClickOrigin).toBeNull()
+
+    store.setLastClickOrigin({ x: 132, y: 480 })
+    expect(store.lastClickOrigin).toEqual({ x: 132, y: 480 })
+
+    store.setLastClickOrigin({ x: 8, y: 900 })
+    expect(store.lastClickOrigin).toEqual({ x: 8, y: 900 })
+  })
 })

@@ -16,7 +16,13 @@
 
 <script setup>
 import { ref, watch, nextTick, onBeforeUnmount } from 'vue'
+import { useExpandAnimation } from '@/composables/useExpandAnimation'
 
+/* v1.4.3 M14（任务 3.1）：内部机制已抽至 useExpandAnimation（单一实现源），
+ * 本组件**对外 props / emits / 行为不变**（既有 ExpandTransition.test.js 全量保持是重构红线）。
+ * 继续服务 DatePickerPopover（其 activator 本就传真实 click 坐标）。
+ * duration 默认值沿用对外 API 的 250（旧口径被红线用例锁定），
+ * 全站 220ms 统一口径由 --expand-duration / EXPAND_DURATION 承载（AppDialog 走该默认）。 */
 const props = defineProps({
   modelValue: {
     type: Boolean,
@@ -44,7 +50,17 @@ const emit = defineEmits(['update:modelValue'])
 
 const show = ref(props.modelValue)
 const contentRef = ref(null)
-let collapseTimer = null
+
+const {
+  applyExpand,
+  applyCollapse,
+  clearCollapseTimer,
+  isCollapsing,
+  calcOrigin,
+} = useExpandAnimation(contentRef, {
+  origin: () => props.origin,
+  duration: () => props.duration,
+})
 
 watch(
   () => props.modelValue,
@@ -64,6 +80,9 @@ watch(show, (val) => {
   emit('update:modelValue', val)
   if (val) {
     nextTick(() => {
+      // 幂等展开：元素停在 scale(0)（收起中途重开）时重新播展开，已在展开态则跳过
+      const el = contentRef.value
+      if (el && el.style.transform === 'scale(1)' && el.style.opacity === '1') return
       applyExpandAnimation()
     })
   }
@@ -72,7 +91,7 @@ watch(show, (val) => {
 // 拦截 v-dialog 的用户交互关闭（遮罩点击 / ESC）：同样先播圆形收起动画再关闭
 function onDialogModelValue(val) {
   if (!val) {
-    if (show.value && !collapseTimer) {
+    if (show.value && !isCollapsing()) {
       applyCollapseAnimation()
     }
   } else {
@@ -81,68 +100,29 @@ function onDialogModelValue(val) {
   }
 }
 
-function clearCollapseTimer() {
-  if (collapseTimer) {
-    clearTimeout(collapseTimer)
-    collapseTimer = null
-  }
-}
-
 onBeforeUnmount(() => {
   clearCollapseTimer()
 })
 
-function calcOrigin(clickX, clickY) {
-  if (!contentRef.value) return 'center center'
-
-  const rect = contentRef.value.getBoundingClientRect()
-  if (!rect.width || !rect.height) return 'center center'
-
-  const x = ((clickX - rect.left) / rect.width) * 100
-  const y = ((clickY - rect.top) / rect.height) * 100
-
-  return `${x}% ${y}%`
-}
-
 function applyExpandAnimation() {
-  if (!contentRef.value) return
-
-  const el = contentRef.value
-  const origin = calcOrigin(props.origin.x, props.origin.y)
-
-  el.style.transformOrigin = origin
-  el.style.transform = 'scale(0)'
-  el.style.opacity = '0'
-  el.style.transition = 'none'
-
-  // Force reflow
-  el.offsetHeight
-
-  el.style.transition = `transform ${props.duration}ms ease, opacity ${props.duration}ms ease`
-  el.style.transform = 'scale(1)'
-  el.style.opacity = '1'
+  applyExpand()
 }
 
 // 圆形收起：收缩回同一展开原点，动画期间 dialog 留在 DOM 中，播完再关闭
 function applyCollapseAnimation() {
-  if (collapseTimer) return
-
-  const el = contentRef.value
-  if (!el) {
+  applyCollapse(() => {
     show.value = false
-    return
-  }
-
-  el.style.transformOrigin = calcOrigin(props.origin.x, props.origin.y)
-  el.style.transition = `transform ${props.duration}ms ease, opacity ${props.duration}ms ease`
-  el.style.transform = 'scale(0)'
-  el.style.opacity = '0'
-
-  collapseTimer = setTimeout(() => {
-    collapseTimer = null
-    show.value = false
-  }, props.duration)
+  })
 }
+
+// 对外可观测面保持迁出前一致（既有红线用例按此访问；composable 抽出的 calcOrigin 在此继续暴露）
+defineExpose({
+  show,
+  contentRef,
+  calcOrigin,
+  applyExpandAnimation,
+  applyCollapseAnimation,
+})
 </script>
 
 <style scoped>

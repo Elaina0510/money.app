@@ -1,5 +1,6 @@
 <template>
-  <v-dialog v-model="show" max-width="360" persistent>
+  <AppDialog v-model="show" max-width="360" persistent>
+    <!-- M14（任务 6.1）：内部换壳为 AppDialog 原点展开，对外 props/emits 与全站确认弹窗行为不变 -->
     <v-card>
       <v-card-title class="text-h6 pb-2">{{ title }}</v-card-title>
       <v-card-text class="text-body-2 text-medium-emphasis">
@@ -20,11 +21,12 @@
         </v-btn>
       </v-card-actions>
     </v-card>
-  </v-dialog>
+  </AppDialog>
 </template>
 
 <script setup>
 import { ref, watch } from 'vue'
+import AppDialog from './AppDialog.vue'
 
 const props = defineProps({
   modelValue: { type: Boolean, default: false },

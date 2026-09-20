@@ -64,11 +64,12 @@
     </div>
 
     <!-- Quick Template Add Dialog -->
-    <v-dialog v-model="showQuickTemplateDialog" max-width="400">
+    <AppDialog v-model="showQuickTemplateDialog" max-width="400">
       <v-card class="pa-4" rounded="xl">
         <v-card-title class="text-h6 pa-0 mb-4">新增快速记账</v-card-title>
         <v-select
           v-model="quickTemplateForm.tag_id"
+          transition="fab-transition"
           :items="tags"
           item-title="name"
           item-value="id"
@@ -95,7 +96,7 @@
           >
         </div>
       </v-card>
-    </v-dialog>
+    </AppDialog>
 
     <!-- Delete Template Confirm（M6：手动/自动均先确认，文案按来源区分） -->
     <ConfirmDialog
@@ -121,6 +122,7 @@ import {
   ignoreAutoQuickTemplate,
 } from '@/api/records'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import AppDialog from '@/components/common/AppDialog.vue'
 
 const categoriesStore = useCategoriesStore()
 const appStore = useAppStore()

@@ -6,6 +6,19 @@
   --shadow-level-2: 0 2px 6px rgba(0, 0, 0, 0.1);
   --shadow-level-3: 0 8px 24px rgba(0, 0, 0, 0.15);
   --shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.12);
+
+  /* v1.4.3 M14（需求十四 / D10，任务 1.1）：全站展开类动画统一口径（需求 200–250ms 取中）。
+     与 composables/useExpandAnimation.js 的 EXPAND_DURATION / EXPAND_EASING **同源互注**：
+     任一处改动必须同步另一处，防口径漂移。 */
+  --expand-duration: 220ms;
+  --expand-easing: cubic-bezier(0.25, 0.8, 0.5, 1);
+}
+
+/* 任务 1.2（可访问性口径，一处生效全站）：系统「减少动态效果」下近似瞬开（不得瞬现＝保留 1ms 过渡） */
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --expand-duration: 1ms;
+  }
 }
 
 html {
@@ -48,6 +61,13 @@ body {
 }
 
 .v-dialog > .v-card {
+  border-radius: 20px !important;
+  box-shadow: var(--shadow-level-3) !important;
+}
+
+/* v1.4.3 M14：AppDialog 统一壳把内容包在 overlay 内层容器里做原点缩放，
+   卡片图层口径不变地继续命中（收编后视觉与 .v-dialog > .v-card 同形） */
+.app-dialog__content > .v-card {
   border-radius: 20px !important;
   box-shadow: var(--shadow-level-3) !important;
 }
@@ -193,6 +213,20 @@ body {
 .slide-up-leave-to {
   transform: translateY(100%);
   opacity: 0;
+}
+
+/* ── v1.4.3 M14（任务 7.3）区内展开统一：预算卡展开明细 / 图标面板收起等 v-slide-y 系列
+   一律引用 --expand-duration / --expand-easing（Vuetify 自带 0.2s !important 时长，
+   故沿用「重复类名提级 + !important」手法在全站一处收敛，不逐组件配置——
+   收编原 StatisticsPage 页内的双类覆写）。 ─────────────────────────────────── */
+.slide-y-transition-enter-active.slide-y-transition-enter-active,
+.slide-y-transition-leave-active.slide-y-transition-leave-active,
+.slide-y-reverse-transition-enter-active.slide-y-reverse-transition-enter-active,
+.slide-y-reverse-transition-leave-active.slide-y-reverse-transition-leave-active,
+.v-slide-y-transition-enter-active.v-slide-y-transition-enter-active,
+.v-slide-y-transition-leave-active.v-slide-y-transition-leave-active {
+  transition-duration: var(--expand-duration) !important;
+  transition-timing-function: var(--expand-easing) !important;
 }
 
 /* Chip group styling */

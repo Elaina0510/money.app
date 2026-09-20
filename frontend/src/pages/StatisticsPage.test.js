@@ -100,9 +100,18 @@ import {
 import { getByCategory, getTrend } from '@/api/statistics'
 import StatisticsPage from './StatisticsPage.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+// v1.4.3 M14：预算对话框外壳收编断言所需
+import AppDialog from '@/components/common/AppDialog.vue'
 import settingsPageSource from './SettingsPage.vue?raw'
 import statisticsPageSource from './StatisticsPage.vue?raw'
 import budgetsApiSource from '../api/budgets.js?raw'
+// v1.4.3 M14：展开动画口径单点定义（:root 变量 + slide-y 一处覆写）源码锁
+// （.scss 走 ?raw 会被样式管线返回空串 → 直接读文件文本）
+import fs from 'node:fs'
+import path from 'node:path'
+import { cwd } from 'node:process'
+
+const globalStyleSource = fs.readFileSync(path.resolve(cwd(), 'src/styles/global.scss'), 'utf8')
 
 async function mountPage() {
   const wrapper = mount(StatisticsPage)
@@ -698,16 +707,23 @@ describe('StatisticsPage - M12 每月多条命名预算（预算卡列表）', (
   })
 
   // 迁移等价：预算区不残留行内编辑态与批量端点封装（jsdom 布局不可测 → ?raw 源码断言）
-  it('用例6: 源码结构锁——卡片列表 key=id、无行内编辑态与批量封装、展开动画字面量口径', () => {
+  it('用例6: 源码结构锁——卡片列表 key=id、无行内编辑态与批量封装、展开动画口径上收全局（M14）', () => {
     expect(statisticsPageSource).not.toMatch(/editingBudget|editBudgetAmount|enrichedBudgets|availableBudgetCategories/)
     expect(statisticsPageSource).not.toContain('batchSetBudgets')
     expect(statisticsPageSource).toMatch(/<v-card\s+v-for="budget in budgets"[\s\S]{0,60}:key="budget\.id"/)
     expect(statisticsPageSource).toMatch(/v-for="row in budget\.details"/)
     expect(statisticsPageSource).toMatch(/<v-slide-y-transition>/)
-    // --expand-duration 变量由 M14 落 :root，本模块只写同值字面量占位（不定义变量）
-    expect(statisticsPageSource).toMatch(/transition-duration:\s*220ms\s*!important/)
-    expect(statisticsPageSource).toMatch(/cubic-bezier\(0\.25,\s*0\.8,\s*0\.5,\s*1\)/)
+    // M14（任务 7.3）：slide-y 时长/缓动覆写上收 global.scss 一处（重复类名提级 + !important），
+    // 本页不再留 220ms 字面量与页内覆写；变量单点定义在 :root，本页只消费——意图不放宽。
+    expect(statisticsPageSource).not.toMatch(/transition-duration:\s*220ms/)
+    expect(statisticsPageSource).not.toMatch(/slide-y-transition-(enter|leave)-active/)
     expect(statisticsPageSource).not.toMatch(/--expand-(duration|easing)\s*:/)
+    // 全局单点定义与消费侧一致（D10 量化口径）
+    expect(globalStyleSource).toMatch(/--expand-duration:\s*220ms/)
+    expect(globalStyleSource).toMatch(/--expand-easing:\s*cubic-bezier\(0\.25,\s*0\.8,\s*0\.5,\s*1\)/)
+    expect(globalStyleSource).toMatch(
+      /\.slide-y-transition-enter-active\.slide-y-transition-enter-active[\s\S]{0,600}transition-duration:\s*var\(--expand-duration\)/,
+    )
     // 统计页预算入口图标不动（M10 域，本模块不改样式）
     expect(statisticsPageSource).toContain('mdi-piggy-bank-outline')
     expect(statisticsPageSource).toContain('entry-avatar')
@@ -887,5 +903,42 @@ describe('StatisticsPage - M7 分类柱状图过渡动画', () => {
     expect(statisticsPageSource).toMatch(
       /\.chart-empty-overlay\s*\{[^}]*background:\s*rgb\(var\(--v-theme-surface\)\)/s
     )
+  })
+})
+
+// ── v1.4.3 M14 全站展开画面统一「从触发点展开」：本页预算对话框收编（任务 6.6）──────
+describe('v1.4.3 M14 预算新增/编辑对话框收编 AppDialog', () => {
+  it('用例M14-统1: 页内零 <v-dialog、零底部上浮过渡字面量，预算对话框外壳为 AppDialog', () => {
+    expect((statisticsPageSource.match(/<v-dialog/g) || [])).toHaveLength(0)
+    expect(statisticsPageSource).not.toMatch(/dialog-bottom-transition/)
+    expect((statisticsPageSource.match(/<AppDialog\b/g) || [])).toHaveLength(1)
+    expect(statisticsPageSource).toMatch(/<AppDialog v-model="showBudgetDialog" max-width="480">/)
+    expect(statisticsPageSource).toMatch(/import AppDialog from '@\/components\/common\/AppDialog\.vue'/)
+    // M12 功能面零改动：对话框字段与保存链路原样（只换外壳组件）
+    expect(statisticsPageSource).toMatch(/v-model="budgetForm\.name"/)
+    expect(statisticsPageSource).toMatch(/@click="saveBudget"/)
+  })
+
+  it('用例M14-统2: 打开预算对话框 → 由 AppDialog 承载并应用原点展开内联样式', async () => {
+    const rectSpy = vi
+      .spyOn(window.HTMLElement.prototype, 'getBoundingClientRect')
+      .mockImplementation(() => ({ left: 100, top: 50, width: 250, height: 200, right: 350, bottom: 250, x: 100, y: 50, toJSON: () => ({}) }))
+    const wrapper = await mountPage()
+    wrapper.vm.openBudgetAddDialog()
+    await nextTick()
+    await nextTick()
+
+    const shell = wrapper.findComponent(AppDialog)
+    expect(shell.exists()).toBe(true)
+    expect(shell.props('modelValue')).toBe(true)
+
+    const content = wrapper.find('.app-dialog__content')
+    expect(content.exists()).toBe(true)
+    // 展开样式已应用（非瞬现）；无触发点时退化中心（appStore 在本案为桩，lastClickOrigin 为空）
+    expect(content.element.style.transform).toBe('scale(1)')
+    expect(content.element.style.transformOrigin).toBe('center center')
+
+    wrapper.unmount()
+    rectSpy.mockRestore()
   })
 })
