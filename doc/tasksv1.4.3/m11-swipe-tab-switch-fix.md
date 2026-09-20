@@ -13,7 +13,7 @@
   > **复现尝试结论：未能复现**——本会话未挂载 browser-use MCP 工具，本地 CDP 探针脚本的执行被权限系统拦截，仅完成 dev server 起服与现场核验；无「根因非 overscroll」的证据，故按 §11.2 overscroll 假设实施 CSS 修复。**「未经真机复现」**（真机验收 5.2/5.3 保留在待人工抽检清单）。
 - [x] 1.2 若复现证明根因不是 overscroll（如 v-bottom-navigation 误命中、drawer 手势）→ 按实际根因调整方案并**回写设计 §11.2**——禁止跳过复现直接按假设合并修复（项目质量红线：先隔离复现再动手）
   > 未触发该分支：复现未观测到 overscroll 之外的根因，方案维持 §11.2，无需回写。
-- [ ] 1.3 复现结论登记到 progress.md 备注
+- [x] 1.3 复现结论登记到 progress.md 备注
   > 登记地 progress.md 只由主 Agent 读写，子 Agent 不触碰（§3.2）；结论原文已随完成报告上报，待主 Agent 落盘。
 
 ## 2. CSS 层修复（设计 §11.2，根因=overscroll 时）
