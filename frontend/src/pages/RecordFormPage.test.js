@@ -51,6 +51,8 @@ import recordFormSource from './RecordFormPage.vue?raw'
 import { searchTags } from '@/api/tags'
 // v1.4.3 M8 §10.4：统一分类列表（收支共用）供记账页九宫格断言
 import { getCategories } from '@/api/categories'
+// v1.4.3 M4 §5.3：日期弹窗「关闭时才回写」→ 表单 consumeDate/dirty 断言
+import DatePickerPopover from '@/components/common/DatePickerPopover.vue'
 
 describe('RecordFormPage - Leave Guard', () => {
   beforeEach(() => {
@@ -277,5 +279,32 @@ describe('RecordFormPage - M8 分类收支共用统一列表', () => {
     )
     // 「其他」不再作为默认选中项（唯一真源常量本地登记）
     expect(recordFormSource).toMatch(/const OTHER_CATEGORY_NAME = '其他'/)
+  })
+})
+
+// ── v1.4.3 M4 日期弹窗「选后不关、关闭时才回写」：调用方侧口径（任务 §5.3）──────
+describe('RecordFormPage - M4 日期弹窗关闭回写', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('DatePickerPopover emit 新日期 → consumeDate 更新 + isDirty=true', async () => {
+    const wrapper = mount(RecordFormPage)
+    await flushPromises()
+
+    // 初始快照已建立 → 未改动不脏
+    expect(wrapper.vm.isDirty).toBe(false)
+
+    const popover = wrapper.findComponent(DatePickerPopover)
+    expect(popover.exists()).toBe(true)
+    const before = wrapper.vm.consumeDate
+
+    // 组件按 M4 语义只在弹窗关闭时 emit 一次最终日期
+    popover.vm.$emit('update:modelValue', '2026-06-06')
+    await nextTick()
+
+    expect(wrapper.vm.consumeDate).toBe('2026-06-06')
+    expect(wrapper.vm.consumeDate).not.toBe(before)
+    expect(wrapper.vm.isDirty).toBe(true)
   })
 })

@@ -8,12 +8,20 @@ import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
+// v1.4.3 M4：Vuetify 内置文案中文化（日历标题/星期/月份等）。
+// vite-plugin-vuetify 未启用 → 走显式 import，零新增依赖（包内已有 vuetify）
+import { zhHans } from 'vuetify/locale'
 import '@mdi/font/css/materialdesignicons.css'
 import './styles/global.scss'
 
 const vuetify = createVuetify({
   components,
   directives,
+  // v1.4.3 M4（需求四）：全站 Vuetify 内置文案中文——日历标题/星期/月份等
+  locale: {
+    locale: 'zhHans',
+    messages: { zhHans },
+  },
   theme: {
     defaultTheme: 'light',
     themes: {
