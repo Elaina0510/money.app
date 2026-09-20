@@ -1,26 +1,54 @@
 <template>
   <div class="dashboard-page">
-    <!-- Monthly Hero Card - 本月总消费 -->
+    <!-- Monthly Hero Card - 需求二：总收支三视图点按切换（初始视图=支出，D5） -->
     <v-card class="monthly-overview-card mb-4" color="primary" rounded="xl">
       <div class="overview-content pa-5">
         <div class="d-flex justify-space-between align-start mb-1">
           <div class="text-subtitle-1 font-weight-medium" style="opacity: 0.9">
-            {{ currentMonthLabel }} 总支出
+            {{ currentMonthLabel }} 总收支
           </div>
-          <v-btn
-            icon
-            variant="text"
-            size="small"
-            color="white"
-            style="opacity: 0.7"
-            @click="router.push('/statistics')"
-          >
-            <v-icon>mdi-chevron-right</v-icon>
-          </v-btn>
+          <div class="overview-jump" @click.stop>
+            <v-btn
+              icon
+              variant="text"
+              size="small"
+              color="white"
+              style="opacity: 0.7"
+              @click="router.push('/statistics')"
+            >
+              <v-icon>mdi-chevron-right</v-icon>
+            </v-btn>
+          </div>
         </div>
-        <div class="monthly-amount mb-3">
-          <span class="amount-symbol">¥</span>
-          <span class="amount-number">{{ totalMonthExpense }}</span>
+
+        <!-- 点按区：视图标签 + 大数字 + 三点指示；普通 div click，不参与滚动链 -->
+        <div
+          class="overview-cycle-area mb-3"
+          role="button"
+          aria-label="切换收支视图"
+          @click="cycleView"
+        >
+          <Transition name="amount-switch" mode="out-in">
+            <div :key="view">
+              <div class="view-label text-caption">{{ currentViewLabel }}</div>
+              <div class="monthly-amount">
+                <span class="amount-symbol">¥</span>
+                <span
+                  class="amount-number"
+                  :class="{ 'amount-number--negative': showNegativeColor }"
+                  >{{ viewAmount }}</span
+                >
+              </div>
+            </div>
+          </Transition>
+          <div class="view-dots" aria-hidden="true">
+            <span
+              v-for="v in views"
+              :key="v"
+              class="view-dot"
+              :class="{ 'view-dot--active': v === view }"
+            ></span>
+          </div>
         </div>
 
         <div class="d-flex ga-4">
@@ -122,16 +150,11 @@
       >
         <v-list-item>
           <template v-slot:prepend>
-            <v-avatar :color="record.type === 'expense' ? '#FFE8E8' : '#E8FFF3'" size="42" class="mr-2">
-              <v-icon :color="record.type === 'expense' ? '#FF6B6B' : '#20C997'" size="20">
-                {{ record.type === 'expense' ? 'mdi-arrow-down' : 'mdi-arrow-up' }}
-              </v-icon>
+            <v-avatar class="entry-avatar mr-2" size="42">
+              <v-icon color="primary" size="20">{{ record.category_icon || 'mdi-circle' }}</v-icon>
             </v-avatar>
           </template>
           <v-list-item-title class="text-body-2 font-weight-medium">
-            <v-avatar size="22" color="rgba(139, 126, 116, 0.12)" class="mr-1">
-              <v-icon size="12" color="#8B7E74">{{ record.category_icon || 'mdi-circle' }}</v-icon>
-            </v-avatar>
             {{ record.tag?.name || record.category_name || '未分类' }}
           </v-list-item-title>
           <v-list-item-subtitle class="text-caption">
@@ -166,15 +189,38 @@ const categoryStats = ref([])
 
 const currentMonthLabel = computed(() => dayjs().format('YYYY年MM月'))
 
-const totalMonthExpense = computed(() => {
-  const val = summary.value?.total_expense || 0
+// 需求二（D5）：大卡三视图点按循环 expense→balance→income，初始视图=支出
+// （与改造前「总支出」卡语义连续）；循环声明序为 收入→支出→结余
+const views = ['income', 'expense', 'balance']
+const view = ref('expense')
+const nextView = { income: 'expense', expense: 'balance', balance: 'income' }
+const viewLabel = { income: '收入', expense: '支出', balance: '结余' }
+
+function cycleView() {
+  view.value = nextView[view.value]
+}
+
+// 金额口径沿用现状：千分位 + 两位小数，负数渲染为 "-1,234.56"
+function fmtMoney(val) {
   return val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+// 结余为纯前端派生（零新增接口）：收入 − 支出
+const balance = computed(() => (summary.value?.total_income || 0) - (summary.value?.total_expense || 0))
+
+const currentViewLabel = computed(() => viewLabel[view.value])
+
+const viewAmount = computed(() => {
+  const inc = summary.value?.total_income || 0
+  const exp = summary.value?.total_expense || 0
+  const val = view.value === 'income' ? inc : view.value === 'expense' ? exp : inc - exp
+  return fmtMoney(val)
 })
 
-const formatIncomeStr = computed(() => {
-  const val = summary.value?.total_income || 0
-  return val.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-})
+// 结余负数色 #FFC7C7（D5）：仅结余视图且结余为负；结余=0 与非负沿用现白
+const showNegativeColor = computed(() => view.value === 'balance' && balance.value < 0)
+
+const formatIncomeStr = computed(() => fmtMoney(summary.value?.total_income || 0))
 
 const dailyAverage = computed(() => {
   const exp = summary.value?.total_expense || 0
@@ -229,6 +275,58 @@ onMounted(async () => {
   font-size: 40px;
   font-weight: 700;
   line-height: 1;
+}
+
+/* 需求二：三视图点按区（普通 div click，不参与滚动链） */
+.overview-cycle-area {
+  position: relative;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.view-label {
+  opacity: 0.85;
+  margin-bottom: 2px;
+}
+
+/* 三点指示：纯装饰，无独立点击语义 */
+.view-dots {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.view-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ffffff;
+  opacity: 0.4;
+}
+
+.view-dot--active {
+  opacity: 1;
+}
+
+/* 结余负数色（D5）：仅结余视图为负时生效 */
+.amount-number--negative {
+  color: #FFC7C7;
+}
+
+/* 需求二切换动画。220ms / cubic-bezier(0.25, 0.8, 0.5, 1) 为 --expand-duration /
+   --expand-easing 的字面量同值占位（M14 落 :root 变量后统一回填为 var() 引用） */
+.amount-switch-enter-active,
+.amount-switch-leave-active {
+  transition:
+    opacity 220ms cubic-bezier(0.25, 0.8, 0.5, 1),
+    transform 220ms cubic-bezier(0.25, 0.8, 0.5, 1);
+}
+
+.amount-switch-enter-from,
+.amount-switch-leave-to {
+  opacity: 0;
+  transform: translateY(6px);
 }
 
 .stat-item {
