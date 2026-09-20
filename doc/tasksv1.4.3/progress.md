@@ -21,7 +21,7 @@
 - [x] [M11 - Bug 修复：竖屏左右滑动误切标签页](m11-swipe-tab-switch-fix.md) —— 需求十一（13）
 - [x] [M12 - 预算模型重构：每月多条命名预算 ★重构+迁移](m12-budget-model-rebuild.md) —— 需求十二（14）
 - [x] [M13 - 分类图标选择改独立居中弹窗](m13-icon-picker-dialog.md) —— 需求十三（15）
-- [ ] [M14 - 全站展开画面统一「从触发点展开」动画（收编型）](m14-expand-animation-unify.md) —— 需求十四（16）
+- [x] [M14 - 全站展开画面统一「从触发点展开」动画（收编型）](m14-expand-animation-unify.md) —— 需求十四（16）
 
 ## 开发顺序（设计附录 B 依赖链）
 
@@ -84,7 +84,7 @@
 | M11 | 前端 | ✅ 已完成 | `d03ce93` | 按 P3 浏览器自动化复现尝试（结论见备注）；纯 CSS overscroll 隔离；vitest 206 全绿 |
 | M12 | 全栈 | ✅ 已完成 | `7912906` | ★迁移阶段 B 同事务续写 + merge_map 接力；D12 四端点、batch→PUT 重接；spent user_id 隔离；顺带修复导出丢关联 bug；pytest 245/vitest 247 |
 | M13 | 前端 | ✅ 已完成 | `285044f` | 全端统一居中小弹窗单分支；92vw 裁定值落锁；签名冻结调用方零改动 |
-| M14 | 前端 | ⬜ 待开始 | | 收编型，最后做 |
+| M14 | 前端 | ✅ 已完成 | `0948515` | 收编 9 处→AppDialog；:root 220ms 变量回填 M2/M12；reduced-motion 1ms；全站 v-dialog 锁 |
 
 ## 测试结果记录
 
@@ -105,6 +105,9 @@
 | M13 `285044f` | 无涉及 | 288/288 全量 | — | — | 通过 | skip |
 | M1 `f33ed1f` | 无涉及 | 290/290 全量 | — | — | 通过 | skip |
 | **终验第一轮**（13 模块汇合、M14 前） | 245/245 | 290/290 | 90 错（基线 106，零新增） | 通过 | 通过（0 error/2 既有 warning） | 通过 |
+| M14 `0948515` | 245/245 零改动复核 | 326/326（15 文件） | — | — | 通过 | 通过（843ms） |
+| **终验复跑**（M14 后，第二轮） | 245/245 | 326/326 | 90 错（与第一轮持平） | 通过 | 0 error/2 warning | 通过（818ms） |
+| dist 重建 `chore(v1.4.3)`（P4） | — | — | — | — | — | gzip 2,684,910B→2,691,620B（+6.6KB：locale +2,050B + M14 壳） |
 
 ## 待人工抽检清单（各模块任务文件「验收与质量门槛」手工项汇总）
 
@@ -157,9 +160,9 @@
 - [ ] 5.2 手工自查：竖屏图标层为不超视口居中弹窗、网格占满弹窗、滚动可选全部图标；宽屏「新增分类」对话框尺寸不膨胀；选中保存后列表/表单预览正确；z 层级与关闭回焦；明暗主题
 
 ### M14
-- [ ] 10.2 六类触发点原点展开/反向收起，全站无瞬现
-- [ ] 10.3 连点无卡帧；reduced-motion 生效
-- [ ] 10.4 回归 M3 居中与 M11 手势；明暗 × 竖/宽
+- [ ] 10.2 手工任选 6 类触发点逐点验（分类新增、确认删除、日期弹窗、图标浮层、CSV 映射、预算新增）：自点击处平滑展开、收起有反向动画；全站无「瞬时蹦出」画面
+- [ ] 10.3 连点无动画错位/卡帧；prefers-reduced-motion 系统开关下近似瞬开
+- [ ] 10.4 回归：M3 选中月居中、M11 横滑手势不复发；明暗主题、竖/宽屏
 
 ## 阻塞清单
 
@@ -170,6 +173,8 @@
 ## 备注
 
 （各模块完成报告 notes 汇总于此：设计偏差裁定、测试口径反转、交接事项、遗留项。）
+
+- **M14 完成（`0948515`，收编型终串行）**：① 收编清单实时 grep 前 11 处/10 文件→后 3 处/3 文件（AppDialog/ExpandTransition 两合法壳 + BudgetPage.vue:92 豁免原样未动）；② 口径同步改写：DashboardPage 用例9 / StatisticsPage 用例6 字面量锁→变量口径锁+三条负锁（断言净增）；CategoryIconPicker 8 条 + SettingsSubPages M13 域 3 条转 AppDialog 口径（用例M13-4 计数锁改「0 v-dialog + 恰 1 AppDialog + after:leave 透传」）；ExpandTransition.test.js 15 条零改动全绿（重构红线）；新增 36 例（+useExpandAnimation 13/AppDialog 12/其余 11），290→326；③ **已登记例外**：ExpandTransition duration 默认 250ms 被既有对外 API 用例冻结→DatePickerPopover 仍 250ms，220ms 统一口径经 AppDialog 承载；④ warning 归属修正：2 条 `vue/require-default-prop` 在 CsvMappingDialog.vue（prop 声明与 HEAD 逐字一致、非本期引入，本期改动仅致行号漂移），此前「非本期文件」措辞订正为「既有 warning，行号漂移」。
 
 - **M1 完成（`f33ed1f`）+ 主 Agent 裁定**：仅 `router/index.js:14` 一行改「主页」（AppLayout 顶栏从 meta 单点取词，bottom nav/侧栏本就「主页」；`document.title` 全库零命中无第二处）；测试注释「第一页」语义两处（现 :225/:566）红线保留；**README.md:29 `alt="首页"` + screenshots/v1.4/首页.png 文件名保留**——历史版本截图资源非顶栏标题，改名超模块范围，若需连带更新 README v1.4.3 版本历史时一并处理（沿既定口径只写 Version History）。
 - **终验第一轮（§6.2，13 模块汇合、M14 启动前）结果：全绿**——pytest 245/245；mypy 90 错 vs v1.4.2 基线 106（基线零新增口径满足，净 -16）；ruff All checks passed；vitest 290/290；lint 0 error（2 既有 warning 非本期文件）；build 通过（787ms）。X 成立，M14 终串行启动。
