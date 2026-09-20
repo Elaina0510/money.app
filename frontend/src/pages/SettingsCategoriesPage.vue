@@ -31,6 +31,10 @@
       <div class="section-block">
         <div class="section-title text-caption text-grey font-weight-medium">全部分类</div>
         <v-list v-if="dragList.length" density="compact" class="bg-transparent pa-0">
+          <!-- M9：:animation="180" 为 sortablejs flip 让位动画时长（拖动中其余行连续平滑让位、
+               落点无跳变）；150–200ms 区间取值，属 D10 独立口径，不引用展开类动画的 --expand-duration。
+               其余拖拽参数（delay / delay-on-touch-only / touch-start-threshold / ghost-class / drag-class）
+               与保存回滚链路维持 v1.4.2 值不变 -->
           <Draggable
             v-model="dragList"
             :handle="'.drag-handle'"
@@ -39,6 +43,7 @@
             :delay="150"
             :delay-on-touch-only="true"
             :touch-start-threshold="5"
+            :animation="180"
             ghost-class="drag-ghost"
             drag-class="drag-float"
             @start="onDragStart"

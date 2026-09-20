@@ -1649,3 +1649,86 @@ describe('v1.4.3 M6 二级页面间距疏朗化', () => {
     expect(tplHtml.match(/class="page-card"/g)).toHaveLength(1)
   })
 })
+
+// ── v1.4.3 M9 分类拖拽排序 flip 让位动画（需求九 / D10 animation:180 独立口径）──
+// 总 prompt §7.3 裁定：只断言 Draggable 的 animation 配置，jsdom 不真实驱动 sortable；
+// 让位平滑度与落点观感属真机项（任务 §4.2/§4.3）。
+describe('v1.4.3 M9 分类拖拽 flip 让位动画', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    getCategories.mockResolvedValue(reorderCopy())
+    reorderCategories.mockResolvedValue(reorderCopy())
+    getTags.mockResolvedValue([])
+    useSlicedPagedMock([])
+    getQuickTemplates.mockResolvedValue([])
+  })
+
+  // 任务 §3.1（设计 §9.4）+ §1.1
+  it('用例M9-1: 单列表唯一 Draggable 实例显式配置 animation = 180', async () => {
+    const wrapper = await mountReorderPage()
+    const draggables = wrapper.findAllComponents(Draggable)
+
+    // M8 单列表：承载 flip 动画的 Draggable 实例唯一（无第二列表各自为政）
+    expect(draggables).toHaveLength(1)
+    const draggable = draggables[0]
+
+    // 设计 §9.4 的 animation=180 口径落点：vuedraggable@4.1.0 声明面只有
+    // list/modelValue/itemKey/clone/tag/move/componentData，animation 属非声明属性 →
+    // 实测落 $attrs 并由其透传给 Sortable（props() 内无该键，见下一行快照红线）。
+    // 故按本文件 M3 用例2b 既定的 sortableOptionsOf（kebab → camel）归一口径断言。
+    expect(draggable.vm.$attrs.animation).toBe(180)
+    expect(sortableOptionsOf(draggable).animation).toBe(180)
+    // 数值口径（非字符串 "180"）：sortablejs 以 ms 数值消费
+    expect(typeof sortableOptionsOf(draggable).animation).toBe('number')
+    // 上游若改为声明式 prop，本条即变 → 需同批改上面两条断言（防静默漂移）
+    expect(draggable.props()).not.toHaveProperty('animation')
+  })
+
+  // 任务 §1.1 D10 独立口径 + §1.2 其余参数零改动
+  it('用例M9-2: animation 以字面量 180 挂在单一列表；其余拖拽参数维持 v1.4.2 值', async () => {
+    const wrapper = await mountReorderPage()
+    const draggable = wrapper.findAllComponents(Draggable)[0]
+    const options = sortableOptionsOf(draggable)
+
+    // 源码级：显式绑定字面量 180（150–200 区间），且为 D10 独立口径 ——
+    // animation 只吃数值字面量，不复用展开类动画的时长变量（两处口径互不牵扯）
+    expect(categoriesPageSource).not.toMatch(/:animation="[^"]*var\(/)
+    // animation 只此一处（无第二列表 / 无重复绑定）；限定属性位，避开页内 M9 说明注释的字面量
+    expect(categoriesPageSource.match(/\n\s+:animation="180"/g)).toHaveLength(1)
+
+    // §1.2 红线：v1.4.2 既有拖拽参数一字不改
+    expect(options.handle).toBe('.drag-handle')
+    expect(options.delay).toBe(150)
+    expect(options.delayOnTouchOnly).toBe(true)
+    expect(options.touchStartThreshold).toBe(5)
+    expect(options.ghostClass).toBe('drag-ghost')
+    expect(options.dragClass).toBe('drag-float')
+    // 把手 touch-action 仍只在把手上（拖动可行走、列表滚动不被杀死 —— 真机项 2.1 的前置）
+    expect(categoriesPageSource).toMatch(/\.drag-handle \{[^}]*touch-action: none/)
+    expect(categoriesPageSource).not.toMatch(/\.category-list-item \{[^}]*touch-action/)
+  })
+
+  // 任务 §1.3 + §3.2：正常路径零闪回、保存链路零改动
+  it('用例M9-3: 正常落位不触发本地归一化（零闪回），保存仍为单次 PUT + 唯一 toast', async () => {
+    const wrapper = await mountReorderPage()
+    const list = wrapper.vm.dragList
+
+    wrapper.vm.onDragStart()
+    // 交换首两行、「其他」恒末位 → 归一化条件不成立
+    const dropped = [list[1], list[0], ...list.slice(2)]
+    wrapper.vm.dragList = dropped
+    const droppedIds = dropped.map((c) => c.id)
+    wrapper.vm.onDragEnd()
+    // 零闪回（同步即可判）：onDragEnd 未写回归一化列表，落点即视觉落点、行数不变
+    expect(wrapper.vm.dragList.map((c) => c.id)).toEqual(droppedIds)
+    expect(wrapper.vm.dragList).toHaveLength(6)
+    await flushPromises()
+
+    // 单次 PUT（全量 ids）+ 全流程唯一 toast：动画不新增请求、不改回滚链路
+    expect(reorderCategories).toHaveBeenCalledTimes(1)
+    expect(reorderCategories).toHaveBeenCalledWith({ ids: [2, 1, 3, 9, 10, 8] })
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith('排序已保存')
+  })
+})
