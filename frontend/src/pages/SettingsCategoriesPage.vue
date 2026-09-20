@@ -335,8 +335,9 @@ onMounted(async () => {
   padding-bottom: 20px;
 }
 
+/* M6 口径对齐：行间垂直间距由 global.scss `.page-card .v-list-item { margin-block: 4px }`
+   统一承载（同特异性的页内 margin 覆写会让本页比其余三页更窄，故删除） */
 .category-list-item {
-  margin: 2px 0;
   transition: all 0.15s ease;
 }
 

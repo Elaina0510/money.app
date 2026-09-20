@@ -112,15 +112,41 @@ body {
 }
 
 /* 设置系二级页统一卡片图层（M4）：与设置主页卡片同源规范
-   （surface 底 / 16px 圆角 / level-1 静态卡片海拔 / 16px 内边距）
+   （surface 底 / 16px 圆角 / level-1 静态卡片海拔 / 20px 内边距——内衬由 M6 疏朗化）
    深色模式无需分支：--v-theme-surface 运行时随主题切换（light #FFFFFF / dark #2C2C2C）
    注：.settings-card 仅作语义钩子，样式统一由本类承载，不重复定义 */
 .page-card {
   background: rgb(var(--v-theme-surface));
   border-radius: 16px;
   box-shadow: var(--shadow-level-1);
-  padding: 16px;
+  padding: 20px;
   margin-bottom: 12px; /* 对齐设置主页 .mb-3 节奏 */
+}
+
+/* ── v1.4.3 M6 二级页面内部间距疏朗化（需求六，D10 量化口径统一承载）─────
+   口径：卡片内衬 20px（上方 .page-card padding）；列表行高下限 48px + 行间垂直间距 4px；
+        区块标题上下 8px/12px；区块与区块之间 20px。
+   作用域：行高/行间距规则全部限定在 .page-card 之内——设置主页卡片（.settings-card /
+        裸 v-card）不挂本类，节奏不受影响（设计 §6.3）。
+   挂用页：分类管理（M8 落模板）/ 标签管理 / 快速记账 / 数据回溯 四个二级页；
+        页面底部滚动余量由 AppLayout .content-wrapper 的 padding-bottom: 100px 承载，不另加规则。 */
+.page-card .v-list {
+  padding: 0; /* 卡壳自带内衬，列表不再另加上下 8px，避免双重留白 */
+}
+
+.page-card .v-list-item {
+  min-height: 48px; /* 下限口径：两行/三行等既有更高行不被压缩 */
+  margin-block: 4px; /* 行间垂直间距 */
+}
+
+/* 区块标题节奏（新工具类，四页统一挂用；配 text-caption text-grey font-weight-medium 语义类） */
+.section-title {
+  margin: 8px 0 12px;
+}
+
+/* 区块与区块之间拉开间隔（单块页面无副作用） */
+.section-block + .section-block {
+  margin-top: 20px;
 }
 
 /* 入口头像统一底色（M8）：主题 primary 10% 透明底，明暗模式自动跟随

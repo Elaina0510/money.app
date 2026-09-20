@@ -904,7 +904,8 @@ describe('M4 设置二级页面统一卡片图层容器', () => {
     expect(styles).toMatch(/\.page-card \{[^}]*background: rgb\(var\(--v-theme-surface\)\)/)
     expect(styles).toMatch(/\.page-card \{[^}]*border-radius: 16px/)
     expect(styles).toMatch(/\.page-card \{[^}]*box-shadow: var\(--shadow-level-1\)/)
-    expect(styles).toMatch(/\.page-card \{[^}]*padding: 16px/)
+    // M6 口径反转（D10 疏朗化）：卡片内衬 16px → 20px，容器其余规范不变
+    expect(styles).toMatch(/\.page-card \{[^}]*padding: 20px/)
     expect(styles).toMatch(/\.page-card \{[^}]*margin-bottom: 12px/)
     // §1.2 深色不加分支（--v-theme-surface 运行时随主题切换）
     expect(styles).not.toMatch(/\.v-theme--dark[^{]*\.page-card/)
@@ -936,9 +937,10 @@ describe('M4 设置二级页面统一卡片图层容器', () => {
     // 标签页 chip 云入卡（§2.3，M5 分页控件同卡位由 M5 承接）
     expect(splitByPageCard(tagsPageSource).card).toContain('flex-wrap')
 
-    // §3.1 数据回溯页空态包卡；§3.2 既有列表 v-card 保持不重构
+    // §3.1 数据回溯页空态包卡
     expect(historyPageSource).toMatch(/class="page-card text-center"[\s\S]*?暂无操作记录/)
-    expect(historyPageSource).toMatch(/<v-card v-else rounded="xl" class="mb-4">/)
+    // M6 口径反转（需求六 3）：主体列表由裸 v-card 统一改挂 .page-card（v-else 移至 div）
+    expect(historyPageSource).toMatch(/<div v-else class="page-card">/)
   })
 
   // 任务 §4.2（P2 收敛后的「页面级无透视」结构性口径）
@@ -956,8 +958,9 @@ describe('M4 设置二级页面统一卡片图层容器', () => {
     const tags = splitByPageCard(tagsPageSource)
     expect(tags.outside).not.toContain('bg-transparent')
 
-    // 数据回溯页唯一 bg-transparent 在既有 v-card 内（展开明细列表），页面级无裸列表
-    expect(historyPageSource).toMatch(/<v-card v-else rounded="xl"[\s\S]*?bg-transparent/)
+    // 数据回溯页唯一 bg-transparent 在卡壳内（展开明细列表），页面级无裸列表
+    // （M6：外层裸 v-card 已统一改挂 .page-card，锚点随之换形）
+    expect(historyPageSource).toMatch(/<div v-else class="page-card">[\s\S]*?bg-transparent/)
   })
 
   // 任务 §4.3（渲染快照）+ M3 交接的卡壳 × 拖拽回归 + M8 单列表并组
@@ -1223,8 +1226,8 @@ describe('M8 设置页/统计页入口图标统一', () => {
     expect(styles).not.toMatch(/\.entry-avatar[^{]*\{[^}]*(#8B7E74|139, *126, *116)/)
     // 深色模式无需分支（--v-theme-primary 运行时随主题切换，与 M4 .page-card 同口径）
     expect(styles).not.toMatch(/\.v-theme--dark[^{]*\.entry-avatar/)
-    // M4 段落零污染
-    expect(styles).toMatch(/\.page-card \{[^}]*padding: 16px/)
+    // M4 段落零污染（M6 仅把内衬 16px 提到 20px，容器规范本身未动）
+    expect(styles).toMatch(/\.page-card \{[^}]*padding: 20px/)
   })
 
   // 任务 §5.1 + §5.2 + §2.1~§2.3 + §4.1
@@ -1504,5 +1507,144 @@ describe('v1.4.3 M8 分类收支共用统一标签（前端）', () => {
     await nextTick()
     expect(wrapper.text()).toContain('7 个分类')
     expect(getCategories).toHaveBeenCalledTimes(1)
+  })
+})
+
+// ── v1.4.3 M6 二级页面内部间距疏朗化（需求六 / D10 全局口径）───────────────
+// 手法：jsdom 无布局引擎，间距值不可测 → 按 §1.2 约定用 ?raw / 样式表原文源码断言
+//      （vitest 不处理 CSS，global.scss 的 ?raw 为空串 → 沿用 readGlobalStyles 直读原文）
+const M6_SECTION_START = 'v1.4.3 M6 二级页面内部间距疏朗化'
+
+// 截出 M6 段落（自段落标题注释起、至下一段 `.entry-avatar` 注释前）并剥除注释，
+// 供区间内规则结构与「纯间距零色彩」断言使用
+function m6StylesSegment(styles) {
+  const start = styles.indexOf(M6_SECTION_START)
+  if (start < 0) throw new Error('未找到 M6 疏朗化段落（global.scss）')
+  const end = styles.indexOf('入口头像统一底色', start)
+  if (end < 0) throw new Error('M6 段落结束锚点未找到')
+  return styles.slice(start, end).replace(/\/\*[\s\S]*?\*\//g, '')
+}
+
+describe('v1.4.3 M6 二级页面间距疏朗化', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    getCategories.mockResolvedValue(reorderCopy())
+    getTags.mockResolvedValue(TAGS.map((t) => ({ ...t })))
+    useSlicedPagedMock(TAGS)
+    getQuickTemplates.mockResolvedValue(TEMPLATES.map((t) => ({ ...t })))
+  })
+
+  // 任务 §4.1（+ §1.1/§1.2/§1.3/§1.4）
+  it('用例M6-1: global.scss D10 量化口径齐备（20px 内衬 / 行 48+4 / 标题 8·12 / 块间 20）', () => {
+    const styles = readGlobalStyles()
+    // §1.1 卡片内衬 16px → 20px
+    expect(styles).toMatch(/\.page-card \{[^}]*padding: 20px/)
+    // §1.2 行高下限 + 行间垂直间距（同一规则块内成对出现）
+    expect(styles).toMatch(
+      /\.page-card \.v-list-item \{[^}]*min-height: 48px[^}]*margin-block: 4px/
+    )
+    // §1.3 列表自带 8px 上下内衬归零（卡壳已有 20px，避免双重留白）
+    expect(styles).toMatch(/\.page-card \.v-list \{[^}]*padding: 0/)
+    // §1.4 新区块标题类 + 区块间距类（M8 分类页已挂用的类名至此「有类名亦有规则」）
+    expect(styles).toMatch(/\.section-title \{[^}]*margin: 8px 0 12px/)
+    expect(styles).toMatch(
+      /\.section-block \+ \.section-block \{[^}]*margin-top: 20px/
+    )
+    // 挂用类名的两页文案标题（分类页由 M8 落，标签/模板页由 M6 落）
+    expect(categoriesPageSource).toMatch(/class="section-title[^"]*">全部分类/)
+
+    // §1.6 作用域自检：行高/行间距只在 .page-card 之内，
+    // 设置主页等未挂 .page-card 的列表不被全局规则命中（无裸 .v-list-item 全局覆写）
+    const section = m6StylesSegment(styles)
+    // 结构性口径：段内所有设 min-height / margin-block 的规则，选择器一律带 .page-card 前缀
+    // （裸 .v-list-item 全局覆写会波及未挂 .page-card 的列表，必须为零）
+    const rules = [...section.matchAll(/([^{}]*)\{([^}]*)\}/g)].map(([, sel, body]) => ({
+      sel: sel.trim(),
+      body,
+    }))
+    expect(rules.length).toBeGreaterThanOrEqual(4)
+    rules
+      .filter((r) => /min-height|margin-block/.test(r.body))
+      .forEach((r) => expect(r.sel, `越界作用域规则：${r.sel}`).toMatch(/^\.page-card \.v-list-item$/))
+    expect(rules.some((r) => r.sel === '.section-title')).toBe(true)
+    expect(rules.some((r) => r.sel === '.section-block + .section-block')).toBe(true)
+    // 设置主页卡片确实未挂 .page-card → 规则天然不作用于它
+    expect(settingsPageSource).not.toContain('class="page-card"')
+    expect(styles).not.toMatch(/\.settings-card[^{]*\{[^}]*min-height/)
+
+    // §3.2 深色模式零风险自检：本段落纯间距，零色彩/零阴影声明
+    expect(section).not.toMatch(/(^|\s)(color|background|box-shadow|border)\s*:/)
+  })
+
+  // 任务 §4.2（+ §2.3）
+  it('用例M6-2: 数据回溯主体列表统一改挂 .page-card，裸 v-card 写法消除', () => {
+    // 统一容器落地：v-else 分支条件移至 div，内部 v-list 原样保留
+    expect(historyPageSource).toMatch(/<div v-else class="page-card">\s*<v-list class="pa-0">/)
+    // 改版前写法字面量不再出现（需求六 3「去除裸 v-card 写法」）
+    expect(historyPageSource).not.toContain('<v-card v-else rounded="xl" class="mb-4">')
+    expect(historyPageSource).not.toMatch(/<v-card\b[^>]*v-else/)
+    // 空态分支（v1.4.2 M4 已包卡）零改动
+    expect(historyPageSource).toMatch(/<div v-else-if="items\.length === 0" class="page-card text-center">/)
+    // §3.1 边界自检：卡壳内不再自带压缩行高覆写（48px 为下限，不压缩既有高度）
+    expect(historyPageSource).not.toMatch(/\.detail-record-item \{[^}]*min-height/)
+  })
+
+  // 任务 §4.3（+ §2.1/§2.2）
+  it('用例M6-3: 标签页 / 快速记账页挂用 section-block + section-title，模板列表去 compact', () => {
+    for (const [name, source] of [
+      ['标签页', tagsPageSource],
+      ['快速记账页', quickTemplatesPageSource],
+    ]) {
+      const card = splitByPageCard(source).card
+      // 区块标题 + 单块容器成对挂在卡壳之内（与分类页 M8 落地写法同款）
+      expect(card, `${name} 未挂 section-block`).toContain('<div class="section-block">')
+      expect(card, `${name} 未挂 section-title`).toMatch(
+        /<div class="section-title text-caption text-grey font-weight-medium">[^<]+<\/div>/
+      )
+    }
+    expect(tagsPageSource).toContain('>全部标签<')
+    expect(quickTemplatesPageSource).toContain('>全部模板<')
+    // §2.2 行高由全局 min-height 48px 托底 → 模板列表不再声明 compact
+    expect(quickTemplatesPageSource).not.toMatch(/density="compact"/)
+    // 标签页主体为 chip 云，无列表行可施 min-height（分页展开区归 M5 结构，不入本次断言）
+    expect(tagsPageSource).not.toMatch(/<v-list\b/)
+    // 三页页头提示文案与操作按钮未动（疏朗化只改间距不改语义）
+    expect(tagsPageSource).toContain('管理标签，点击标签右侧 × 可删除')
+    expect(quickTemplatesPageSource).toContain('常用标签与金额，记一笔时快捷使用')
+  })
+
+  // M6 对 M8 已落分类页的口径对齐：页内不再以同特异性 margin 覆写全局行间 4px
+  it('用例M6-3b: 分类页行间距由全局口径承载（页内窄间距覆写已消除）', () => {
+    expect(categoriesPageSource).toMatch(/<div class="section-block">/)
+    expect(categoriesPageSource).not.toMatch(/\.category-list-item \{[^}]*margin:/)
+    // 卡壳唯一、区块唯一（四页节奏一致）
+    expect(categoriesPageSource.match(/class="page-card"/g)).toHaveLength(1)
+    expect(splitByPageCard(categoriesPageSource).card.match(/class="section-block"/g)).toHaveLength(1)
+  })
+
+  // 渲染快照：两页标题节点落在 .page-card 内且在列表之前
+  it('用例M6-4: 标签/模板页挂载后 .page-card 内渲染 .section-title 且先于内容', async () => {
+    const tags = await mountPage(SettingsTagsPage)
+    const tagsCard = tags.find('.page-card')
+    expect(tagsCard.exists()).toBe(true)
+    const tagsTitle = tagsCard.find('.section-title')
+    expect(tagsTitle.text()).toBe('全部标签')
+    // 标题在 chip 云之前（DOM 序）
+    const tagsHtml = tagsCard.html()
+    expect(tagsHtml.indexOf('全部标签')).toBeLessThan(tagsHtml.indexOf('日常'))
+    expect(tagsHtml).toContain('section-block')
+
+    const templates = await mountPage(SettingsQuickTemplatesPage)
+    const tplCard = templates.find('.page-card')
+    const tplTitle = tplCard.find('.section-title')
+    expect(tplTitle.text()).toBe('全部模板')
+    const tplHtml = tplCard.html()
+    expect(tplHtml.indexOf('全部模板')).toBeLessThan(tplHtml.indexOf('日常 · ¥25'))
+    expect(tplHtml).toContain('section-block')
+
+    // 空态不渲染标题之外的旧写法残留：两页卡壳仍恰一处（未重复定义容器）
+    expect(tagsHtml.match(/class="page-card"/g)).toHaveLength(1)
+    expect(tplHtml.match(/class="page-card"/g)).toHaveLength(1)
   })
 })

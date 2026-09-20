@@ -24,7 +24,10 @@
       <p class="text-body-2 text-grey mt-2">暂无操作记录</p>
     </div>
 
-    <v-card v-else rounded="xl" class="mb-4">
+    <!-- 主体列表统一卡片图层（M6）：去裸 v-card + mb-4 写法，改挂 .page-card
+         （内衬 20px / 行高下限 48px + 行间 4px 由 global.scss 统一承载）；
+         v-else 分支条件移至容器 div，内部 v-list 与行结构不变 -->
+    <div v-else class="page-card">
       <v-list class="pa-0">
         <template v-for="(item, index) in items" :key="item.id">
           <v-list-item
@@ -93,7 +96,7 @@
           <v-divider v-if="index < items.length - 1" />
         </template>
       </v-list>
-    </v-card>
+    </div>
 
     <!-- Rollback Confirm Dialog -->
     <ConfirmDialog
@@ -216,7 +219,7 @@ onMounted(loadHistory)
   background: rgba(var(--v-theme-primary), 0.04);
 }
 
-.detail-record-item {
-  min-height: 36px;
-}
+/* M6 疏朗化：展开明细行原页内 36px 行高覆写已删除——行高下限统一由 global.scss
+   的 `.page-card .v-list-item` 规则（48px 下限 + margin-block 4px）承载，
+   下限口径不压缩既有更高行；类名保留在模板内作语义钩子 */
 </style>

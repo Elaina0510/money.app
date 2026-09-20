@@ -20,31 +20,37 @@
         暂无标签
       </div>
 
-      <div v-else class="d-flex flex-wrap ga-1">
-        <v-chip v-for="tag in displayedTags" :key="tag.id" size="small" variant="tonal" class="mb-1">
-          <v-icon start size="x-small">mdi-tag</v-icon>
-          {{ tag.name }}
-          <template v-slot:append>
-            <v-icon size="x-small" class="ml-1 tag-delete-icon" @click.stop="confirmDeleteTag(tag)">
-              mdi-close
-            </v-icon>
-          </template>
-        </v-chip>
-      </div>
+      <!-- 单一区块（M6 疏朗化口径）：section-block / section-title 类名定义在 global.scss，
+           本页只挂用（与分类页 M8 落地的单块写法同款） -->
+      <div class="section-block">
+        <div class="section-title text-caption text-grey font-weight-medium">全部标签</div>
 
-      <!-- 分页展开区（M5）：标签数 ≤ PAGE_SIZE 时整块不渲染，页面与改版前一致 -->
-      <div v-if="total > PAGE_SIZE" class="d-flex flex-column align-center mt-2" style="gap: 4px">
-        <v-btn
-          v-if="hasMore"
-          variant="text"
-          color="primary"
-          size="small"
-          :loading="loadingMore"
-          @click="loadMore"
-        >
-          展开更多
-        </v-btn>
-        <p class="text-caption text-grey mb-0">已显示 {{ displayedTags.length }} / 共 {{ total }} 个</p>
+        <div v-if="displayedTags.length" class="d-flex flex-wrap ga-1">
+          <v-chip v-for="tag in displayedTags" :key="tag.id" size="small" variant="tonal" class="mb-1">
+            <v-icon start size="x-small">mdi-tag</v-icon>
+            {{ tag.name }}
+            <template v-slot:append>
+              <v-icon size="x-small" class="ml-1 tag-delete-icon" @click.stop="confirmDeleteTag(tag)">
+                mdi-close
+              </v-icon>
+            </template>
+          </v-chip>
+        </div>
+
+        <!-- 分页展开区（M5）：标签数 ≤ PAGE_SIZE 时整块不渲染，页面与改版前一致 -->
+        <div v-if="total > PAGE_SIZE" class="d-flex flex-column align-center mt-2" style="gap: 4px">
+          <v-btn
+            v-if="hasMore"
+            variant="text"
+            color="primary"
+            size="small"
+            :loading="loadingMore"
+            @click="loadMore"
+          >
+            展开更多
+          </v-btn>
+          <p class="text-caption text-grey mb-0">已显示 {{ displayedTags.length }} / 共 {{ total }} 个</p>
+        </div>
       </div>
     </div>
 
