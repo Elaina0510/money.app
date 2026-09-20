@@ -72,6 +72,12 @@ const routes = [
     meta: { title: '快速记账' },
   },
   {
+    path: '/settings/import-export',
+    name: 'SettingsImportExport',
+    component: () => import('@/pages/SettingsImportExportPage.vue'),
+    meta: { title: '导入导出' },
+  },
+  {
     path: '/history',
     name: 'History',
     component: () => import('@/pages/HistoryPage.vue'),

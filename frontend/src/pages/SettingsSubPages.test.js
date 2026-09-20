@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import { createPinia, setActivePinia } from 'pinia'
@@ -102,6 +102,19 @@ import quickTemplatesPageSource from './SettingsQuickTemplatesPage.vue?raw'
 import historyPageSource from './HistoryPage.vue?raw'
 // M8 入口图标统一：统计页预算卡头红线断言所需（仅追加，不动既有导入）
 import statisticsPageSource from './StatisticsPage.vue?raw'
+// v1.4.3 M5：导入导出改设置二级页——新页组件 + ?raw 源码（M8-2 迁出计数改锁所需）
+// + @/api/export 六函数（走本文件顶部既有 vi.mock 桩）
+import SettingsImportExportPage from './SettingsImportExportPage.vue'
+import importExportPageSource from './SettingsImportExportPage.vue?raw'
+import routerSource from '@/router/index.js?raw'
+import {
+  exportCsv,
+  exportSql,
+  previewCsvImport,
+  importCsv,
+  previewSqlImport,
+  importSql,
+} from '@/api/export'
 
 // ── 测试数据 ────────────────────────────────────────────────────────
 const CATEGORIES = [
@@ -223,16 +236,21 @@ describe('M7 设置页三个管理区块改二级页面', () => {
   })
 
   // ── 用例1：设置页摘要卡 ──────────────────────────────────────────
-  it('用例1: 设置页渲染三张摘要卡，只含数量与箭头，不含列表条目/新增按钮', async () => {
+  it('用例1: 设置页渲染四张摘要卡，只含数量与箭头，不含列表条目/新增按钮', async () => {
     // M5：不再手动预拉标签——摘要数量应由 onMounted 自身的 fetchTags 提供
     const wrapper = await mountPage(SettingsPage)
 
-    // 三张摘要卡的跳转目标
+    // 四张摘要卡的跳转目标（v1.4.3 M5：导入导出内联卡迁出为二级页，设置页只留入口行）
     const entries = wrapper
       .findAll('v-list-item')
       .filter((node) => node.attributes('to'))
       .map((node) => node.attributes('to'))
-    expect(entries).toEqual(['/settings/categories', '/settings/tags', '/settings/quick-templates'])
+    expect(entries).toEqual([
+      '/settings/categories',
+      '/settings/tags',
+      '/settings/quick-templates',
+      '/settings/import-export',
+    ])
 
     const text = wrapper.text()
     expect(text).toContain('分类管理')
@@ -1197,10 +1215,11 @@ const EntrySlotHost = {
   },
 }
 
-// 截出设置页「数据回溯」卡区间：§5.4 定点断言，避免误伤外观/导入导出/账号三张 pa-4 卡头
+// 截出设置页「数据回溯」卡区间：§5.4 定点断言，避免误伤外观/导入导出/账号三张卡头
+// （v1.4.3 M5 口径反转：结束锚点原为已迁出的 `<!-- Hidden file inputs -->`，改锁下一区块 Account Section）
 function sliceHistoryCard(source) {
   const start = source.indexOf('<!-- Data History Entry -->')
-  const end = source.indexOf('<!-- Hidden file inputs -->')
+  const end = source.indexOf('<!-- Account Section -->')
   if (start < 0 || end < 0 || end < start) throw new Error('未定位到数据回溯卡区间')
   return source.slice(start, end)
 }
@@ -1231,8 +1250,10 @@ describe('M8 设置页/统计页入口图标统一', () => {
   })
 
   // 任务 §5.1 + §5.2 + §2.1~§2.3 + §4.1
-  it('用例M8-2: 两页零内联 rgba 头像底与静态 Material 图标色，11+1 处同规格', () => {
-    for (const src of [settingsPageSource, statisticsPageSource]) {
+  // 【v1.4.3 M5 口径反转改写】原「7 卡头 + 导入导出 4 子条目 = 11 处」中的 4 子条目
+  // 随导入导出迁出设置主页（非放宽）：主页计数改 7，迁出的 4 处同规格改锁新页源文件。
+  it('用例M8-2: 两页零内联 rgba 头像底与静态 Material 图标色，7+4+1 处同规格', () => {
+    for (const src of [settingsPageSource, statisticsPageSource, importExportPageSource]) {
       expect(src).not.toMatch(AVATAR_INLINE_RGBA)
       expect(src).not.toMatch(STATIC_ICON_COLOR)
     }
@@ -1241,9 +1262,10 @@ describe('M8 设置页/统计页入口图标统一', () => {
     // §5.1 正向断言：入口头像类已落地
     expect(settingsPageSource).toContain('entry-avatar')
     expect(statisticsPageSource).toContain('entry-avatar')
-    // §2.3：外观/分类/标签/快速记账/导入导出/数据回溯/账号 7 卡头
-    //      + §3.1 导入导出 4 子条目 = 11 处完全同规格（36 圆底 + primary/20 图标）
-    expect(settingsPageSource.match(ENTRY_AVATAR_TPL)).toHaveLength(11)
+    // §2.3：外观/分类/标签/快速记账/导入导出（M5 入口行）/数据回溯/账号 7 处同规格
+    expect(settingsPageSource.match(ENTRY_AVATAR_TPL)).toHaveLength(7)
+    // M5：迁入二级页的 4 个子条目（导出/导入 CSV、导出/导入 SQL）同规格不降级
+    expect(importExportPageSource.match(ENTRY_AVATAR_TPL)).toHaveLength(4)
     // §4.1：统计页仅预算卡头一处（M8 范围收敛）
     expect(statisticsPageSource.match(ENTRY_AVATAR_TPL)).toHaveLength(1)
     // §3.1：裸 v-icon（无圆底）写法已消除
@@ -1273,7 +1295,10 @@ describe('M8 设置页/统计页入口图标统一', () => {
   })
 
   // 任务 §5.3（渲染）+ 需求 5 条（文案/顺序/功能不变）
-  it('用例M8-4: 挂载后 .entry-avatar 计数 ≥ 11 且其内图标均为 primary 色', async () => {
+  // 【v1.4.3 M5 口径反转改写】导入导出四行（导出/导入 CSV、导出/导入 SQL）已迁出为
+  // /settings/import-export 二级页 → 原「≥ 11 且含 4 子条目」改锁 7 入口 + 四行零残留，
+  // 迁出后的四行渲染断言随 M5 新用例组承接（用例M5-1），非放宽。
+  it('用例M8-4: 挂载后 .entry-avatar 计数 = 7 且其内图标均为 primary 色', async () => {
     const wrapper = mount(SettingsPage, {
       global: {
         mocks: { $router: { push: mockPush, back: mockBack } },
@@ -1283,7 +1308,7 @@ describe('M8 设置页/统计页入口图标统一', () => {
     await flushPromises()
 
     const avatars = wrapper.findAll('.entry-avatar')
-    expect(avatars.length).toBeGreaterThanOrEqual(11)
+    expect(avatars).toHaveLength(7)
     avatars.forEach((node) => {
       // §2.1 容器与左偏移：36 圆底 + mr-2（卡头与子条目同规格）
       expect(node.attributes('size')).toBe('36')
@@ -1294,17 +1319,13 @@ describe('M8 设置页/统计页入口图标统一', () => {
       expect(icon.attributes('color')).toBe('primary')
       expect(icon.attributes('size')).toBe('20')
     })
-    // 11 个入口图标齐全且无游离头像（顺序即模板顺序，需求 5 条不改文案与顺序）
+    // 7 个入口图标齐全且无游离头像（顺序即模板顺序，需求 5 条不改文案与顺序）
     expect(avatars.map((node) => node.find('v-icon').text())).toEqual([
       'mdi-brightness-6',
       'mdi-shape',
       'mdi-tag-multiple',
       'mdi-lightning-bolt',
       'mdi-swap-vertical',
-      'mdi-file-delimited-outline',
-      'mdi-file-import-outline',
-      'mdi-database-export-outline',
-      'mdi-database-import-outline',
       'mdi-history',
       'mdi-account',
     ])
@@ -1313,15 +1334,23 @@ describe('M8 设置页/统计页入口图标统一', () => {
     ;['外观设置', '分类管理', '标签管理', '快速记账', '导入导出', '数据回溯', '账号'].forEach(
       (title) => expect(text).toContain(title)
     )
+    // M5 红线：四个操作行不再在设置主页渲染（行名 + 副标题双口径零残留）
+    const rowTitles = wrapper.findAll('v-list-item-title').map((node) => node.text())
     ;['导出 CSV', '导入 CSV', '导出 SQL', '导入 SQL'].forEach((title) =>
-      expect(text).toContain(title)
+      expect(rowTitles).not.toContain(title)
     )
+    ;['导出账单为 CSV 文件', '从 CSV 文件导入账单', '导出全量数据为 SQL 备份'].forEach((sub) =>
+      expect(text).not.toContain(sub)
+    )
+    expect(text).toContain('导出 CSV/SQL，导入备份文件')
     expect(text).toContain('4 个分类')
     expect(text).toContain('5 个')
     expect(text).toContain('2 个模板')
   })
 
   // 任务 §3.2 / §3.3 / §3.4 / §5.4（结构性修复；§3.5 骨架不归一 = 两类并存）
+  // 【v1.4.3 M5 口径反转改写】导入导出由「pa-4 区块卡 + 4 子条目」降为摘要入口行 →
+  // 摘要类 4→5、区块类 3→2、字阶标题 8→5（迁入新页的 4 行由用例M5-5 同口径锁定），非放宽。
   it('用例M8-5: 数据回溯卡去 pa-4 叠加、左偏移两类基线与字阶统一', () => {
     const history = sliceHistoryCard(settingsPageSource)
     // §5.4：不再出现 pa-4 卡壳与 v-list 的双层 padding 叠加写法
@@ -1330,16 +1359,23 @@ describe('M8 设置页/统计页入口图标统一', () => {
     expect(history).toContain('<v-card class="mb-3 settings-card" rounded="xl">')
     expect(history).toMatch(/<v-list class="bg-transparent pa-0">/)
     expect(history).toMatch(/<v-list-item-title class="text-body-1 font-weight-medium">数据回溯/)
-    // §3.3：摘要类 4 入口（分类/标签/快速记账/数据回溯）统一 v-card 无 pa + 默认内衬
-    expect(settingsPageSource.match(/<v-card class="mb-3 settings-card" rounded="xl">/g)).toHaveLength(4)
-    // §3.3/§3.5：区块类 3 卡头（外观/导入导出/账号）flex pa-4 保持原骨架
-    expect(settingsPageSource.match(/<v-card class="pa-4 mb-3 settings-card" rounded="xl">/g)).toHaveLength(3)
-    expect(settingsPageSource.match(/<div class="d-flex align-center mb-[23]">/g)).toHaveLength(3)
+    // §3.3：摘要类 5 入口（分类/标签/快速记账/导入导出[M5 入口行]/数据回溯）
+    //      统一 v-card 无 pa + 默认内衬
+    expect(settingsPageSource.match(/<v-card class="mb-3 settings-card" rounded="xl">/g)).toHaveLength(5)
+    // §3.3/§3.5：区块类 2 卡头（外观/账号）flex pa-4 保持原骨架
+    //（M5：导入导出区块卡已迁出，其原「pa-4 卡头 + d-flex」骨架随之内联卡一并消失）
+    expect(settingsPageSource.match(/<v-card class="pa-4 mb-3 settings-card" rounded="xl">/g)).toHaveLength(2)
+    expect(settingsPageSource.match(/<div class="d-flex align-center mb-[23]">/g)).toHaveLength(2)
+    expect(settingsPageSource).not.toMatch(/<span class="text-body-1 font-weight-medium">导入导出/)
     // §3.4：字阶统一取 text-body-1 font-weight-medium（卡头原 text-subtitle-2 已覆盖升级）
     expect(settingsPageSource).not.toContain('text-subtitle-2')
-    expect(settingsPageSource.match(/<v-list-item-title class="text-body-1 font-weight-medium">/g)).toHaveLength(8)
+    expect(
+      settingsPageSource.match(/<v-list-item-title class="text-body-1 font-weight-medium">/g)
+    ).toHaveLength(5)
     expect(settingsPageSource).toMatch(/<span class="text-body-1 font-weight-medium">外观设置/)
-    expect(settingsPageSource).toMatch(/<span class="text-body-1 font-weight-medium">导入导出/)
+    expect(settingsPageSource).toMatch(
+      /<v-list-item-title class="text-body-1 font-weight-medium">导入导出/
+    )
     expect(settingsPageSource).toMatch(/<span class="text-body-1 font-weight-medium">账号/)
     expect(settingsPageSource).toMatch(/<div class="text-body-1 font-weight-medium">\{\{ username \}\}/)
   })
@@ -1730,5 +1766,430 @@ describe('v1.4.3 M9 分类拖拽 flip 让位动画', () => {
     expect(reorderCategories).toHaveBeenCalledWith({ ids: [2, 1, 3, 9, 10, 8] })
     expect(mockShowToast).toHaveBeenCalledTimes(1)
     expect(mockShowToast).toHaveBeenCalledWith('排序已保存')
+  })
+})
+
+// ── v1.4.3 M5 导入导出改为设置二级页面（需求五 / 设计 §五） ──────────────────
+// 任务 §5.1~§5.3：功能整体从设置页内联卡平移而来（组件复用、业务不重写），
+// 故本组既锁「新页四功能行为不变」，也锁「设置主页零残留」（防双份状态）。
+describe('v1.4.3 M5 导入导出二级页', () => {
+  // blob 下载与 file input / anchor click 的浏览器侧行为在 jsdom 缺失，按任务 §5.1 桩替
+  let downloads
+  let inputClicks
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    getCategories.mockResolvedValue(CATEGORIES.map((c) => ({ ...c })))
+    getTags.mockResolvedValue(TAGS.map((t) => ({ ...t })))
+    getQuickTemplates.mockResolvedValue(TEMPLATES.map((t) => ({ ...t })))
+
+    downloads = []
+    inputClicks = []
+    URL.createObjectURL = vi.fn(() => 'blob:mock-object-url')
+    URL.revokeObjectURL = vi.fn()
+    vi.spyOn(window.HTMLAnchorElement.prototype, 'click').mockImplementation(function () {
+      downloads.push({ download: this.download, href: String(this.href) })
+    })
+    vi.spyOn(window.HTMLInputElement.prototype, 'click').mockImplementation(function () {
+      inputClicks.push(this.getAttribute('accept'))
+    })
+
+    exportCsv.mockResolvedValue({ __blob: 'csv' })
+    exportSql.mockResolvedValue({ __blob: 'sql' })
+    previewCsvImport.mockResolvedValue({})
+    importCsv.mockResolvedValue({ imported_count: 0 })
+    previewSqlImport.mockResolvedValue({})
+    importSql.mockResolvedValue({ records_imported: 0 })
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    delete URL.createObjectURL
+    delete URL.revokeObjectURL
+  })
+
+  const rowByTitle = (wrapper, title) =>
+    wrapper.findAll('v-list-item').find((node) => node.text().includes(title))
+
+  const csvPreviewFixture = () => ({
+    cache_id: 'csv-cache-1',
+    format: 'native',
+    row_count: 3,
+    categories_in_file: ['餐饮', '未知类'],
+    tags_in_file: [],
+  })
+
+  const sqlPreviewFixture = (overrides = {}) => ({
+    cache_id: 'sql-cache-1',
+    format: 'sqlite_binary',
+    is_third_party: true,
+    tables: { records: { count: 5 }, categories: { count: 3 } },
+    categories_in_file: ['餐饮'],
+    tags_in_file: [],
+    ...overrides,
+  })
+
+  // 任务 §5.1（导出 CSV/SQL → exportCsv/exportSql + blob 下载）+ §2.4（文件名口径不变）
+  it('用例M5-1: 导出 CSV/SQL 调用 @/api/export 并触发 blob 下载，文件名与 toast 不变', async () => {
+    const wrapper = await mountPage(SettingsImportExportPage)
+
+    await rowByTitle(wrapper, '导出 CSV').trigger('click')
+    await flushPromises()
+
+    expect(exportCsv).toHaveBeenCalledTimes(1)
+    expect(URL.createObjectURL).toHaveBeenCalledWith({ __blob: 'csv' })
+    expect(downloads).toHaveLength(1)
+    expect(downloads[0].download).toMatch(/^money_export_\d{8}\.csv$/)
+    expect(downloads[0].href).toContain('blob:')
+    expect(URL.revokeObjectURL).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith('CSV 导出成功')
+    expect(wrapper.vm.exporting).toBe(false)
+
+    await rowByTitle(wrapper, '导出 SQL').trigger('click')
+    await flushPromises()
+
+    expect(exportSql).toHaveBeenCalledTimes(1)
+    expect(downloads).toHaveLength(2)
+    expect(downloads[1].download).toMatch(/^money_backup_\d{8}\.sql$/)
+    expect(mockShowToast).toHaveBeenLastCalledWith('SQL 导出成功')
+    expect(wrapper.vm.exporting).toBe(false)
+  })
+
+  // 设计 §5.3：导出失败口径与迁移前一致（错误 toast + exporting 复位，不卡死入口）
+  it('用例M5-2: 导出失败 → 错误 toast、exporting 复位、未触发下载', async () => {
+    exportCsv.mockRejectedValueOnce(new Error('服务不可用'))
+    const wrapper = await mountPage(SettingsImportExportPage)
+
+    await rowByTitle(wrapper, '导出 CSV').trigger('click')
+    await flushPromises()
+
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith('服务不可用', 'error')
+    expect(URL.createObjectURL).not.toHaveBeenCalled()
+    expect(downloads).toHaveLength(0)
+    expect(wrapper.vm.exporting).toBe(false)
+  })
+
+  // 任务 §5.1（导入 CSV：点击触发隐藏 input → 预览 → CsvMappingDialog confirm 走 importCsv）
+  it('用例M5-3: 导入 CSV 触发隐藏 input、change 走预览并打开映射弹窗，confirm 提交 importCsv', async () => {
+    const wrapper = await mountPage(SettingsImportExportPage)
+
+    // 两个隐藏 file input（accept 与迁移前一致），初始不显示
+    const inputs = wrapper.findAll('input[type="file"]')
+    expect(inputs).toHaveLength(2)
+    expect(inputs[0].attributes('accept')).toBe('.csv')
+    expect(inputs[1].attributes('accept')).toBe('.sql,.db')
+
+    await rowByTitle(wrapper, '导入 CSV').trigger('click')
+    expect(inputClicks).toEqual(['.csv'])
+
+    previewCsvImport.mockResolvedValueOnce(csvPreviewFixture())
+    const file = new window.File(['a,b\n1,2'], 'records.csv', { type: 'text/csv' })
+    Object.defineProperty(inputs[0].element, 'files', { value: [file], configurable: true })
+    await inputs[0].trigger('change')
+    await flushPromises()
+
+    expect(previewCsvImport).toHaveBeenCalledTimes(1)
+    expect(previewCsvImport).toHaveBeenCalledWith(file)
+    // 原样平移的 reset 逻辑：读文件后清空 value，允许重复选同一文件
+    expect(inputs[0].element.value).toBe('')
+    expect(wrapper.vm.showCsvMapping).toBe(true)
+    expect(wrapper.vm.csvPreviewData.cache_id).toBe('csv-cache-1')
+
+    // CSV 映射弹窗（第一个实例）拿预览数据与 store 分类
+    const dialogs = wrapper.findAllComponents(CsvMappingDialog)
+    expect(dialogs).toHaveLength(2)
+    const csvDialog = dialogs[0]
+    expect(csvDialog.props('modelValue')).toBe(true)
+    expect(csvDialog.props('previewData')).toMatchObject({ cache_id: 'csv-cache-1', row_count: 3 })
+    expect(csvDialog.props('categories').map((c) => c.name)).toEqual(['餐饮', '出行', '购物', '工资'])
+
+    importCsv.mockResolvedValueOnce({ imported_count: 3 })
+    csvDialog.vm.$emit('confirm', {
+      category_mapping: { 未知类: { action: 'map', target_id: 3 } },
+      tag_mapping: {},
+    })
+    await flushPromises()
+
+    expect(importCsv).toHaveBeenCalledWith({
+      cache_id: 'csv-cache-1',
+      format: 'native',
+      category_mapping: { 未知类: { action: 'map', target_id: 3 } },
+      tag_mapping: {},
+    })
+    expect(mockShowToast).toHaveBeenCalledWith('成功导入 3 条记录')
+    expect(wrapper.vm.showCsvMapping).toBe(false)
+    expect(wrapper.vm.csvPreviewData).toBe(null)
+    expect(wrapper.vm.importing).toBe(false)
+  })
+
+  // CSV 预览失败：错误 toast 且不弹映射框（行为与迁移前一致）
+  it('用例M5-3b: CSV 预览失败 → 错误 toast、映射弹窗不打开', async () => {
+    previewCsvImport.mockRejectedValueOnce(new Error('文件格式不支持'))
+    const wrapper = await mountPage(SettingsImportExportPage)
+
+    await wrapper.vm.handleCsvFileSelect({
+      target: { files: [new window.File(['x'], 'bad.csv')], value: 'C:\\fakepath\\bad.csv' },
+    })
+    await flushPromises()
+
+    expect(mockShowToast).toHaveBeenCalledWith('文件格式不支持', 'error')
+    expect(wrapper.vm.showCsvMapping).toBe(false)
+    expect(wrapper.findAllComponents(CsvMappingDialog)[0].props('modelValue')).toBe(false)
+  })
+
+  // 任务 §2.3/§5.1（SQL 两段式：确认弹窗 → 映射弹窗 → importSql）
+  it('用例M5-4: 导入 SQL 先出确认弹窗（格式/来源/预览计数），下一步进映射并成功导入', async () => {
+    const wrapper = await mountPage(SettingsImportExportPage)
+
+    await rowByTitle(wrapper, '导入 SQL').trigger('click')
+    expect(inputClicks).toEqual(['.sql,.db'])
+
+    previewSqlImport.mockResolvedValueOnce(sqlPreviewFixture())
+    const sqlInput = wrapper.findAll('input[type="file"]')[1]
+    const file = new window.File(['--'], 'backup.sqlite')
+    Object.defineProperty(sqlInput.element, 'files', { value: [file], configurable: true })
+    await sqlInput.trigger('change')
+    await flushPromises()
+
+    expect(previewSqlImport).toHaveBeenCalledWith(file)
+    expect(sqlInput.element.value).toBe('')
+    expect(wrapper.vm.showSqlConfirm).toBe(true)
+    expect(wrapper.vm.sqlCacheId).toBe('sql-cache-1')
+    expect(wrapper.vm.sqlFormat).toBe('sqlite_binary')
+    // 确认弹窗文案：SQLite 二进制 / 第三方来源 / 逐表计数（原样平移）
+    const text = wrapper.text()
+    expect(text).toContain('文件格式：SQLite 数据库')
+    expect(text).toContain('数据来源：Cashew（第三方）')
+    expect(text).toContain('records：5 条')
+    expect(text).toContain('categories：3 条')
+
+    const nextBtn = wrapper.findAll('v-btn').find((node) => node.text() === '下一步')
+    expect(nextBtn, 'SQL 确认弹窗「下一步」未渲染').toBeTruthy()
+    await nextBtn.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.vm.showSqlConfirm).toBe(false)
+    expect(wrapper.vm.showSqlMapping).toBe(true)
+
+    importSql.mockResolvedValueOnce({ records_imported: 5 })
+    wrapper.findAllComponents(CsvMappingDialog)[1].vm.$emit('confirm', {
+      category_mapping: { 餐饮: { action: 'map', target_id: 1 } },
+      tag_mapping: {},
+    })
+    await flushPromises()
+
+    expect(importSql).toHaveBeenCalledWith({
+      cache_id: 'sql-cache-1',
+      format: 'sqlite_binary',
+      is_third_party: true,
+      category_mapping: { 餐饮: { action: 'map', target_id: 1 } },
+      tag_mapping: {},
+    })
+    expect(mockShowToast).toHaveBeenCalledWith('成功导入 5 条记录')
+    expect(wrapper.vm.showSqlMapping).toBe(false)
+    expect(wrapper.vm.sqlPreviewData).toBe(null)
+    expect(wrapper.vm.sqlCacheId).toBe(null)
+    expect(wrapper.vm.sqlFormat).toBe(null)
+    expect(wrapper.vm.importing).toBe(false)
+  })
+
+  // 设计 §5.2：文件内无待映射分类/标签 → 下一步直接导入（mapping 传 null）
+  it('用例M5-4b: SQL 无需映射时「下一步」直接导入，category/tag_mapping 为 null', async () => {
+    const wrapper = await mountPage(SettingsImportExportPage)
+    // 文件内无 categories_in_file / tags_in_file → 无需映射，「下一步」直入 importSql
+    previewSqlImport.mockResolvedValueOnce(
+      sqlPreviewFixture({
+        format: 'text_sql',
+        is_third_party: false,
+        categories_in_file: [],
+        tags_in_file: [],
+      })
+    )
+    await wrapper.vm.handleSqlFileSelect({
+      target: {
+        files: [new window.File(['sql'], 'backup.sql')],
+        value: 'C:\\fakepath\\backup.sql',
+      },
+    })
+    await flushPromises()
+    expect(wrapper.vm.showSqlConfirm).toBe(true)
+    expect(wrapper.vm.sqlFormat).toBe('text_sql')
+
+    importSql.mockResolvedValueOnce({ records_imported: 2 })
+    wrapper.vm.handleSqlNext()
+    await flushPromises()
+
+    expect(wrapper.vm.showSqlMapping).toBe(false)
+    expect(importSql).toHaveBeenCalledTimes(1)
+    expect(importSql).toHaveBeenCalledWith({
+      cache_id: 'sql-cache-1',
+      format: 'text_sql',
+      is_third_party: false,
+      category_mapping: null,
+      tag_mapping: null,
+    })
+    expect(mockShowToast).toHaveBeenCalledWith('成功导入 2 条记录')
+  })
+
+  // 任务 §2.1/§2.2（页头同款 + 主体唯一 .page-card + 四行与 v-divider 排布原样）
+  it('用例M5-5: 页头返回与说明文案在卡外，四行与 v-divider 整体迁入唯一 .page-card', async () => {
+    const { card, outside } = splitByPageCard(importExportPageSource)
+    // §2.1 页头：返回箭头 + $router.back() + text-caption text-grey 说明（参考 HistoryPage 结构）
+    expect(outside).toContain('mdi-arrow-left')
+    expect(outside).toContain('$router.back()')
+    expect(outside).toContain('导出账单或从备份恢复')
+    // 每页恰一个卡壳（容器复用不重复定义，自动继承 M6 疏朗化口径）
+    expect(importExportPageSource.match(/class="page-card"/g)).toHaveLength(1)
+    // §2.2 CSV/SQL 两组现有排布原样迁移：4 行 + 中间一条 v-divider 分组
+    // （正则排除 v-list-item-title/subtitle 前缀连带命中）
+    expect(card.match(/<v-list-item(?![\w-])/g)).toHaveLength(4)
+    expect(card.match(/<v-divider class="my-1" \/>/g)).toHaveLength(1)
+    ;['导出 CSV', '导入 CSV', '导出 SQL', '导入 SQL'].forEach((t) => expect(card).toContain(t))
+    ;[
+      '导出账单为 CSV 文件',
+      '从 CSV 文件导入账单',
+      '导出全量数据为 SQL 备份',
+      '从 SQL/SQLite 文件导入数据',
+    ].forEach((s) => expect(card).toContain(s))
+    ;[
+      'mdi-file-delimited-outline',
+      'mdi-file-import-outline',
+      'mdi-database-export-outline',
+      'mdi-database-import-outline',
+    ].forEach((i) => expect(card).toContain(i))
+    // 卡壳之外无页面级透明列表（M4 口径）
+    expect(outside).not.toContain('bg-transparent')
+
+    // 渲染快照：返回按钮为页头首个 v-btn，点击走 $router.back()（与其他二级页一致）
+    const wrapper = await mountPage(SettingsImportExportPage)
+    expect(wrapper.findAll('.page-card')).toHaveLength(1)
+    const cardNode = wrapper.find('.page-card')
+    ;['导出 CSV', '导入 CSV', '导出 SQL', '导入 SQL'].forEach((t) =>
+      expect(cardNode.text()).toContain(t)
+    )
+    await wrapper.findAll('v-btn')[0].trigger('click')
+    expect(mockBack).toHaveBeenCalledTimes(1)
+  })
+
+  // 任务 §2.4（剪切非复制）+ §3.3 红线 + §5.2
+  it('用例M5-6: 状态与函数完整平移，SettingsPage 零残留且含 import-export 入口', () => {
+    const moved = [
+      // 状态
+      'exporting',
+      'importing',
+      'csvFileInput',
+      'sqlFileInput',
+      'showCsvMapping',
+      'csvPreviewData',
+      'showSqlConfirm',
+      'showSqlMapping',
+      'sqlPreviewData',
+      'sqlCacheId',
+      'sqlFormat',
+      // 函数
+      'downloadBlob',
+      'handleExportCsv',
+      'handleExportSql',
+      'triggerCsvImport',
+      'handleCsvFileSelect',
+      'handleCsvImport',
+      'triggerSqlImport',
+      'handleSqlFileSelect',
+      'handleSqlNext',
+      'handleSqlImport',
+      // 依赖与模板骨架
+      'CsvMappingDialog',
+      '@/api/export',
+      'exportCsv',
+      'exportSql',
+      'previewCsvImport',
+      'importCsv',
+      'previewSqlImport',
+      'importSql',
+      'dayjs',
+      'type="file"',
+      '确认导入 SQL',
+      '导入模式：合并（放弃原始 ID，重新分配）',
+    ]
+    moved.forEach((id) => expect(importExportPageSource, `新页缺「${id}」`).toContain(id))
+    // 新页自身仍是 api/export 唯一消费方（toast 走 appStore.showToast，与设计 §5.2.2 一致）
+    expect(importExportPageSource).toContain("from '@/api/export'")
+    expect(importExportPageSource).toContain('appStore.showToast')
+    // 四行文案的唯一副本：新页有、设置页无（防双份状态残留）
+    moved.forEach((id) => expect(settingsPageSource, `SettingsPage 残留「${id}」`).not.toContain(id))
+    // 任务 §5.2 三条 ?raw 断言
+    expect(settingsPageSource).not.toContain('CsvMappingDialog')
+    expect(settingsPageSource).not.toMatch(/<input[^>]*type="file"/)
+    expect(settingsPageSource).toContain('to="/settings/import-export"')
+    // 任务 §3.3 红线字面量（csvMapping|sqlPreview|exportCsv）大小写两型皆零命中
+    expect(settingsPageSource).not.toMatch(/csvMapping|sqlPreview|exportCsv/i)
+  })
+
+  // 任务 §5.3（路由表用例，:710 风格）+ §4.2 直达 URL 走全局守卫
+  it('用例M5-7: /settings/import-export 路由存在、懒加载、meta.title 正确且非 public', async () => {
+    const expected = [['/settings/import-export', 'SettingsImportExport', '导入导出']]
+    const byPath = {}
+    router.getRoutes().forEach((r) => {
+      byPath[r.path] = r
+    })
+
+    for (const [path, name, title] of expected) {
+      const route = byPath[path]
+      expect(route, `缺少路由 ${path}`).toBeTruthy()
+      expect(route.name).toBe(name)
+      expect(route.meta.title).toBe(title)
+      expect(typeof route.components.default).toBe('function')
+      const mod = await route.components.default()
+      expect(mod.default).toBeTruthy()
+      expect(route.meta.public).toBeFalsy()
+    }
+    // 追加位置口径（任务 §1.1）：quick-templates 之后、/history 之前
+    // （M1 随后在本文件只改 Dashboard 的 meta.title，不动本区块）
+    expect(routerSource).toMatch(
+      /\/settings\/quick-templates[\s\S]*?\/settings\/import-export[\s\S]*?path: '\/history'/
+    )
+  })
+
+  // 任务 §4.1/§4.2 边界：直达本页补拉分类（映射弹窗候选）；中途返回卸载不炸
+  it('用例M5-8: 直达本页时补拉分类供映射候选，store 已加载则不重复请求；卸载后回调不触达', async () => {
+    const store = useCategoriesStore()
+    expect(store.loaded).toBe(false)
+
+    const wrapper = await mountPage(SettingsImportExportPage)
+    await flushPromises()
+    expect(getCategories).toHaveBeenCalledTimes(1)
+    expect(wrapper.findAllComponents(CsvMappingDialog)[0].props('categories')).toHaveLength(4)
+
+    // store 已 loaded（从设置页进入的常态）→ 不再新增请求
+    const store2 = useCategoriesStore()
+    store2.loaded = true
+    const again = await mountPage(SettingsImportExportPage)
+    await flushPromises()
+    expect(getCategories).toHaveBeenCalledTimes(1)
+    expect(again.vm.csvFileInput).toBeTruthy()
+
+    // 导入进行中返回设置页：页面卸载，后续回调仅写入已卸载实例（无 DOM 崩溃、无多余 toast）
+    let resolvePreview
+    previewCsvImport.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolvePreview = resolve
+      })
+    )
+    const pending = await mountPage(SettingsImportExportPage)
+    const input = pending.findAll('input[type="file"]')[0]
+    Object.defineProperty(input.element, 'files', {
+      value: [new window.File(['a'], 'x.csv')],
+      configurable: true,
+    })
+    await input.trigger('change')
+    pending.unmount()
+    resolvePreview(csvPreviewFixture())
+    await flushPromises()
+
+    expect(pending.vm.showCsvMapping).toBe(true) // 状态写在已卸载实例上，不影响全局
+    expect(mockShowToast).not.toHaveBeenCalled()
   })
 })
