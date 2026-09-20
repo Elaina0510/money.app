@@ -8,7 +8,7 @@
 
 ## 模块清单（14 个，与需求十四节一对一）
 
-- [ ] [M1 - 顶栏标题「首页」统一为「主页」](m1-home-title-text.md) —— 需求一（总览 1）
+- [x] [M1 - 顶栏标题「首页」统一为「主页」](m1-home-title-text.md) —— 需求一（总览 1）
 - [x] [M2 - 主页大卡「总收支」三视图点按切换](m2-dashboard-total-views.md) —— 需求二（2）
 - [x] [M3 - 账单页月份条放大 + 选中月滚动居中 + 选中态修复](m3-month-selector.md) —— 需求三（3、4）
 - [x] [M4 - 日期弹窗中文化 + 实时显示 + 选后不关](m4-datepicker-zh-keepopen.md) —— 需求四（5）
@@ -71,7 +71,7 @@
 
 | 模块 | 层 | 状态 | 完成 commit | 备注 |
 |------|----|------|-------------|------|
-| M1 | 前端 | ⬜ 待开始 | | |
+| M1 | 前端 | ✅ 已完成 | `f33ed1f` | router meta 单点取词，用户可见「首页」零残留；README 历史截图 alt 保留（见备注） |
 | M2 | 前端 | ✅ 已完成 | `d7cd977` | D5 循环/负结余 #FFC7C7 落定；220ms 字面量带 M14 回填标记；DashboardPage.test.js 新建 |
 | M3 | 前端 | ✅ 已完成 | `036b286` | `.month-scroller` 类已建（M11 挂载点就绪）；vitest 200 全绿 |
 | M4 | 前端 | ✅ 已完成 | `ecf5152` | 选后不关+closeAndCommit 单出口；locale gzip 实测 +2,050B（估算下沿，见备注） |
@@ -103,11 +103,13 @@
 | M5 `9364394` | 无涉及 | 275/275 全量 | — | — | 通过 | skip |
 | M7 `ea7f61a` | 无涉及 | 276/276 全量 | — | — | 通过 | skip |
 | M13 `285044f` | 无涉及 | 288/288 全量 | — | — | 通过 | skip |
+| M1 `f33ed1f` | 无涉及 | 290/290 全量 | — | — | 通过 | skip |
+| **终验第一轮**（13 模块汇合、M14 前） | 245/245 | 290/290 | 90 错（基线 106，零新增） | 通过 | 通过（0 error/2 既有 warning） | 通过 |
 
 ## 待人工抽检清单（各模块任务文件「验收与质量门槛」手工项汇总）
 
 ### M1
-- [ ] 3.2 顶栏 / bottom nav / 桌面侧栏三处同显「主页」
+- [ ] 3.2 手工自查：顶栏 / bottom nav / 桌面侧栏三处同显「主页」；明暗主题无差异（纯文本改动）
 
 ### M2
 - [ ] 6.2 真机竖屏一次点击即切换无连环跳；primary 深底红/白对比度；明暗 × 竖/宽四组合
@@ -168,6 +170,9 @@
 ## 备注
 
 （各模块完成报告 notes 汇总于此：设计偏差裁定、测试口径反转、交接事项、遗留项。）
+
+- **M1 完成（`f33ed1f`）+ 主 Agent 裁定**：仅 `router/index.js:14` 一行改「主页」（AppLayout 顶栏从 meta 单点取词，bottom nav/侧栏本就「主页」；`document.title` 全库零命中无第二处）；测试注释「第一页」语义两处（现 :225/:566）红线保留；**README.md:29 `alt="首页"` + screenshots/v1.4/首页.png 文件名保留**——历史版本截图资源非顶栏标题，改名超模块范围，若需连带更新 README v1.4.3 版本历史时一并处理（沿既定口径只写 Version History）。
+- **终验第一轮（§6.2，13 模块汇合、M14 启动前）结果：全绿**——pytest 245/245；mypy 90 错 vs v1.4.2 基线 106（基线零新增口径满足，净 -16）；ruff All checks passed；vitest 290/290；lint 0 error（2 既有 warning 非本期文件）；build 通过（787ms）。X 成立，M14 终串行启动。
 
 - **M13 完成（`285044f`）**：① **文档瑕疵登记**：任务书称「两处调用方」，实测全库仅 `SettingsCategoriesPage.vue:110` 一处（RecordFormPage 不走图标 picker），按零改动执行并以用例锁死恰 1 处；② 旧行为口径反转 4 组（内联展开/收起按钮/fullscreen/resize 切分支→居中弹窗统一），CategoryIconPicker.test.js 12 旧→19 新零静默删除；③ **交接 M14**：组件持恰 1 处 `<v-dialog`（受控 model-value + `dialog-bottom-transition` + after:leave 回焦链），SettingsSubPages 用例M13-4 已落计数锁，M14 换 AppDialog 需同步改口径且回焦事件必须透传，否则 M13 用例红；滚动结构 flex+80vh 勿被原点缩放动画破坏；④ 微偏离两处（可接受）：activator 增补 aria 属性、「.icon-cell」min-height 40→44px 与触摸靶同径，均无断言依赖旧值。
 
