@@ -84,6 +84,18 @@ vi.mock('@/stores/useAppStore', () => ({
 // Import component after mocks
 import RecordListPage from './RecordListPage.vue'
 
+// M10 行内断言用桩件：行首图标与金额位于 v-list-item 的具名插槽内，而 jsdom 下 Vuetify 未安装，
+// 未解析的自定义元素不会渲染具名插槽内容 → 用透传桩件把插槽原样落到 DOM（原有 class/属性由
+// Vue 的 fallthrough 保留，故 .entry-avatar / color="primary" 仍可被精确断言）。
+const ROW_SLOT_STUBS = {
+  'v-list-item': {
+    template: '<div><slot name="prepend" /><slot /><slot name="append" /></div>',
+  },
+}
+// jsdom 的 cssstyle 会把十六进制色序列化为 rgb()，两种写法都视为命中
+const EXPENSE_COLOR = /#FF6B6B|rgb\(255,\s*107,\s*107\)/i
+const INCOME_COLOR = /#20C997|rgb\(32,\s*201,\s*151\)/i
+
 describe('RecordListPage - Category Icons', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -137,8 +149,11 @@ describe('RecordListPage - Category Icons', () => {
     expect(wrapper.vm.records[0].category_icon).toBeNull()
   })
 
-  it('should maintain expense background color', async () => {
-    const wrapper = mount(RecordListPage)
+  // 需求十（M10）口径反转：本组两条用例原断「行首 avatar 按收支双色（#FFE8E8/#E8FFF3）底色」，
+  // 该双色底与右侧金额红/绿语义重复，现统一为设置页入口同款 .entry-avatar（primary 10% 底）
+  // + 图标 color="primary"，收支仅由金额色与前缀表达（设计 §10.2 / 任务 2.1、2.2）。
+  it('should render row icon with shared entry-avatar primary scheme instead of expense background color (M10)', async () => {
+    const wrapper = mount(RecordListPage, { global: { stubs: ROW_SLOT_STUBS } })
     await flushPromises()
 
     wrapper.vm.records = [
@@ -153,15 +168,22 @@ describe('RecordListPage - Category Icons', () => {
     ]
     await nextTick()
 
-    // Check that expense records still have the correct background color
-    const avatar = wrapper.find('.v-avatar')
-    if (avatar.exists()) {
-      expect(avatar.attributes('style')).toContain('#FFE8E8')
-    }
+    // 行首图标统一走 .entry-avatar，其内为分类图标 + primary 色（不再按收支切色）
+    const avatar = wrapper.find('.entry-avatar')
+    expect(avatar.exists()).toBe(true)
+    expect(avatar.attributes('class')).toContain('entry-avatar')
+    expect(avatar.attributes('color')).toBeUndefined()
+    const rowIcon = avatar.find('v-icon')
+    expect(rowIcon.attributes('color')).toBe('primary')
+    expect(rowIcon.text()).toContain('mdi-food')
+    // 支出语义仍由金额红 + 「-」前缀表达
+    const amount = wrapper.find('.record-card .font-weight-bold')
+    expect(amount.attributes('style')).toMatch(EXPENSE_COLOR)
+    expect(amount.text()).toContain('-100')
   })
 
-  it('should maintain income background color', async () => {
-    const wrapper = mount(RecordListPage)
+  it('should render same entry-avatar primary scheme for income rows with green amount (M10)', async () => {
+    const wrapper = mount(RecordListPage, { global: { stubs: ROW_SLOT_STUBS } })
     await flushPromises()
 
     wrapper.vm.records = [
@@ -176,11 +198,14 @@ describe('RecordListPage - Category Icons', () => {
     ]
     await nextTick()
 
-    // Check that income records still have the correct background color
-    const avatar = wrapper.find('.v-avatar')
-    if (avatar.exists()) {
-      expect(avatar.attributes('style')).toContain('#E8FFF3')
-    }
+    // 收入行与支出行行首同款（收支双色底色已废弃）
+    const avatar = wrapper.find('.entry-avatar')
+    expect(avatar.exists()).toBe(true)
+    expect(avatar.find('v-icon').attributes('color')).toBe('primary')
+    // 收入语义由金额绿 + 「+」前缀表达
+    const amount = wrapper.find('.record-card .font-weight-bold')
+    expect(amount.attributes('style')).toMatch(INCOME_COLOR)
+    expect(amount.text()).toContain('+1000')
   })
 
   it('should display tag name when available', async () => {
@@ -1111,5 +1136,39 @@ describe('RecordListPage - 横滑误切标签页修复（M11）', () => {
     // 月份条容器仍绑定同一 class（未新增类名分叉）
     expect(recordListSource).toMatch(/class="month-scroller"/)
     expect(recordListSource).not.toMatch(/month-scroller-\w/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// M10（需求十）：账单页行首图标统一为设置页入口同款 primary 色系（设计 §10.2 / 测试 §10.4-2）
+//   复用既有全局 .entry-avatar（D8，零新增类、global.scss 零改动）；
+//   收支双色（#FFE8E8/#E8FFF3 底 + #FF6B6B/#20C997 图标）整体撤除，收支仅由金额红/绿表达。
+//   记录详情页（RecordDetailPage.vue）按需求 10.4 裁定不改，故两色断言只作用于本页源码。
+// ---------------------------------------------------------------------------
+describe('RecordListPage - 行图标 primary 色系统一（M10）', () => {
+  it('用例1: 行 avatar 复用 .entry-avatar，图标 color="primary"（无新增类、无 :color 双色）', () => {
+    const rowAvatar = recordListSource.match(/<v-list-item[\s\S]*?<\/v-list-item>/)
+    expect(rowAvatar, '未找到账单行结构').toBeTruthy()
+    expect(rowAvatar[0]).toMatch(/<v-avatar\s+class="entry-avatar\s+mr-2"\s+size="40">/)
+    expect(rowAvatar[0]).toMatch(/<v-icon\s+color="primary"\s+size="20">/)
+    // 不复用行内 style/:color，仍沿用全局类（D8）
+    expect(rowAvatar[0]).not.toMatch(/:color=/)
+    expect(recordListSource).not.toMatch(/\.entry-avatar\s*\{/)
+  })
+
+  it('用例2: 收支双色字面量在本页源码零命中（模板区与样式区皆无）', () => {
+    expect(recordListSource).not.toMatch(/#FFE8E8/i)
+    expect(recordListSource).not.toMatch(/#E8FFF3/i)
+  })
+
+  it('用例3: 图标仍是分类图标且缺失回退 mdi-circle；金额区红/绿 + −/+ 前缀口径不动', () => {
+    expect(recordListSource).toMatch(/\{\{\s*record\.category_icon\s*\|\|\s*'mdi-circle'\s*\}\}/)
+    // 金额仅此处保留收支色（任务 2.2 金额区不动）
+    expect(recordListSource).toMatch(
+      /color:\s*record\.type === 'expense'\s*\?\s*'#FF6B6B'\s*:\s*'#20C997'/,
+    )
+    expect(recordListSource).toMatch(
+      /\{\{\s*record\.type === 'expense'\s*\?\s*'-'\s*:\s*'\+'\s*\}\}\s*\{\{\s*record\.amount\s*\}\}/,
+    )
   })
 })

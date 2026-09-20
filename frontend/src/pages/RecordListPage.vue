@@ -113,12 +113,8 @@
         <v-card rounded="xl" class="record-card">
           <v-list-item @click="goToDetail($event, record.id)">
             <template v-slot:prepend>
-              <v-avatar
-                :color="record.type === 'expense' ? '#FFE8E8' : '#E8FFF3'"
-                size="40"
-                class="mr-2"
-              >
-                <v-icon :color="record.type === 'expense' ? '#FF6B6B' : '#20C997'" size="20">
+              <v-avatar class="entry-avatar mr-2" size="40">
+                <v-icon color="primary" size="20">
                   {{ record.category_icon || 'mdi-circle' }}
                 </v-icon>
               </v-avatar>
