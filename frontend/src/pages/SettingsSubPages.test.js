@@ -115,6 +115,9 @@ import {
   previewSqlImport,
   importSql,
 } from '@/api/export'
+// v1.4.3 M13：图标选择改独立居中弹窗——组件 ?raw 源码锁 + 精选集条目数（仅追加，不动既有导入）
+import categoryIconPickerSource from '@/components/common/CategoryIconPicker.vue?raw'
+import { CATEGORY_ICONS } from '@/constants/categoryIcons'
 
 // ── 测试数据 ────────────────────────────────────────────────────────
 const CATEGORIES = [
@@ -2212,5 +2215,162 @@ describe('v1.4.3 M7 账号区用户行头像缩进对齐', () => {
     expect(settingsPageSource.match(/class="account-user-row/g)).toHaveLength(2)
     // §1.4 头像本身尺寸/配色不动（首字母头像仍为 36px primary，与标题行头像同径）
     expect(settingsPageSource).toMatch(/<v-avatar size="36" color="primary" class="mr-2">/)
+  })
+})
+
+// ── v1.4.3 M13 分类图标选择改独立居中弹窗（需求十三 / 设计 §十三）──────────────
+// 手法：分类表单挂载真实 CategoryIconPicker，只桩 v-dialog 以便分辨「外层分类对话框」与
+// 「组件自带居中弹窗」两层；jsdom 无布局 → 尺寸/网格口径另走 ?raw 源码锁（§1.2 既定手法）。
+describe('v1.4.3 M13 分类图标选择独立居中弹窗', () => {
+  // 声明 fullscreen prop：组件不传时桩上读到 false，用于「非全屏」侧证
+  const DialogStub = {
+    name: 'VDialog',
+    props: { modelValue: Boolean, fullscreen: Boolean, maxWidth: String, transition: String },
+    emits: ['update:modelValue'],
+    template:
+      '<div class="m13-dialog-stub" :data-fullscreen="String(fullscreen)" :data-max-width="String(maxWidth)">' +
+      '<div v-if="modelValue" class="m13-dialog-content"><slot /></div></div>',
+  }
+
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    getCategories.mockResolvedValue(CATEGORIES.map((c) => ({ ...c })))
+  })
+
+  async function mountCategories() {
+    const wrapper = mount(SettingsCategoriesPage, {
+      global: {
+        mocks: { $router: { push: mockPush, back: mockBack } },
+        stubs: { 'v-dialog': DialogStub, VDialog: DialogStub },
+      },
+    })
+    await flushPromises()
+    wrapper.vm.showCategoryDialog = true
+    await nextTick()
+    return wrapper
+  }
+
+  function outerDialog(wrapper) {
+    return wrapper.findAllComponents(DialogStub).find((d) => d.props('maxWidth') === '400')
+  }
+
+  // ---------- 任务 4.3 / 2.1：居中弹窗形态（宽屏两档同一路径） ----------
+
+  for (const width of [1280, 375]) {
+    it(`用例M13-1(${width}px): 图标网格落在组件自带居中弹窗，外层分类对话框无内联展开区`, async () => {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, writable: true, value: width })
+      const wrapper = await mountCategories()
+      const picker = wrapper.findComponent(CategoryIconPicker)
+      expect(picker.exists()).toBe(true)
+      expect(picker.props('modelValue')).toBe('mdi-cash')
+
+      const outer = outerDialog(wrapper)
+      expect(outer).toBeTruthy()
+      // 未点 activator：全页无网格（v1.4.2 宽屏内联展开分支已删 → 外层不再被撑大）
+      expect(wrapper.findAll('.icon-grid')).toHaveLength(0)
+      expect(wrapper.findAll('.icon-panel')).toHaveLength(0)
+
+      await picker.find('.icon-activator').trigger('click')
+
+      // 组件内恰一份弹窗、非全屏、裁定宽度口径 92vw、初版过渡 dialog-bottom-transition
+      const inner = picker.findAllComponents(DialogStub)
+      expect(inner).toHaveLength(1)
+      expect(inner[0].props('fullscreen')).toBe(false)
+      expect(inner[0].element.getAttribute('data-fullscreen')).toBe('false')
+      expect(inner[0].props('maxWidth')).toBe('min(560px, 92vw)')
+      expect(inner[0].props('transition')).toBe('dialog-bottom-transition')
+      expect(inner[0].props('modelValue')).toBe(true)
+
+      // 全量精选图标落在这一层弹窗里；内联展开区两档均零命中
+      const cells = inner[0].findAll('.icon-cell')
+      expect(cells).toHaveLength(CATEGORY_ICONS.length)
+      expect(inner[0].find('.icon-dialog__preview-name').text()).toBe('mdi-cash')
+      expect(wrapper.findAll('.icon-panel')).toHaveLength(0)
+      // 外层分类对话框自身尺寸口径不受图标弹窗开合影响（撑出现象根因消除）
+      expect(outer.props('maxWidth')).toBe('400')
+      expect(outer.props('modelValue')).toBe(true)
+      // 网格归属组件自己的弹窗层，而非外层对话框内的直接展开区
+      const gridHost = outer.find('.icon-grid').element.closest('.m13-dialog-content')
+      expect(gridHost).toBe(inner[0].find('.m13-dialog-content').element)
+      expect(outer.findAll('.icon-panel')).toHaveLength(0)
+      delete window.innerWidth
+    })
+  }
+
+  // ---------- 任务 3.1 / 3.2：单段式点选 + 关闭不再回抛 ----------
+
+  it('用例M13-2: 点选即回抛 v-model 供表单实时预览，「完成」仅收起内层弹窗', async () => {
+    const wrapper = await mountCategories()
+    const picker = wrapper.findComponent(CategoryIconPicker)
+    await picker.find('.icon-activator').trigger('click')
+
+    const target = CATEGORY_ICONS[4]
+    await picker.findAll('.icon-cell').find((c) => c.attributes('title') === target).trigger('click')
+    // 调用方零改动：仍靠 update:modelValue 单向回填 categoryForm.icon
+    expect(wrapper.vm.categoryForm.icon).toBe(target)
+    expect(picker.find('.icon-activator__name').text()).toBe(target)
+    // 弹窗不自动关（可连续改选），高亮描边落到所选
+    expect(picker.find('.m13-dialog-content').exists()).toBe(true)
+    expect(picker.findAll('.icon-cell--selected').map((c) => c.attributes('title'))).toEqual([target])
+
+    const done = picker.find('.icon-dialog__done')
+    expect(done.exists()).toBe(true)
+    expect(done.text()).toBe('完成')
+    await done.trigger('click')
+    await nextTick()
+
+    expect(picker.find('.m13-dialog-content').exists()).toBe(false)
+    // 关闭路径不再产生第二次回抛、外层表单对话框仍开着（回编辑路径不变）
+    expect(wrapper.vm.categoryForm.icon).toBe(target)
+    expect(wrapper.vm.showCategoryDialog).toBe(true)
+    expect(outerDialog(wrapper).props('modelValue')).toBe(true)
+  })
+
+  // ---------- 任务 4.4：存量非选集图标在表单侧的行为回归 ----------
+
+  it('用例M13-3: 编辑存量非选集图标分类 → 提示 chip 保留、网格无选中项、选新即覆盖', async () => {
+    const wrapper = await mountCategories()
+    wrapper.vm.categoryForm.icon = 'mdi-abacus' // 历史手输、精选集外
+    await nextTick()
+
+    const picker = wrapper.findComponent(CategoryIconPicker)
+    expect(picker.find('.icon-activator').text()).toContain('不在精选集，编辑需改选')
+
+    await picker.find('.icon-activator').trigger('click')
+    expect(picker.findAll('.icon-cell')).toHaveLength(CATEGORY_ICONS.length)
+    expect(picker.findAll('.icon-cell--selected')).toHaveLength(0)
+    expect(picker.find('.icon-dialog__preview-name').text()).toBe('mdi-abacus')
+
+    await picker.findAll('.icon-cell')[0].trigger('click')
+    expect(wrapper.vm.categoryForm.icon).toBe(CATEGORY_ICONS[0])
+    expect(picker.find('.icon-activator').text()).not.toContain('不在精选集')
+  })
+
+  // ---------- 任务 4.5 / 2.3：源码口径锁（含交给 M14 的收编锚点） ----------
+
+  it('用例M13-4: ?raw 源码锁——双分支/写死带高已删，居中尺寸与单层弹窗就绪', () => {
+    // 删除项：全屏分支、写死滚动带高、窄屏判定与 resize 监听、内联展开区
+    expect(categoryIconPickerSource).not.toContain('fullscreen')
+    expect(categoryIconPickerSource).not.toContain('max-height: 240px')
+    expect(categoryIconPickerSource).not.toMatch(/\bisNarrow\b|NARROW_BREAKPOINT/)
+    expect(categoryIconPickerSource).not.toMatch(/addEventListener\(['"]resize/)
+    expect(categoryIconPickerSource).not.toMatch(/icon-panel/)
+    expect(categoryIconPickerSource).not.toMatch(/v-slide-y-transition/)
+
+    // 保留项：居中 dialog（非全屏）+ 92vw 裁定值 + 卡片 80vh + 网格撑满可用高度
+    const styleBlock = categoryIconPickerSource.slice(categoryIconPickerSource.indexOf('<style scoped>'))
+    expect(categoryIconPickerSource).toMatch(/max-width="min\(560px, 92vw\)"/)
+    expect(categoryIconPickerSource).toMatch(/transition="dialog-bottom-transition"/)
+    expect(styleBlock).toMatch(/\.icon-dialog\s*\{[^}]*max-height:\s*80vh/)
+    expect(styleBlock).toMatch(/\.icon-grid-scroll\s*\{[^}]*flex:\s*1;[^}]*min-height:\s*0;[^}]*overflow-y:\s*auto/)
+    expect(styleBlock).toMatch(/grid-template-columns:\s*repeat\(auto-fill,\s*minmax\(44px,\s*1fr\)\)/)
+
+    // M14 收编清单：本组件恰一处 <v-dialog（原点点开替换点，过渡为初版 dialog-bottom-transition）
+    expect(categoryIconPickerSource.match(/<v-dialog/g)).toHaveLength(1)
+    expect(categoryIconPickerSource.match(/dialog-bottom-transition/g)).toHaveLength(2) // 属性 + 注释
+
+    // 对外签名与调用方零改动：表单侧仍是裸 v-model，未新增可见态/场景 prop
+    expect(categoriesPageSource).toMatch(/<CategoryIconPicker v-model="categoryForm\.icon" \/>/)
+    expect(categoriesPageSource.match(/<CategoryIconPicker/g)).toHaveLength(1)
   })
 })
