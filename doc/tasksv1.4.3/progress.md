@@ -16,7 +16,7 @@
 - [x] [M6 - 二级页面间距疏朗化（三页 + 全局口径）](m6-page-spacing.md) —— 需求六（7）
 - [ ] [M7 - 设置页账号区用户行头像缩进对齐](m7-account-row-indent.md) —— 需求七（8）
 - [x] [M8 - 分类模型重构：收支共用统一分类 ★重构+迁移](m8-category-model-unify.md) —— 需求八（9）
-- [ ] [M9 - 分类拖拽 flip 让位动画](m9-drag-flip-animation.md) —— 需求九（10）
+- [x] [M9 - 分类拖拽 flip 让位动画](m9-drag-flip-animation.md) —— 需求九（10）
 - [x] [M10 - 主页/账单页行图标 primary 色系统一](m10-row-icon-primary-unify.md) —— 需求十（11、12）
 - [x] [M11 - Bug 修复：竖屏左右滑动误切标签页](m11-swipe-tab-switch-fix.md) —— 需求十一（13）
 - [x] [M12 - 预算模型重构：每月多条命名预算 ★重构+迁移](m12-budget-model-rebuild.md) —— 需求十二（14）
@@ -79,7 +79,7 @@
 | M6 | 前端 | ✅ 已完成 | `ca9a482` | 全局 `.page-card`/`.section-title` 定义已落（P2 窗口闭合）；分类页 scoped margin 静默覆写已修 |
 | M7 | 前端 | ⬜ 待开始 | | |
 | M8 | 全栈 | ✅ 已完成 | `8652bec` | ★迁移阶段 A + 脚本骨架/挂点就绪（单事务、sqlite_master 判据、整表重建）；pytest 212 全绿；money.db 未触碰 |
-| M9 | 前端 | ⬜ 待开始 | | 依赖 M8 |
+| M9 | 前端 | ✅ 已完成 | `e00285a` | 仅 :animation="180" 一行改动；vuedraggable animation 落 $attrs 口径偏离见备注 |
 | M10 | 前端 | ✅ 已完成 | `5ec01d4`（dashboard 半区在 `d7cd977`） | D8 纯复用 .entry-avatar 零新增类；详情页未动（红线1） |
 | M11 | 前端 | ✅ 已完成 | `d03ce93` | 按 P3 浏览器自动化复现尝试（结论见备注）；纯 CSS overscroll 隔离；vitest 206 全绿 |
 | M12 | 全栈 | ✅ 已完成 | `7912906` | ★迁移阶段 B 同事务续写 + merge_map 接力；D12 四端点、batch→PUT 重接；spent user_id 隔离；顺带修复导出丢关联 bug；pytest 245/vitest 247 |
@@ -98,6 +98,7 @@
 | M10 `5ec01d4` | 无涉及 | 237/237 全量 | — | — | 通过 | skip |
 | M12 后端 | 245/245 | — | 零新增（90 vs 基线106） | 通过 | — | skip |
 | M12 `7912906` | 245/245 复核 | 247/247 复核 | 同上 | 通过 | 通过 | skip |
+| M9 `e00285a` | 无涉及 | 250/250 全量 | — | — | 通过 | skip |
 
 ## 待人工抽检清单（各模块任务文件「验收与质量门槛」手工项汇总）
 
@@ -127,8 +128,8 @@
 - [ ] 11.4 明暗 × 竖/宽自查
 
 ### M9
-- [ ] 4.2 真机触摸拖动其余行实时平滑让位无跳变；松手刷新不丢
-- [ ] 4.3 鼠标路径同测；明暗主题
+- [ ] 4.2 **真机必测**：竖屏触摸拖动分类，其余行随拖动位置实时平滑让位、全程无跳变；松手落位顺序保持、刷新不丢
+- [ ] 4.3 桌面鼠标路径同测；明暗主题走查
 
 ### M10
 - [ ] 5.2 主页行首分类图标无箭头；账单页与设置页入口同款；金额红绿；明暗 × 竖/宽
@@ -163,6 +164,8 @@
 ## 备注
 
 （各模块完成报告 notes 汇总于此：设计偏差裁定、测试口径反转、交接事项、遗留项。）
+
+- **M9 完成（`e00285a`）口径偏离（已接受）**：设计 §9.4 字面断言 `props('animation') === 180` 实测不可达——vuedraggable@4.1.0 声明面无 animation，该 prop 落 `$attrs` 透传 Sortable；用例改按本文件既定 `sortableOptionsOf()` 归一口径断 `$attrs.animation===180` + `props()` 不含 animation 键快照，未降断言。M14 收编本页对话框不受影响。
 
 - **M12 完成报告要点（`7912906`，主 Agent 已复核 pytest 245/245 + vitest 247/247 复跑）**：① 口径反转改写除任务点名的 test_budgets/test_data_isolation/StatisticsPage 预算块外，还包括 `test_security.py` 两条预算 IDOR（403 意图保留并加强「无痕迹」核验）与 `test_migration_v143.py` ⑦/⑥ 重指向两阶段真态（阶段 A 单元不变量拆新用例，零删除）；② **越文件改锁（已裁定接受）**：`SettingsSubPages.test.js` 用例M8-3 锁定了 M12 按设计删除的「每分类一条预算行」标记，就地改锁预算卡色档函数（意图不变），设计附录 C 未预见该交叉；③ **顺带修复真实 bug**：导出 `budget_categories` 缺 `category_name` 致导入后预算关联全丢，导出双写名称+导入三级解析，3 新用例锁；修复了 `/api/export/sql` 对持有预算用户必崩的既有缺陷；④ 遗留登记：`BudgetPage.vue`（死文件红线）仍 import 已下线的 `batchSetBudgets`（悬空、不入包）；slide-y 覆写因 Vuetify `!important` 时长用双类提级，M14 收编统一；⑤ **既有缺陷不修登记（越权判定）**：`restore_default_categories` 对持有账单记录的自定义分类置空 `records.category_id` 违反 NOT NULL（基线 8652bec 即存在，v1.2.3 遗留）→ 该场景 500；M12 用例 4.4 绕开该形制并在测试内注释，建议下版单独立项修复。
 
