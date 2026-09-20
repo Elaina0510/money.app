@@ -2374,3 +2374,36 @@ describe('v1.4.3 M13 分类图标选择独立居中弹窗', () => {
     expect(categoriesPageSource.match(/<CategoryIconPicker/g)).toHaveLength(1)
   })
 })
+
+// ── v1.4.3 M1：顶栏标题「首页」统一为「主页」（需求一，设计 §1.4）───────────
+// 仅在本文件末尾追加本块：上方各模块区块与 :225、:566 处「分页接口第一页」语义注释
+// 保持原文（任务 1.3 红线，顺手改即误义）。
+describe('v1.4.3 M1 顶栏标题统一为「主页」', () => {
+  // 任务 2.1：路由表 `/` 的 meta.title === '主页'
+  // 单点生效链：AppLayout.vue currentTitle = route.meta?.title → 顶栏文本
+  it('用例M1-1: 根路由 / 的 meta.title 为「主页」，name/icon/nav 与登录守卫保持不动', () => {
+    const byPath = {}
+    router.getRoutes().forEach((r) => {
+      byPath[r.path] = r
+    })
+
+    const home = byPath['/']
+    expect(home, '缺少根路由 /').toBeTruthy()
+    expect(home.name).toBe('Dashboard')
+    expect(home.meta.title).toBe('主页')
+    // 只改标题取词：icon 与 bottom nav 标记不动（bottom nav / 侧栏本就为「主页」）
+    expect(home.meta.icon).toBe('mdi-view-dashboard-outline')
+    expect(home.meta.nav).toBe(true)
+    expect(home.meta.public).toBeFalsy()
+  })
+
+  // 任务 2.2：?raw 源码扫描——路由表全文再无用户可见「首页」字样
+  it('用例M1-2: ?raw 源码断言 router/index.js 不含「首页」，且根路由结构未受影响', () => {
+    expect(routerSource).not.toContain('首页')
+    // 反向锁：path / name / component 懒加载原样保留，仅 title 换字
+    expect(routerSource).toMatch(
+      /path: '\/',\s*\n\s*name: 'Dashboard',\s*\n\s*component: \(\) => import\('@\/pages\/DashboardPage\.vue'\),\s*\n\s*meta: \{ title: '主页'/
+    )
+    expect(routerSource).toContain("meta: { title: '主页', icon: 'mdi-view-dashboard-outline', nav: true }")
+  })
+})

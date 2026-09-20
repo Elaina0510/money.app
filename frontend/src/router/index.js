@@ -11,7 +11,7 @@ const routes = [
     path: '/',
     name: 'Dashboard',
     component: () => import('@/pages/DashboardPage.vue'),
-    meta: { title: '首页', icon: 'mdi-view-dashboard-outline', nav: true },
+    meta: { title: '主页', icon: 'mdi-view-dashboard-outline', nav: true },
   },
   {
     path: '/records',
