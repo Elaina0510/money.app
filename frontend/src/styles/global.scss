@@ -21,6 +21,15 @@ body {
   font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
 }
 
+/* 需求十一（M11）：竖屏页内横滑误切底部标签页——根因假设为 Chromium 文档级横向
+   overscroll 被解释为历史前进/后退（hash 路由下表现为"跳标签页"）。
+   根滚动容器隔离横滑链，纵向 overscroll（下拉刷新）语义零改动。
+   本轮按裁定 P3 以 CSS 假设实施，真机复现与验收仍待人工抽检清单确认。 */
+html,
+body {
+  overscroll-behavior-x: contain;
+}
+
 /* Smooth transitions */
 .v-card,
 .v-list-item,

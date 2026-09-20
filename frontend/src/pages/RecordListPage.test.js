@@ -1018,14 +1018,98 @@ describe('RecordListPage - 月份条居中与放大（M3）', () => {
     expect(recordListSource).not.toMatch(/variant="text"\s+size="x-small"/)
   })
 
-  it('用例9: 选中态失色修复 + 居中红线（?raw 不含 selectedYear === currentYear 限定、零 scrollIntoView）', () => {
-    expect(recordListSource).toMatch(
-      /:color="selectedMonth === m \? 'primary' : ''"/
-    )
+  it('用例9: 选中态失色修复 + 居中红线（?raw 不含 selectedYear === currentYear 限定、无 scrollIntoView 调用点）', () => {
+    expect(recordListSource).toMatch(/:color="selectedMonth === m \? 'primary' : ''"/)
     expect(recordListSource).not.toContain('selectedMonth === m && selectedYear === currentYear')
     expect(recordListSource).not.toMatch(/selectedYear === currentYear\s*\?\s*'primary'/)
-    // 模块红线：居中禁用 scrollIntoView（会连带垂直滚动祖先，打断 M11 与详情页返回滚动）
-    // 源码注释会合法提及该 API 名，故断言"无调用点"
+    // 模块红线：居中禁用 scrollIntoView（会连带垂直滚动祖先，打断 M11 与详情页返回滚动）。
+    // 源码注释为解释红线会合法提及该 API 名，故断言取"无调用点"形式。
     expect(recordListSource).not.toMatch(/\.scrollIntoView\s*\(/)
+  })
+
+  it('用例10: 放大后月份条结构不变（年份箭头 + 12 chip，红线：不改连续时间轴）', async () => {
+    getEarliestYear.mockResolvedValue({ earliest_year: currentYear - 5 })
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.findAll('.month-scroller > div')).toHaveLength(12)
+    expect(recordListSource).toMatch(/v-for="m in 12"/)
+    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(1)
+    wrapper.unmount()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// M11 需求十一：竖屏页内横滑误切底部标签页修复（CSS 层 overscroll-behavior-x）
+//   4.1 global.scss 根级断言（vitest 不处理 CSS，?raw 会拿到空串 → 沿用仓库既定的
+//       node:fs 直读样式表手法，见 SettingsSubPages.test.js 的 readGlobalStyles）
+//   4.2 RecordListPage.vue ?raw 断言 .month-scroller 含该属性
+//   4.3 M3 居中/滚动用例回归（见上一 describe 组，滚动定位不受影响）
+// ---------------------------------------------------------------------------
+import { existsSync, readFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { cwd } from 'node:process'
+
+function readSourceFile(relative) {
+  let dir = cwd()
+  for (let i = 0; i < 5; i++) {
+    const candidate = join(dir, relative)
+    if (existsSync(candidate)) return readFileSync(candidate, 'utf8')
+    const parent = dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  throw new Error(`未找到 ${relative}（cwd=${cwd()}）`)
+}
+
+const OVERSCAN_X = /overscroll-behavior-x:\s*contain/
+
+describe('RecordListPage - 横滑误切标签页修复（M11）', () => {
+  const globalStyles = readSourceFile(join('src', 'styles', 'global.scss'))
+
+  it('用例1: 根滚动容器隔离横向 overscroll（主修复，global.scss）', () => {
+    expect(globalStyles).toMatch(/overscroll-behavior-x:\s*contain/)
+    expect(globalStyles).toMatch(/html,\s*body\s*\{[^}]*overscroll-behavior-x:\s*contain/)
+    // 只断横向：纵向 overscroll（下拉刷新）语义零改动（任务 3.4）
+    expect(globalStyles).not.toMatch(/overscroll-behavior-y\s*:/)
+    expect(globalStyles).not.toMatch(/[^-]overscroll-behavior\s*:/)
+  })
+
+  it('用例2: M3 建的 .month-scroller 类追加横向 overscroll 隔离（不新增类、不改结构）', () => {
+    const rule = recordListSource.match(/\.month-scroller\s*\{[^}]*\}/)
+    expect(rule, '.month-scroller 类未定义').toBeTruthy()
+    expect(rule[0]).toMatch(OVERSCAN_X)
+    // 追加属性后容器仍可横滚（contain 只断链、不取消滚动），M3 口径全量保持
+    expect(rule[0]).toMatch(/overflow-x:\s*auto/)
+    expect(rule[0]).toMatch(/gap:\s*8px/)
+    expect(rule[0]).toMatch(/scrollbar-width:\s*none/)
+    // 纵向不设值（任务 3.4）
+    expect(rule[0]).not.toMatch(/overscroll-behavior-y\s*:/)
+    expect(rule[0]).not.toMatch(/overscroll-behavior\s*:/)
+  })
+
+  it('用例3: CSS-only 修复——不引入任何 JS 手势拦截代码（红线 5 / 任务 3.1）', () => {
+    expect(recordListSource).not.toMatch(/addEventListener\(\s*['"]touch/)
+    expect(recordListSource).not.toMatch(/touchstart|touchmove|touchend/)
+    expect(recordListSource).not.toMatch(/preventDefault\s*\(/)
+    expect(recordListSource).not.toContain('scrollIntoView(')
+    // 居中仍走容器 scrollTo（M3 手法不变）
+    expect(recordListSource).toMatch(/scroller\.scrollTo\?\.\(/)
+  })
+
+  it('用例4: 全站横滚容器审计（任务 2.3）——可横滚容器仅月份条一处', () => {
+    const appLayout = readSourceFile(join('src', 'components', 'layout', 'AppLayout.vue'))
+    // AppLayout 为 overflow-x: hidden（裁剪而非可滚动容器）→ 按设计 §11.2 第 3/4 点不处理，保持现状
+    expect(appLayout).toMatch(/overflow-x:\s*hidden/)
+    expect(appLayout).not.toMatch(/overflow-x:\s*(auto|scroll)/)
+    // 根级与月份条两处 contain 即为全覆盖（其余页面样式文件无横向滚动容器）
+    const scssFiles = ['src/styles/global.scss']
+    for (const f of scssFiles) {
+      expect(readSourceFile(f)).toMatch(/overscroll-behavior-x/)
+    }
+    // 月份条容器仍绑定同一 class（未新增类名分叉）
+    expect(recordListSource).toMatch(/class="month-scroller"/)
+    expect(recordListSource).not.toMatch(/month-scroller-\w/)
   })
 })

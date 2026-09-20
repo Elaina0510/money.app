@@ -365,11 +365,13 @@ onMounted(async () => {
 }
 
 /* 需求三：月份条横滚容器（收敛原 flex/间距/横滚/底部留白工具类与内联 scrollbar-width）。
-   本类同时是 M11 追加 overscroll-behavior-x 的挂载点。 */
+   需求十一：追加横向 overscroll 隔离——横滑到左右边缘不再把滚动链交给文档，
+   阻断 Chromium 历史滑动导航（竖屏误切底部标签页）；只断链，月份条自身横滑与居中不受影响。 */
 .month-scroller {
   display: flex;
   flex-grow: 1;
   overflow-x: auto;
+  overscroll-behavior-x: contain;
   gap: 8px;
   padding-bottom: 8px;
   scrollbar-width: none;
