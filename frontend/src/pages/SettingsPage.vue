@@ -131,7 +131,7 @@
         <span class="text-body-1 font-weight-medium">账号</span>
       </div>
 
-      <div v-if="isLoggedIn" class="d-flex align-center justify-space-between mt-2">
+      <div v-if="isLoggedIn" class="account-user-row d-flex align-center justify-space-between mt-2">
         <div class="d-flex align-center">
           <v-avatar size="36" color="primary" class="mr-2">
             <span class="text-body-2 text-white font-weight-bold">{{ username.charAt(0) }}</span>
@@ -147,7 +147,7 @@
         </v-btn>
       </div>
 
-      <div v-else class="mt-2">
+      <div v-else class="account-user-row mt-2">
         <div class="text-body-2 text-grey mb-3">未登录，部分功能可能受限</div>
         <v-btn color="primary" variant="tonal" @click="goToLogin">
           <v-icon start>mdi-login</v-icon>
@@ -225,5 +225,11 @@ onMounted(async () => {
 <style scoped>
 .settings-page {
   padding-bottom: 20px;
+}
+
+/* v1.4.3 M7 账号区用户行与标题行图标文字起点同列缩进：
+   44px = 标题行头像 36px + mr-2 8px（与导入导出区块内层列表项二级缩进模式统一） */
+.account-user-row {
+  padding-left: 44px;
 }
 </style>

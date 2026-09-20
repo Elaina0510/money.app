@@ -2193,3 +2193,24 @@ describe('v1.4.3 M5 导入导出二级页', () => {
     expect(mockShowToast).not.toHaveBeenCalled()
   })
 })
+
+// ── v1.4.3 M7 设置页账号区用户行头像缩进对齐（需求七 / 设计 §七）────────────
+// 手法：jsdom 无布局引擎，44px 缩进数学不可测 → 按 §1.2 约定用 SettingsPage.vue ?raw 源码断言
+describe('v1.4.3 M7 账号区用户行头像缩进对齐', () => {
+  // 任务 §3.1：含 .account-user-row 类定义 + 模板用户行绑定该类 + 样式含 padding-left: 44px
+  it('用例M7-1: scoped 样式定义 .account-user-row{padding-left:44px}，登录/未登录两分支用户行同挂该类', () => {
+    // §1.1 类定义在 <style scoped> 内，缩进值为定值 px（§2.1 宽屏卡片变宽节奏不变）
+    const styleBlock = settingsPageSource.slice(settingsPageSource.indexOf('<style scoped>'))
+    expect(styleBlock).toMatch(/\.account-user-row\s*\{[^}]*padding-left:\s*44px[^}]*\}/)
+    // §1.2 登录分支：挂类且原布局类序完整（justify-space-between 保持行右缘对齐，§1.4）
+    expect(settingsPageSource).toMatch(
+      /<div v-if="isLoggedIn" class="account-user-row d-flex align-center justify-space-between mt-2">/
+    )
+    // §1.3 未登录分支（「去登录」行）同挂该类，两分支缩进一致
+    expect(settingsPageSource).toMatch(/<div v-else class="account-user-row mt-2">/)
+    // 模板内该类仅账号区两分支挂载（登录 + 未登录 = 恰 2 处），不波及其他区块
+    expect(settingsPageSource.match(/class="account-user-row/g)).toHaveLength(2)
+    // §1.4 头像本身尺寸/配色不动（首字母头像仍为 36px primary，与标题行头像同径）
+    expect(settingsPageSource).toMatch(/<v-avatar size="36" color="primary" class="mr-2">/)
+  })
+})
