@@ -250,9 +250,11 @@ const tagSearchResults = ref([])
 const tagSearching = ref(false)
 let searchDebounceTimer = null
 
-const currentCategories = computed(() =>
-  categories.value.filter((c) => c.type === recordType.value)
-)
+// v1.4.3 M8：分类收支共用，全量单列表即记账可选分类（不再按交易 type 过滤）；
+// 九宫格图标/选中色继续按**交易** type 着色（records.type 语义不变）
+const OTHER_CATEGORY_NAME = '其他'
+
+const currentCategories = computed(() => categories.value)
 
 const canSubmit = computed(() => {
   return parseFloat(amount.value) > 0 && categoryId.value !== null
@@ -428,12 +430,8 @@ async function submit() {
   }
 }
 
-watch(recordType, () => {
-  const cats = currentCategories.value
-  if (cats.length && !cats.find((c) => c.id === categoryId.value)) {
-    categoryId.value = cats[0]?.id || null
-  }
-})
+// v1.4.3 M8：切换支出/收入不再改变可选分类集合（全量单列表），
+// 原「选中项出组即重置为组内首项」的 watch(recordType) 已随之删除
 
 // Watch form fields for dirty state
 watch(
@@ -452,9 +450,10 @@ onMounted(async () => {
     categories.value = cats
     templates.value = tpls || []
 
-    const expenseCats = cats.filter((c) => c.type === 'expense')
-    if (expenseCats.length) {
-      categoryId.value = expenseCats[0].id
+    // M8：默认分类取全列表首个非「其他」项（「其他」是末尾兜底位，不做默认选中）
+    const defaultCat = cats.find((c) => c.name !== OTHER_CATEGORY_NAME) || cats[0]
+    if (defaultCat) {
+      categoryId.value = defaultCat.id
     }
 
     if (isEdit.value) {

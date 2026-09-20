@@ -258,6 +258,67 @@ VALUES (1, 50.0, 'expense', 1, NULL, '2024-01-15 12:00', '测试',
         assert resp.status_code == 200
         assert resp.json()["data"]["records_imported"] >= 1
 
+    async def test_import_legacy_same_name_categories_collapse(self, auth_client: AsyncClient):
+        """边界 §8.3/8.2：旧文件同名 income/expense 两分类 → name 匹配「已存在同名即映射」。
+
+        v1.4.3 起 name + user_id 唯一，旧 dump 的两行「退款」必撞约束；导入器只认
+        name（type 忽略），两条账单落到同一分类、各自的**交易** type 保持原样。
+        dump 里的 user_id 故意写 7，验证导入归属当前认证用户而非文件内 id。
+        """
+        sql_content = """CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    icon TEXT NOT NULL,
+    sort_order INTEGER,
+    is_preset INTEGER DEFAULT 0,
+    user_id INTEGER
+);
+INSERT INTO categories (id, name, type, icon, sort_order, is_preset, user_id)
+VALUES (11, '退款', 'expense', 'mdi-cash', 1, 0, 7);
+INSERT INTO categories (id, name, type, icon, sort_order, is_preset, user_id)
+VALUES (12, '退款', 'income', 'mdi-cash-plus', 1, 0, 7);
+
+CREATE TABLE IF NOT EXISTS records (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    amount REAL NOT NULL,
+    type TEXT NOT NULL,
+    category_id INTEGER NOT NULL,
+    tag_id INTEGER,
+    consume_time TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+INSERT INTO records (id, user_id, amount, type, category_id, consume_time, created_at, updated_at)
+VALUES (21, 7, 30.0, 'income', 12, '2024-01-15 12:00',
+    '2024-01-15 12:00:00', '2024-01-15 12:00:00');
+INSERT INTO records (id, user_id, amount, type, category_id, consume_time, created_at, updated_at)
+VALUES (22, 7, 50.0, 'expense', 11, '2024-01-16 12:00',
+    '2024-01-16 12:00:00', '2024-01-16 12:00:00');
+"""
+        files = {"file": ("legacy.sql", sql_content.encode("utf-8"), "application/sql")}
+        resp = await auth_client.post("/api/import/sql/preview", files=files)
+        cache_id = resp.json()["data"]["cache_id"]
+
+        resp = await auth_client.post(
+            "/api/import/sql", json={"cache_id": cache_id, "format": "text_sql"}
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["data"]["records_imported"] == 2
+
+        cats = [c for c in (await auth_client.get("/api/categories")).json()["data"]
+                if c["name"] == "退款"]
+        assert len(cats) == 1, "同名两行必须合流为一"
+        assert cats[0]["type"] == "expense"  # 占位值（D2）
+        cat_id = cats[0]["id"]
+
+        records = (await auth_client.get("/api/records")).json()["data"]["items"]
+        mine = [r for r in records if r["category_id"] == cat_id]
+        assert len(mine) == 2, "两条账单都须重定向到合流后的同一分类"
+        assert sorted(r["type"] for r in mine) == ["expense", "income"]  # 交易 type 不受影响
+
     async def test_import_strips_id_from_insert(self, auth_client: AsyncClient):
         """Should strip id from INSERT statements."""
         sql_content = """CREATE TABLE IF NOT EXISTS categories (

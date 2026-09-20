@@ -92,8 +92,11 @@ import CategoryIconPicker from '@/components/common/CategoryIconPicker.vue'
 import SettingsTagsPage from './SettingsTagsPage.vue'
 import SettingsQuickTemplatesPage from './SettingsQuickTemplatesPage.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+// v1.4.3 M8 §10.5：CSV 映射弹窗去 type 后缀
+import CsvMappingDialog from '@/components/common/CsvMappingDialog.vue'
 import settingsPageSource from './SettingsPage.vue?raw'
 import categoriesPageSource from './SettingsCategoriesPage.vue?raw'
+import csvMappingSource from '@/components/common/CsvMappingDialog.vue?raw'
 import tagsPageSource from './SettingsTagsPage.vue?raw'
 import quickTemplatesPageSource from './SettingsQuickTemplatesPage.vue?raw'
 import historyPageSource from './HistoryPage.vue?raw'
@@ -167,14 +170,16 @@ async function mountPage(component) {
   return wrapper
 }
 
-// ── M3 拖拽排序：含「其他」的可见集合（等价于后端 GET 的排序真值） ──────
+// ── M3 拖拽排序 + v1.4.3 M8 统一分类：含唯一「其他」置末的全量可见集合 ──────
+// type 列按 D2 保留迁移前的原值（收支共用后前端一律不读取），
+// 工资/红包 仍带 legacy 'income' 值却必须与其余行同列渲染 —— 即「忽略 type」的回归载体
 const REORDER_CATEGORIES = [
   { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 1, is_preset: 1 },
   { id: 2, name: '出行', type: 'expense', icon: 'mdi-bus', sort_order: 2, is_preset: 1 },
   { id: 3, name: '购物', type: 'expense', icon: 'mdi-cart', sort_order: 3, is_preset: 0 },
-  { id: 8, name: '其他支出', type: 'expense', icon: 'mdi-cash-minus', sort_order: 99, is_preset: 1 },
-  { id: 9, name: '工资', type: 'income', icon: 'mdi-wallet', sort_order: 1, is_preset: 1 },
-  { id: 10, name: '其他收入', type: 'income', icon: 'mdi-cash-plus', sort_order: 99, is_preset: 1 },
+  { id: 9, name: '工资', type: 'income', icon: 'mdi-wallet', sort_order: 4, is_preset: 1 },
+  { id: 10, name: '红包', type: 'income', icon: 'mdi-cash-plus', sort_order: 5, is_preset: 1 },
+  { id: 8, name: '其他', type: 'expense', icon: 'mdi-cash-minus', sort_order: 99, is_preset: 1 },
 ]
 
 const reorderCopy = () => REORDER_CATEGORIES.map((c) => ({ ...c }))
@@ -233,8 +238,8 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     expect(text).toContain('分类管理')
     expect(text).toContain('标签管理')
     expect(text).toContain('快速记账')
-    // 数量摘要
-    expect(text).toContain('支出 3 / 收入 1')
+    // 数量摘要（M8：分类收支共用 → 单一「N 个分类」，不再分列支出/收入）
+    expect(text).toContain('4 个分类')
     expect(text).toContain('5 个')
     expect(text).toContain('2 个模板')
     // 摘要卡不展示任何详细条目与新增按钮
@@ -255,7 +260,7 @@ describe('M7 设置页三个管理区块改二级页面', () => {
 
     // 未进过任何标签页也拿到真实数量（后端已解除 20 条上限 → 全量数组 length）
     expect(getTags).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('支出 3 / 收入 1')
+    expect(wrapper.text()).toContain('4 个分类')
     expect(wrapper.text()).toContain('5 个')
 
     store.categories = [...CATEGORIES, { id: 4, name: '娱乐', type: 'expense' }]
@@ -263,23 +268,26 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     await nextTick()
 
     const text = wrapper.text()
-    expect(text).toContain('支出 4 / 收入 1')
+    expect(text).toContain('5 个分类')
     expect(text).toContain('0 个')
     // 数量更新未触发对设置页的重新请求
     expect(getTags).toHaveBeenCalledTimes(1)
   })
 
   // ── 用例2：分类管理二级页 ────────────────────────────────────────
-  it('用例2: 分类二级页返回按钮触发 router.back，渲染支出/收入两组列表', async () => {
+  it('用例2: 分类二级页返回按钮触发 router.back，渲染收支共用单一列表', async () => {
     const wrapper = await mountPage(SettingsCategoriesPage)
 
     await wrapper.findAll('v-btn')[0].trigger('click')
     expect(mockBack).toHaveBeenCalledTimes(1)
 
     const text = wrapper.text()
-    expect(text).toContain('支出分类')
-    expect(text).toContain('收入分类')
+    // M8：原「支出分类 / 收入分类」两组标题已删，改为单一「全部分类」块
+    expect(text).not.toContain('支出分类')
+    expect(text).not.toContain('收入分类')
+    expect(text).toContain('全部分类')
     expect(text).toContain('餐饮')
+    // 收支共用：原收入预设「工资」与支出同类同列可见（前端不再按 type 过滤）
     expect(text).toContain('工资')
     expect(wrapper.findAll('.category-list-item')).toHaveLength(4)
     expect(getCategories).toHaveBeenCalledTimes(1)
@@ -293,18 +301,19 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     // D8：旧上移/下移按钮与 moveCategory 整体移除（单个 PUT 已不改排序）
     expect(categoriesPageSource).not.toContain('mdi-chevron')
     expect(categoriesPageSource).not.toMatch(/\bmoveCategory\b/)
-    expect(categoriesPageSource.match(/mdi-drag-vertical/g)).toHaveLength(2)
-    expect(categoriesPageSource.match(/class="drag-handle mr-1"/g)).toHaveLength(2)
-    expect(categoriesPageSource.match(/class="drag-handle-placeholder mr-1"/g)).toHaveLength(2)
+    // M8：收支两组并为一组 → 把手/占位各恰一处
+    expect(categoriesPageSource.match(/mdi-drag-vertical/g)).toHaveLength(1)
+    expect(categoriesPageSource.match(/class="drag-handle mr-1"/g)).toHaveLength(1)
+    expect(categoriesPageSource.match(/class="drag-handle-placeholder mr-1"/g)).toHaveLength(1)
     expect(categoriesPageSource).toMatch(/v-if="!isOther\(cat\)"/)
     // 样式红线：touch-action: none 只加把手，未污染整行（加整行会杀死列表滚动）
     expect(categoriesPageSource).toMatch(/\.drag-handle \{[^}]*touch-action: none/)
     expect(categoriesPageSource).not.toMatch(/\.category-list-item \{[^}]*touch-action/)
     expect(categoriesPageSource).toMatch(/\.drag-handle-placeholder \{[^}]*width: 20px/)
 
-    // 支出/收入各一个独立 Draggable 实例（天然不可跨组拖）
+    // M8：单一 Draggable 实例承载全量单列表（原支出/收入两个实例已合并）
     const draggables = wrapper.findAllComponents(Draggable)
-    expect(draggables).toHaveLength(2)
+    expect(draggables).toHaveLength(1)
     const options = sortableOptionsOf(draggables[0])
     expect(options.handle).toBe('.drag-handle')
     expect(options.delay).toBe(150)
@@ -315,27 +324,30 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     expect(options.disabled).toBe(false)
     expect(draggables[0].props('itemKey')).toBe('id')
 
-    // REORDER 夹具：支出 4 行 + 收入 2 行；行渲染与 Sortable 命中集一一对应
+    // REORDER 夹具：6 行（含原收入类）全在一列；行渲染与 Sortable 命中集一一对应
     // （[data-draggable] 缺失即整列表拖不动，属真实渲染断言）
     expect(wrapper.findAll('.category-list-item')).toHaveLength(6)
     expect(wrapper.findAll('[data-draggable]')).toHaveLength(6)
 
     // jsdom 不真实驱动 sortable：vm 直改 dragList 后手动调 onDragEnd
-    expect(wrapper.vm.expenseDragList.map((c) => c.name)).toEqual([
+    expect(wrapper.vm.dragList.map((c) => c.name)).toEqual([
       '餐饮',
       '出行',
       '购物',
-      '其他支出',
+      '工资',
+      '红包',
+      '其他',
     ])
-    const list = wrapper.vm.expenseDragList
-    wrapper.vm.onDragStart('expense')
-    expect(wrapper.vm.preDragSnapshot.expense.map((c) => c.id)).toEqual([1, 2, 3, 8])
-    wrapper.vm.expenseDragList = [list[1], list[0], list[2], list[3]]
-    wrapper.vm.onDragEnd('expense')
+    const list = wrapper.vm.dragList
+    wrapper.vm.onDragStart()
+    expect(wrapper.vm.preDragSnapshot.map((c) => c.id)).toEqual([1, 2, 3, 9, 10, 8])
+    wrapper.vm.dragList = [list[1], list[0], list[2], list[3], list[4], list[5]]
+    wrapper.vm.onDragEnd()
     await flushPromises()
 
     expect(reorderCategories).toHaveBeenCalledTimes(1)
-    expect(reorderCategories).toHaveBeenCalledWith({ type: 'expense', ids: [2, 1, 3, 8] })
+    // M8：body 仅 { ids }，且为「全量」可见集合（跨原收支语义的 工资/红包 一并提交）
+    expect(reorderCategories).toHaveBeenCalledWith({ ids: [2, 1, 3, 9, 10, 8] })
     // 全流程唯一一次 toast：store 成功路径不再附加「更新成功」类提示
     expect(mockShowToast).toHaveBeenCalledTimes(1)
     expect(mockShowToast).toHaveBeenCalledWith('排序已保存')
@@ -343,33 +355,39 @@ describe('M7 设置页三个管理区块改二级页面', () => {
 
   it('用例2b-2:「其他」被拖到中间 → 本地与提交 ids 均归一化回末位；isOther/isOtherLocked 口径', async () => {
     const wrapper = await mountReorderPage()
-    const list = wrapper.vm.expenseDragList
-    const [food, trip, shopping, other] = list
+    const list = wrapper.vm.dragList
+    const [food, trip, shopping, salary, redpack, other] = list
 
-    wrapper.vm.onDragStart('expense')
-    wrapper.vm.expenseDragList = [food, other, trip, shopping]
-    wrapper.vm.onDragEnd('expense')
-    // 本地镜像后端「末尾占位」归一化（同步生效，避免保存后跳变）
-    expect(wrapper.vm.expenseDragList.map((c) => c.name)).toEqual([
+    wrapper.vm.onDragStart()
+    wrapper.vm.dragList = [food, other, trip, shopping, salary, redpack]
+    wrapper.vm.onDragEnd()
+    // 本地镜像后端「末尾占位」归一化（同步生效，避免保存后跳变）——作用域为全列表
+    expect(wrapper.vm.dragList.map((c) => c.name)).toEqual([
       '餐饮',
       '出行',
       '购物',
-      '其他支出',
+      '工资',
+      '红包',
+      '其他',
     ])
     await flushPromises()
-    expect(reorderCategories).toHaveBeenCalledWith({ type: 'expense', ids: [1, 2, 3, 8] })
+    expect(reorderCategories).toHaveBeenCalledWith({ ids: [1, 2, 3, 9, 10, 8] })
 
-    // isOther: name + type 双判（与后端助手对齐），错类型同名不算「其他」
+    // M8/D11：isOther 仅按 name 判定（唯一真源「其他」）；
+    // v1.4.2 的「其他支出/其他收入」双别名迁移后已不存在，不再命中
     expect(wrapper.vm.isOther(other)).toBe(true)
-    expect(wrapper.vm.isOther({ name: '其他支出', type: 'income' })).toBe(false)
-    expect(wrapper.vm.isOther({ name: '其他收入', type: 'income' })).toBe(true)
+    expect(wrapper.vm.isOther({ name: '其他' })).toBe(true)
+    expect(wrapper.vm.isOther({ name: '其他', type: 'income' })).toBe(true)
+    expect(wrapper.vm.isOther({ name: '其他支出', type: 'expense' })).toBe(false)
+    expect(wrapper.vm.isOther({ name: '其他收入', type: 'income' })).toBe(false)
     expect(wrapper.vm.isOther({ name: '餐饮', type: 'expense' })).toBe(false)
+    expect(wrapper.vm.isOther(null)).toBe(false)
 
-    // isOtherLocked: 非末位「其他」（异常数据）→ 禁用本组拖动
+    // isOtherLocked: 非末位「其他」（异常数据）→ 禁用拖动
     expect(wrapper.vm.isOtherLocked([other, food, trip])).toBe(true)
     expect(wrapper.vm.isOtherLocked([food, trip, other])).toBe(false)
     expect(wrapper.vm.isOtherLocked([])).toBe(false)
-    expect(sortableOptionsOf(wrapper.findAllComponents(Draggable)[1]).disabled).toBe(false)
+    expect(sortableOptionsOf(wrapper.findAllComponents(Draggable)[0]).disabled).toBe(false)
   })
 
   it('用例2b-3: 保存失败 → 回滚拖前快照 + 错误 toast，并静默重拉对齐后端真值', async () => {
@@ -378,16 +396,16 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     // 重拉同样失败：证明列表恢复来自快照回滚而非重新请求
     getCategories.mockRejectedValue(new Error('network down'))
 
-    const list = wrapper.vm.expenseDragList
-    wrapper.vm.onDragStart('expense')
-    // 出行↑ 购物↑ 其他↑ 餐饮↓ →「其他」在中间，归一化后提交 ids = [2,3,1,8]
-    wrapper.vm.expenseDragList = [list[1], list[2], list[3], list[0]]
-    wrapper.vm.onDragEnd('expense')
+    const list = wrapper.vm.dragList
+    wrapper.vm.onDragStart()
+    // 整表左旋一位 →「其他」落到首位，归一化后回末位，提交 ids = [2,3,9,10,1,8]
+    wrapper.vm.dragList = [list[1], list[2], list[3], list[4], list[5], list[0]]
+    wrapper.vm.onDragEnd()
     await flushPromises()
 
     expect(reorderCategories).toHaveBeenCalledTimes(1)
-    expect(reorderCategories).toHaveBeenCalledWith({ type: 'expense', ids: [2, 3, 1, 8] })
-    expect(wrapper.vm.expenseDragList.map((c) => c.id)).toEqual([1, 2, 3, 8])
+    expect(reorderCategories).toHaveBeenCalledWith({ ids: [2, 3, 9, 10, 1, 8] })
+    expect(wrapper.vm.dragList.map((c) => c.id)).toEqual([1, 2, 3, 9, 10, 8])
     expect(getCategories).toHaveBeenCalledTimes(2) // 初始加载 + 失败后静默对齐
     expect(mockShowToast).toHaveBeenCalledTimes(1)
     expect(mockShowToast).toHaveBeenCalledWith('排序保存失败', 'error')
@@ -411,16 +429,16 @@ describe('M7 设置页三个管理区块改二级页面', () => {
 
     await wrapper.vm.saveCategory()
     await flushPromises()
-    // M2：新增载荷不再携带 sort_order（排序由服务端计算：追加组末、「其他」之前）
+    // M2：新增载荷不携带 sort_order（排序由服务端计算：追加列表末、「其他」之前）
+    // M8：分类收支共用 → 载荷仅 {name, icon}，不再有 type
     expect(createCategory).toHaveBeenCalledWith({
       name: '娱乐',
-      type: 'expense',
       icon: 'mdi-gamepad',
     })
     expect(updateCategory).not.toHaveBeenCalled()
 
     // 编辑：表单项回填、标题切换为「编辑分类」，面板选中态同步为原图标
-    const target = wrapper.vm.expenseCategories[0]
+    const target = wrapper.vm.dragList[0]
     wrapper.vm.editCategory(target)
     await nextTick()
     expect(wrapper.vm.showCategoryDialog).toBe(true)
@@ -432,16 +450,19 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     wrapper.vm.categoryForm.name = '餐饮美食'
     await wrapper.vm.saveCategory()
     await flushPromises()
-    // M2：编辑载荷不含 type（编辑不改类型）也不含 sort_order（单个 PUT 不改排序）
+    // M2：编辑载荷不含 type（M8 起无类型语义）也不含 sort_order（单个 PUT 不改排序）
     expect(updateCategory).toHaveBeenCalledWith(1, {
       name: '餐饮美食',
       icon: 'mdi-food',
     })
     expect(wrapper.vm.editingCategory).toBeNull()
 
-    // 表单状态与模板均不再持有「排序」
-    expect(Object.keys(wrapper.vm.categoryForm).sort()).toEqual(['icon', 'name', 'type'])
+    // 表单状态与模板均不再持有「排序」，也不再持有「类型」（M8）
+    expect(Object.keys(wrapper.vm.categoryForm).sort()).toEqual(['icon', 'name'])
     expect(categoriesPageSource).not.toContain('label="排序"')
+    expect(categoriesPageSource).not.toContain('label="类型"')
+    expect(categoriesPageSource).not.toMatch(/\btypeOptions\b/)
+    expect(categoriesPageSource).not.toMatch(/categoryForm\.type/)
 
     // 源码断言：任意文本图标名入口已移除，改为接入 CategoryIconPicker
     expect(categoriesPageSource).not.toContain('图标 (mdi-*)')
@@ -731,11 +752,13 @@ describe('M7 设置页三个管理区块改二级页面', () => {
   // ── 用例6：搬移完整性 + 设置页零残留（回归红线） ──────────────────
   it('用例6: 三个区块的函数与状态完整搬移到对应二级页', () => {
     const movedToCategories = [
-      'expenseCategories',
-      'incomeCategories',
+      // M8：原 expenseCategories / incomeCategories / typeOptions 随收支共用一并删除，
+      // 换为单列表渲染源与统一「其他」真源、单块标题
+      'dragList',
+      'OTHER_CATEGORY_NAME',
+      '全部分类',
       'showCategoryDialog',
       'categoryForm',
-      'typeOptions',
       'editingCategory',
       'savingCategory',
       // 'moveCategory' 随 M3 决策 D8 整体移除（拖拽把手口径见用例 2b）
@@ -889,7 +912,8 @@ describe('M4 设置二级页面统一卡片图层容器', () => {
     expect(styles).not.toMatch(/\.settings-card\s*\{/)
 
     const pages = [
-      ['分类页', categoriesPageSource, ['支出分类', '收入分类', '暂无分类']],
+      // M8：分类页两组并一，组标题改单块「全部分类」（收入/支出标题已删）
+      ['分类页', categoriesPageSource, ['全部分类', '暂无分类']],
       ['标签页', tagsPageSource, ['暂无标签']],
       ['快速记账页', quickTemplatesPageSource, ['暂无快速记账模板']],
     ]
@@ -904,8 +928,11 @@ describe('M4 设置二级页面统一卡片图层容器', () => {
       expect(outside).toContain('$router.back()')
     })
 
-    // 分类页两块同卡分区（§2.2：块间距 mb-4）；快速记账页模板列表入卡（§2.4）
-    expect(splitByPageCard(categoriesPageSource).card).toContain('class="mb-4"')
+    // M8：分类页并为一块（原两块 mb-4 间距口径由单块 section-block 取代，
+    //     section-block/section-title 类名挂载在分类页，定义归 M6 全局疏朗化）
+    const categoriesCard = splitByPageCard(categoriesPageSource).card
+    expect(categoriesCard.match(/class="section-block"/g)).toHaveLength(1)
+    expect(categoriesCard).toMatch(/class="section-title[^"]*">全部分类/)
     // 标签页 chip 云入卡（§2.3，M5 分页控件同卡位由 M5 承接）
     expect(splitByPageCard(tagsPageSource).card).toContain('flex-wrap')
 
@@ -918,8 +945,8 @@ describe('M4 设置二级页面统一卡片图层容器', () => {
   it('用例M4-2: 卡壳之外无列表透明直贴页面背景；卡内 Draggable 的 bg-transparent 合法保留', () => {
     const categories = splitByPageCard(categoriesPageSource)
     expect(categories.outside).not.toContain('bg-transparent')
-    // M3 合入后两个 Draggable 的 v-list 位于卡壳内部，不再产生透视 → 不入清除范围（易错点 6）
-    expect(categories.card.match(/bg-transparent/g)).toHaveLength(2)
+    // M8：两组并一组 → 卡内 Draggable 的 v-list 恰一处保留 bg-transparent（卡内合法，非页面级透视）
+    expect(categories.card.match(/bg-transparent/g)).toHaveLength(1)
 
     const templates = splitByPageCard(quickTemplatesPageSource)
     expect(templates.outside).not.toContain('bg-transparent')
@@ -933,37 +960,45 @@ describe('M4 设置二级页面统一卡片图层容器', () => {
     expect(historyPageSource).toMatch(/<v-card v-else rounded="xl"[\s\S]*?bg-transparent/)
   })
 
-  // 任务 §4.3（渲染快照）+ M3 交接的卡壳 × 拖拽回归
-  it('用例M4-3: 分类页支出/收入标题渲染在 .page-card 内，卡壳不影响拖拽与批量重排', async () => {
+  // 任务 §4.3（渲染快照）+ M3 交接的卡壳 × 拖拽回归 + M8 单列表并组
+  it('用例M4-3: 分类页单块「全部分类」渲染在 .page-card 内，卡壳不影响拖拽与批量重排', async () => {
     const wrapper = await mountPage(SettingsCategoriesPage)
     const cards = wrapper.findAll('.page-card')
     expect(cards).toHaveLength(1)
     const card = cards[0]
 
     const text = card.text()
-    expect(text).toContain('支出分类')
-    expect(text).toContain('收入分类')
+    // M8：单块标题，原「支出分类 / 收入分类」双标题不再渲染
+    expect(text).toContain('全部分类')
+    expect(text).not.toContain('支出分类')
+    expect(text).not.toContain('收入分类')
     expect(text).toContain('餐饮')
-    expect(text).toContain('其他收入')
+    expect(text).toContain('其他')
     // 页头操作按钮留卡外
     expect(text).not.toContain('恢复默认')
     expect(wrapper.text()).toContain('恢复默认')
-    // 卡内两块分区，支出块 mb-4 生效一处
-    expect(card.findAll('.mb-4')).toHaveLength(1)
+    // M8：并为一块（无原两块间的 mb-4 间距节点）
+    expect(card.findAll('.mb-4')).toHaveLength(0)
+    expect(card.findAll('.section-block')).toHaveLength(1)
+    // §5.2：行图标统一 .entry-avatar（收支双色底已消除）。
+    // 头像在 v-list-item 具名 slot 内，本文件不装 Vuetify 故不落 DOM → ?raw 源码口径
+    expect(categoriesPageSource.match(/class="entry-avatar mr-2"/g)).toHaveLength(1)
+    expect(categoriesPageSource).not.toMatch(/#FFE8E8|#E8FFF3/)
+    expect(categoriesPageSource).not.toMatch(/#FF6B6B|#20C997/)
 
-    // 卡壳未吃掉 M3 拖拽结构：两组各一个 Draggable 实例、行渲染源一一对应
-    expect(card.findAllComponents(Draggable)).toHaveLength(2)
+    // 卡壳未吃掉 M3 拖拽结构：单组一个 Draggable 实例、行渲染源一一对应
+    expect(card.findAllComponents(Draggable)).toHaveLength(1)
     expect(card.findAll('.category-list-item')).toHaveLength(6)
     expect(card.findAll('[data-draggable]')).toHaveLength(6)
 
     // 拖拽改序仍走一次批量重排（视觉结构未回归破坏）
-    const list = wrapper.vm.expenseDragList
-    wrapper.vm.onDragStart('expense')
-    wrapper.vm.expenseDragList = [list[1], list[0], list[2], list[3]]
-    wrapper.vm.onDragEnd('expense')
+    const list = wrapper.vm.dragList
+    wrapper.vm.onDragStart()
+    wrapper.vm.dragList = [list[1], list[0], list[2], list[3], list[4], list[5]]
+    wrapper.vm.onDragEnd()
     await flushPromises()
     expect(reorderCategories).toHaveBeenCalledTimes(1)
-    expect(reorderCategories).toHaveBeenCalledWith({ type: 'expense', ids: [2, 1, 3, 8] })
+    expect(reorderCategories).toHaveBeenCalledWith({ ids: [2, 1, 3, 9, 10, 8] })
     expect(mockShowToast).toHaveBeenCalledTimes(1)
     expect(mockShowToast).toHaveBeenCalledWith('排序已保存')
   })
@@ -1277,7 +1312,7 @@ describe('M8 设置页/统计页入口图标统一', () => {
     ;['导出 CSV', '导入 CSV', '导出 SQL', '导入 SQL'].forEach((title) =>
       expect(text).toContain(title)
     )
-    expect(text).toContain('支出 3 / 收入 1')
+    expect(text).toContain('4 个分类')
     expect(text).toContain('5 个')
     expect(text).toContain('2 个模板')
   })
@@ -1303,5 +1338,171 @@ describe('M8 设置页/统计页入口图标统一', () => {
     expect(settingsPageSource).toMatch(/<span class="text-body-1 font-weight-medium">导入导出/)
     expect(settingsPageSource).toMatch(/<span class="text-body-1 font-weight-medium">账号/)
     expect(settingsPageSource).toMatch(/<div class="text-body-1 font-weight-medium">\{\{ username \}\}/)
+  })
+})
+
+// ── v1.4.3 M8 分类收支共用统一标签（前端消费方，任务 §10） ───────────────────
+describe('v1.4.3 M8 分类收支共用统一标签（前端）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    // 统一后的服务端可见集合：单列表、唯一「其他」恒末位、type 列仅存遗留值
+    getCategories.mockResolvedValue(reorderCopy())
+    reorderCategories.mockResolvedValue(reorderCopy())
+    createCategory.mockResolvedValue({ id: 11, name: '娱乐', type: 'expense' })
+    getTags.mockResolvedValue([])
+    useSlicedPagedMock([])
+    getQuickTemplates.mockResolvedValue([])
+  })
+
+  function mountSlots(component) {
+    return mount(component, {
+      global: {
+        mocks: { $router: { push: mockPush, back: mockBack } },
+        components: { 'v-list-item': EntrySlotHost },
+      },
+    })
+  }
+
+  // 任务 §10.1（+ §5.1/§5.4 渲染快照）
+  it('用例10.1: 单列表渲染——无收支分组标题、「其他」行无把手且恒末位', async () => {
+    const wrapper = mountSlots(SettingsCategoriesPage)
+    await flushPromises()
+    await nextTick()
+
+    const text = wrapper.text()
+    expect(text).not.toContain('支出分类')
+    expect(text).not.toContain('收入分类')
+    expect(text).toContain('全部分类')
+    // 单一列表：6 行全部同列（原收入预设 工资/红包 与支出类混排）
+    // 注：EntrySlotHost 替换了 v-list-item 本体，行容器 class 不再落 DOM → 按标题节点计数
+    const titles = wrapper.findAll('.category-title')
+    expect(titles).toHaveLength(6)
+    expect(titles.map((node) => node.text().replace(/\s+/g, ' ').trim())).toEqual([
+      '餐饮 预设',
+      '出行 预设',
+      '购物',
+      '工资 预设',
+      '红包 预设',
+      '其他 预设',
+    ])
+
+    // 恰一个 Draggable 实例承载全量单列表
+    expect(wrapper.findAllComponents(Draggable)).toHaveLength(1)
+
+    // 「其他」无把手（占位同宽保对齐），其余 5 行各一把手。
+    // EntrySlotHost 将每行 prepend/default/append 摊平为兄弟节点 → 按文档序配对行序
+    const handles = wrapper.findAll('.drag-handle, .drag-handle-placeholder')
+    expect(handles).toHaveLength(6)
+    expect(handles[5].classes()).toContain('drag-handle-placeholder')
+    expect(handles[5].classes()).not.toContain('drag-handle')
+    handles
+      .slice(0, 5)
+      .forEach((node) => expect(node.classes()).toContain('drag-handle'))
+
+    // 行图标全部走 .entry-avatar（收支双色底已消除）
+    expect(wrapper.findAll('.entry-avatar')).toHaveLength(6)
+    expect(wrapper.findAll('.entry-avatar v-icon').map((n) => n.attributes('color'))).toEqual(
+      Array(6).fill('primary')
+    )
+  })
+
+  // 任务 §10.2（+ §5.3 弹窗载荷）
+  it('用例10.2: 弹窗无「类型」下拉；保存载荷仅 {name, icon}', async () => {
+    const wrapper = await mountPage(SettingsCategoriesPage)
+
+    wrapper.vm.showCategoryDialog = true
+    wrapper.vm.categoryForm.name = '娱乐'
+    wrapper.vm.categoryForm.icon = 'mdi-gamepad'
+    await nextTick()
+
+    // DOM 口径：弹窗内不再有 label="类型" 的选择器，也不再渲染 v-select 类型项
+    const selects = wrapper.findAll('v-select')
+    expect(selects.filter((node) => node.attributes('label') === '类型')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('支出')
+    expect(wrapper.text()).not.toContain('收入')
+
+    await wrapper.vm.saveCategory()
+    await flushPromises()
+    expect(createCategory).toHaveBeenCalledTimes(1)
+    expect(createCategory).toHaveBeenCalledWith({ name: '娱乐', icon: 'mdi-gamepad' })
+    // 载荷键集恰为 name/icon（既无 type 也无 sort_order）
+    expect(Object.keys(createCategory.mock.calls[0][0]).sort()).toEqual(['icon', 'name'])
+  })
+
+  // 任务 §10.3（+ §6.4 store 签名收敛）
+  it('用例10.3: store.reorderCategories(ids) 以纯 ids 调批量重排接口', async () => {
+    const store = useCategoriesStore()
+    await store.fetchCategories()
+
+    await store.reorderCategories([2, 1, 3, 9, 10, 8])
+    await flushPromises()
+
+    expect(reorderCategories).toHaveBeenCalledTimes(1)
+    expect(reorderCategories).toHaveBeenCalledWith({ ids: [2, 1, 3, 9, 10, 8] })
+    // 全量单列表：一次提交覆盖原收支两类共 6 个 id，body 无 type 键
+    expect(Object.keys(reorderCategories.mock.calls[0][0])).toEqual(['ids'])
+    // 成功路径不附加 toast（唯一提示由页面发「排序已保存」）
+    expect(mockShowToast).not.toHaveBeenCalled()
+    // 按 type 过滤的两个 computed 已从 store 移除
+    expect(store.expenseCategories).toBeUndefined()
+    expect(store.incomeCategories).toBeUndefined()
+    // 排序后整体重拉以对齐后端真值（预设 CoW 会换 id）
+    expect(getCategories).toHaveBeenCalledTimes(2)
+  })
+
+  // 任务 §10.5（+ §6.3 CSV 映射弹窗）
+  it('用例10.5: CsvMappingDialog 选项 label 无「(支出/收入)」后缀、新建不带 type', async () => {
+    const preview = {
+      format: 'native',
+      row_count: 3,
+      categories_in_file: ['餐饮', '报销', '自定义X'],
+      tags_in_file: [],
+    }
+    const wrapper = mount(CsvMappingDialog, {
+      props: { modelValue: true, previewData: preview, categories: reorderCopy() },
+    })
+    await flushPromises()
+
+    const labels = wrapper.vm.categoryOptions.map((o) => o.label)
+    expect(labels).toEqual(['— 跳过 —', '餐饮', '出行', '购物', '工资', '红包', '其他', '+ 新建分类'])
+    labels.forEach((label) => {
+      expect(label).not.toContain('(支出)')
+      expect(label).not.toContain('(收入)')
+      expect(label).not.toMatch(/[（(](支出|收入)[）)]/)
+    })
+    // 源码级红线：不再拼接 type 后缀
+    expect(csvMappingSource).not.toMatch(/支出.*:.*收入/)
+    expect(csvMappingSource).not.toMatch(/cat\.type/)
+
+    // 新建映射载荷不带 type（后端 CategoryCreate 已删该字段）
+    wrapper.vm.setCategoryMapping('自定义X', 'create')
+    await nextTick()
+    await wrapper.vm.handleConfirm()
+    const payload = wrapper.emitted('confirm')[0][0]
+    expect(payload.category_mapping['自定义X']).toEqual({ action: 'create' })
+    expect(payload.category_mapping['自定义X']).not.toHaveProperty('type')
+    // 同名即映射：按 name 命中，与 type 无关
+    expect(payload.category_mapping['餐饮']).toEqual({ action: 'map', target_id: 1 })
+  })
+
+  // 任务 §10.6（+ §6.2 设置页摘要）
+  it('用例10.6: 设置页分类摘要为「N 个分类」，不再分列支出/收入', async () => {
+    const wrapper = await mountPage(SettingsPage)
+    await flushPromises()
+
+    const text = wrapper.text()
+    expect(text).toContain('6 个分类')
+    expect(text).not.toMatch(/支出 \d+ \/ 收入 \d+/)
+
+    // 响应式：共享 store 变更后摘要数量随之变化（不重新请求）
+    const store = useCategoriesStore()
+    store.categories = [
+      ...REORDER_CATEGORIES.map((c) => ({ ...c })),
+      { id: 11, name: '娱乐', type: 'expense', icon: 'mdi-gamepad' },
+    ]
+    await nextTick()
+    expect(wrapper.text()).toContain('7 个分类')
+    expect(getCategories).toHaveBeenCalledTimes(1)
   })
 })

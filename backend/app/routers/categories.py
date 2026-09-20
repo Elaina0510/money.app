@@ -16,11 +16,17 @@ router = APIRouter(prefix="/api/categories", tags=["分类管理"])
 
 @router.get("")
 async def list_categories(
-    type: str | None = Query(None, description="筛选类型: income/expense"),
+    type: str | None = Query(
+        None, description="已废弃（v1.4.3 M8）：参数保留签名但一律忽略，响应恒为全量单列表"
+    ),
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_auth),
 ) -> JSONResponse:
-    """Get all categories, optionally filtered by type."""
+    """Get all categories (single unified list).
+
+    v1.4.3 M8：分类收支共用，``type`` 查询参数保留签名以兼容旧客户端，
+    但服务层一律忽略（不报错、不过滤）。
+    """
     categories = await category_service.get_categories(db, type, current_user)
     items = [
         CategoryResponse.model_validate(c, from_attributes=True).model_dump() for c in categories
@@ -34,7 +40,10 @@ async def create_category(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_auth),
 ) -> JSONResponse:
-    """Create a new custom category."""
+    """Create a new custom category.
+
+    v1.4.3 M8：不再收 ``type``（分类收支共用），服务层写占位值并按 name + user_id 查重。
+    """
     try:
         category = await category_service.create_category(db, data, current_user)
         return success_response(
@@ -55,14 +64,13 @@ async def reorder_categories(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_auth),
 ) -> JSONResponse:
-    """批量重排某类型分组的分类排序（原子保存，「其他」强制置尾）。
+    """批量重排全量分类排序（原子保存，「其他」强制置尾）。
 
+    v1.4.3 M8：分类不再分收支两组，载荷为 ``{ids}``（全量有序 id）。
     注意：必须声明在 ``PUT /{category_id}`` 之前，否则会被路径参数抢先匹配 422。
     """
     try:
-        categories = await category_service.reorder_categories(
-            db, data.type, data.ids, current_user
-        )
+        categories = await category_service.reorder_categories(db, data.ids, current_user)
     except ValueError as e:
         return error_response(Code.PARAM_ERROR, str(e))
     items = [

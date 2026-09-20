@@ -14,7 +14,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.budget import Budget
-from app.models.category import Category
+from app.models.category import LEGACY_CATEGORY_TYPE, Category
 from app.models.quick_template import QuickTemplate
 from app.models.record import Record
 from app.models.tag import Tag
@@ -138,6 +138,29 @@ async def preview_csv(
     }
 
 
+async def _resolve_or_create_category(
+    db: AsyncSession, user_id: int | None, name: str
+) -> int:
+    """按 name 取已有分类，无则新建（v1.4.3 M8，设计 §8.3「已存在同名即映射」）。
+
+    约束换形后 name + user_id 全库唯一：同一份 CSV 里多行映射到同一「create」分类名
+    时，逐行 INSERT 会在第二行撞 UNIQUE 并让整个导入 500——故先查后建，复用同名列。
+    type 一律不参与匹配，新建行写占位值（D2）。
+    """
+    existing = (
+        await db.exec(select(Category).where(Category.name == name, Category.user_id == user_id))
+    ).first()
+    if existing is not None:
+        assert existing.id is not None  # 已落库行必有主键
+        return existing.id
+
+    category = Category(name=name, type=LEGACY_CATEGORY_TYPE, icon="mdi-circle", user_id=user_id)
+    db.add(category)
+    await db.flush()
+    assert category.id is not None  # flush 后由自增主键回填
+    return category.id
+
+
 async def import_csv_data(
     db: AsyncSession,
     user_id: int | None,
@@ -195,15 +218,11 @@ async def import_csv_data(
             continue
 
         if cat_mapping.get("action") == "create":
-            category = Category(
-                name=cat_name,
-                type=cat_mapping.get("type", "expense"),
-                icon="mdi-circle",
-                user_id=user_id,
-            )
-            db.add(category)
-            await db.flush()
-            category_id = category.id
+            # v1.4.3 M8：type 恒写占位值（分类收支共用，映射载荷不再携带 type）；
+            # 同名即复用（见 _resolve_or_create_category）。
+            # 现状登记：此处不设 sort_order（默认 0）、未经 _next_sort_order——
+            # 本期只改 type 语义，排序行为维持现状不扩范围。
+            category_id = await _resolve_or_create_category(db, user_id, cat_name)
         else:
             category_id = cat_mapping.get("target_id")
             if not category_id:
@@ -670,14 +689,13 @@ async def _import_category_stmt(
 
     # Parse category fields
     name = _unquote(values.get("name", ""))
-    cat_type = _unquote(values.get("type", "expense"))
     icon = _unquote(values.get("icon", "mdi-circle"))
 
-    # Check for existing category
+    # v1.4.3 M8（设计 §8.3）：匹配仅按 name、type 一律忽略。旧文件里同名
+    # income/expense 两分类在新库撞 name 唯一 → 由「已存在同名即映射」自然消解。
     existing = await db.exec(
         select(Category).where(
             Category.name == name,
-            Category.type == cat_type,
             Category.user_id == user_id,
         )
     )
@@ -687,7 +705,7 @@ async def _import_category_stmt(
 
     category = Category(
         name=name,
-        type=cat_type,
+        type=LEGACY_CATEGORY_TYPE,
         icon=icon,
         user_id=user_id,
     )
@@ -897,20 +915,19 @@ async def _import_sqlite_binary(
             rows = conn.execute("SELECT * FROM categories").fetchall()
             for row in rows:
                 name = row["name"]
-                cat_type = row["type"]
                 icon = row["icon"]
 
+                # v1.4.3 M8（任务 4.4）：匹配仅按 name、源库 type 一律忽略
                 existing = await db.exec(
                     select(Category).where(
                         Category.name == name,
-                        Category.type == cat_type,
                         Category.user_id == user_id,
                     )
                 )
                 if not existing.first():
                     category = Category(
                         name=name,
-                        type=cat_type,
+                        type=LEGACY_CATEGORY_TYPE,
                         icon=icon,
                         user_id=user_id,
                     )
@@ -1084,38 +1101,14 @@ async def _import_cashew_sqlite(
             if category_mapping and cat_name in category_mapping:
                 cat_map = category_mapping[cat_name]
                 if cat_map.get("action") == "create":
-                    new_cat = Category(
-                        name=cat_name,
-                        type=cat_map.get("type", rec_type),
-                        icon="mdi-circle",
-                        user_id=user_id,
-                    )
-                    db.add(new_cat)
-                    await db.flush()
-                    category_id = new_cat.id
+                    # v1.4.3 M8：新建分类恒写占位 type（原取映射 type / 交易 rec_type），
+                    # 同名即复用
+                    category_id = await _resolve_or_create_category(db, user_id, cat_name)
                 else:
                     category_id = cat_map.get("target_id")
             else:
-                # Auto-match by name
-                existing = await db.exec(
-                    select(Category).where(
-                        Category.name == cat_name,
-                        Category.user_id == user_id,
-                    )
-                )
-                cat = existing.first()
-                if cat:
-                    category_id = cat.id
-                else:
-                    new_cat = Category(
-                        name=cat_name,
-                        type=rec_type,
-                        icon="mdi-circle",
-                        user_id=user_id,
-                    )
-                    db.add(new_cat)
-                    await db.flush()
-                    category_id = new_cat.id
+                # Auto-match by name（匹配不上即按 name 新建，type 不参与匹配）
+                category_id = await _resolve_or_create_category(db, user_id, cat_name)
 
         if not category_id:
             continue

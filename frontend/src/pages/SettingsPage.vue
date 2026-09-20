@@ -47,9 +47,7 @@
           </v-avatar>
         </template>
         <v-list-item-title class="text-body-1 font-weight-medium">分类管理</v-list-item-title>
-        <v-list-item-subtitle class="text-caption">
-          支出 {{ expenseCategories.length }} / 收入 {{ incomeCategories.length }}
-        </v-list-item-subtitle>
+        <v-list-item-subtitle class="text-caption">{{ categories.length }} 个分类</v-list-item-subtitle>
         <template v-slot:append>
           <v-icon size="20" color="grey">mdi-chevron-right</v-icon>
         </template>
@@ -282,10 +280,8 @@ const categoriesStore = useCategoriesStore()
 const appStore = useAppStore()
 
 // 分类/标签数量直读共享 store（二级页操作后返回即响应式更新）
+// v1.4.3 M8：分类收支共用，原按 type 过滤的 expenseCategories / incomeCategories 已删除
 const { categories, tags } = storeToRefs(categoriesStore)
-
-const expenseCategories = computed(() => categories.value.filter((c) => c.type === 'expense'))
-const incomeCategories = computed(() => categories.value.filter((c) => c.type === 'income'))
 
 // 快速记账摘要数量（管理操作已下沉至 /settings/quick-templates）
 const quickTemplateCount = ref(0)

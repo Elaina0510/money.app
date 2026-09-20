@@ -422,16 +422,26 @@ async def get_quick_templates(
 async def add_quick_template(
     db: AsyncSession, tag_id: int, amount: float, current_user: User | None = None
 ) -> QuickTemplate | None:
-    """Manually add a quick template."""
+    """Manually add a quick template.
+
+    v1.4.3 M8（D9）：``type`` 不再取 category.type（分类收支语义已废弃），
+    改取**该标签最近一笔流水的交易 type**，无流水兜底 ``'expense'``；
+    ``quick_templates.type`` 列语义不变（仍是交易语义）。
+    """
     tag = await db.get(Tag, tag_id)
     if not tag:
         return None
-    # Derive type from tag's category
-    template_type = "expense"
-    if tag.category_id:
-        category = await db.get(Category, tag.category_id)
-        if category:
-            template_type = category.type
+    latest_type_stmt = (
+        select(Record.type)
+        .where(Record.tag_id == tag_id)
+        .order_by(col(Record.consume_time).desc())
+        .limit(1)
+    )
+    if current_user:
+        latest_type_stmt = latest_type_stmt.where(Record.user_id == current_user.id)
+    else:
+        latest_type_stmt = latest_type_stmt.where(col(Record.user_id).is_(None))
+    template_type: str = (await db.exec(latest_type_stmt)).first() or "expense"
     qt = QuickTemplate(
         user_id=current_user.id if current_user else None,
         tag_id=tag_id,

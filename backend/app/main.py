@@ -11,7 +11,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import CORS_ORIGINS, UPLOAD_DIR
 from app.database import create_all_tables, engine
-from app.models.category import Category
+from app.models.category import LEGACY_CATEGORY_TYPE, Category
 from app.models.operation_history import OperationHistory  # noqa: F401
 from app.routers import (
     attachments,
@@ -41,49 +41,35 @@ FRONTEND_DIST = Path(os.getenv("FRONTEND_DIST", str(_default_frontend)))
 ensure_upload_dir()
 
 # Preset categories data
+# v1.4.3 M8（D11）：收支双套 15 条合并为**单套 14 条**——「其他支出/其他收入」
+# 合并为「其他」（固定 mdi-cash-minus、恒末位）；type 列恒写占位值（D2 列保留语义废弃）。
 PRESET_CATEGORIES = [
-    # Expense categories
-    {"name": "餐饮", "type": "expense", "icon": "mdi-food", "sort_order": 1, "is_preset": 1},
-    {"name": "出行", "type": "expense", "icon": "mdi-bus", "sort_order": 2, "is_preset": 1},
-    {"name": "购物", "type": "expense", "icon": "mdi-cart", "sort_order": 3, "is_preset": 1},
-    {"name": "娱乐", "type": "expense", "icon": "mdi-gamepad", "sort_order": 4, "is_preset": 1},
-    {
-        "name": "医疗",
-        "type": "expense",
-        "icon": "mdi-hospital-box",
-        "sort_order": 5,
-        "is_preset": 1,
-    },
-    {"name": "居住", "type": "expense", "icon": "mdi-home", "sort_order": 6, "is_preset": 1},
-    {"name": "通讯", "type": "expense", "icon": "mdi-cellphone", "sort_order": 7, "is_preset": 1},
-    {"name": "工作", "type": "expense", "icon": "mdi-briefcase", "sort_order": 8, "is_preset": 1},
-    {"name": "旅行", "type": "expense", "icon": "mdi-bag-suitcase",
-     "sort_order": 9, "is_preset": 1},
-    {"name": "账单与费用", "type": "expense", "icon": "mdi-receipt-text",
-     "sort_order": 10, "is_preset": 1},
-    {
-        "name": "其他支出",
-        "type": "expense",
-        "icon": "mdi-cash-minus",
-        "sort_order": 99,
-        "is_preset": 1,
-    },
-    # Income categories
-    {"name": "工资", "type": "income", "icon": "mdi-wallet", "sort_order": 1, "is_preset": 1},
-    {"name": "红包", "type": "income", "icon": "mdi-gift", "sort_order": 2, "is_preset": 1},
-    {"name": "理财", "type": "income", "icon": "mdi-finance", "sort_order": 3, "is_preset": 1},
-    {
-        "name": "其他收入",
-        "type": "income",
-        "icon": "mdi-cash-plus",
-        "sort_order": 99,
-        "is_preset": 1,
-    },
+    {"name": name, "type": LEGACY_CATEGORY_TYPE, "icon": icon,
+     "sort_order": sort_order, "is_preset": 1}
+    for name, icon, sort_order in (
+        ("餐饮", "mdi-food", 1),
+        ("出行", "mdi-bus", 2),
+        ("购物", "mdi-cart", 3),
+        ("娱乐", "mdi-gamepad", 4),
+        ("医疗", "mdi-hospital-box", 5),
+        ("居住", "mdi-home", 6),
+        ("通讯", "mdi-cellphone", 7),
+        ("工作", "mdi-briefcase", 8),
+        ("旅行", "mdi-bag-suitcase", 9),
+        ("账单与费用", "mdi-receipt-text", 10),
+        ("工资", "mdi-wallet", 11),
+        ("红包", "mdi-gift", 12),
+        ("理财", "mdi-finance", 13),
+        ("其他", "mdi-cash-minus", 14),
+    )
 ]
 
 
 async def init_preset_data() -> None:
-    """Insert preset categories if they don't exist."""
+    """Insert preset categories if they don't exist.
+
+    v1.4.3 M8（任务 3.3）：预设幂等判定**仅按 name**——分类不再区分收支。
+    """
     from sqlmodel import select
     from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -91,7 +77,6 @@ async def init_preset_data() -> None:
         for cat_data in PRESET_CATEGORIES:
             stmt = select(Category).where(
                 Category.name == cat_data["name"],
-                Category.type == cat_data["type"],
             )
             result = await session.exec(stmt)
             existing = result.first()

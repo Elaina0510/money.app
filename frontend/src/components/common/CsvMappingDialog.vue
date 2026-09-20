@@ -96,7 +96,8 @@ const formatLabel = computed(() => {
 const categoryOptions = computed(() => {
   const options = [{ label: '— 跳过 —', value: null }]
   for (const cat of (props.categories || [])) {
-    options.push({ label: `${cat.name} (${cat.type === 'expense' ? '支出' : '收入'})`, value: cat.id })
+    // v1.4.3 M8：分类收支共用，label 去掉「(支出/收入)」后缀
+    options.push({ label: cat.name, value: cat.id })
   }
   options.push({ label: '+ 新建分类', value: 'create' })
   return options
@@ -132,7 +133,8 @@ function setCategoryMapping(catName, value) {
   if (value === null) {
     delete categoryMapping.value[catName]
   } else if (value === 'create') {
-    categoryMapping.value[catName] = { action: 'create', type: 'expense' }
+    // M8：新建分类不再携带 type（服务端写占位值）
+    categoryMapping.value[catName] = { action: 'create' }
   } else {
     categoryMapping.value[catName] = { action: 'map', target_id: value }
   }

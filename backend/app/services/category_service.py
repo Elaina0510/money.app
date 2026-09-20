@@ -6,42 +6,41 @@ from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.budget import Budget
-from app.models.category import Category
+from app.models.category import LEGACY_CATEGORY_TYPE, Category
 from app.models.record import Record
 from app.models.user import User
 from app.schemas.category import CategoryCreate, CategoryUpdate
 
-# 「其他」分类判定唯一真源（M2 create/update 与 M3 reorder 共用，禁止散落字面量）
-# 判据 = 类型对应且同名（决策 D3）：预设行与其 Copy-on-Write 用户副本同名，一并命中
-OTHER_CATEGORY_NAMES: dict[str, str] = {"expense": "其他支出", "income": "其他收入"}
+# 「其他」分类判定唯一真源（create/update 与 reorder 共用，禁止散落字面量）
+# v1.4.3 M8（D11）：判据从「类型对应且同名」改「同名即其他类」——
+# 预设行与其 Copy-on-Write 用户副本同名，一并命中
+OTHER_CATEGORY_NAME = "其他"
 
 
 def _is_other_category(cat: Category) -> bool:
-    """「其他」= 类型对应且同名（预设行与其 Copy-on-Write 用户副本同名，一并命中）。"""
-    return cat.name == OTHER_CATEGORY_NAMES.get(cat.type)
+    """「其他」= 仅按名称判定（预设行与其 CoW 用户副本一并命中）。"""
+    return cat.name == OTHER_CATEGORY_NAME
 
 
-def _is_other_row(type_: str, name: str) -> bool:
-    """按类型 + 名称判定是否「其他」分类行（尚未落库的行同样适用）。"""
-    return name == OTHER_CATEGORY_NAMES.get(type_)
+def _is_other_row(name: str) -> bool:
+    """按名称判定是否「其他」分类行（尚未落库的行同样适用）。"""
+    return name == OTHER_CATEGORY_NAME
 
 
 async def _visible_categories(
-    db: AsyncSession, type_filter: str | None = None, current_user: User | None = None
+    db: AsyncSession, current_user: User | None = None
 ) -> list[Category]:
-    """该用户（可选类型）可见的分类集合，按 (sort_order, id) 升序。
+    """该用户可见的分类集合（单列表，不分收支），按 (sort_order, id) 升序。
 
     与 get_categories 同一查询逻辑，供 create 的排序计算与 reorder 复用：
-    presets + own custom ones；已有用户副本（同 name+type）的预设被排除，
-    即副本生效、预设隐藏，不会重复计入。
+    presets + own custom ones；已有用户副本（**同名**，v1.4.3 M8 起仅按 name 匹配，
+    无论列上残留 type 值）的预设被排除，即副本生效、预设隐藏，不会重复计入。
     """
     query = select(Category).order_by(Category.sort_order, Category.id)
-    if type_filter:
-        query = query.where(Category.type == type_filter)
     if current_user:
-        # Subquery: (name, type) pairs of user's custom categories
+        # Subquery: names of user's custom categories
         user_custom = (
-            select(Category.name, Category.type)
+            select(Category.name)
             .where(
                 Category.user_id == current_user.id,
                 Category.is_preset == 0,
@@ -51,10 +50,7 @@ async def _visible_categories(
         # Include: user's own categories + presets NOT overridden by user
         not_overridden = (
             select(user_custom.c.name)
-            .where(
-                user_custom.c.name == Category.name,
-                user_custom.c.type == Category.type,
-            )
+            .where(user_custom.c.name == Category.name)
             .exists()
         )
         query = query.where(
@@ -72,24 +68,23 @@ async def get_categories(
 ) -> list[Category]:
     """Get all categories visible to the user: presets + own custom ones.
 
-    Presets that have a user-specific copy (same name+type) are excluded
-    to avoid duplicates — the user copy takes precedence.
+    v1.4.3 M8：`type_filter` 保留签名但**一律忽略**（不报错、不过滤，响应恒为全量单列表）；
+    预设行若已被用户同名副本遮蔽则不再重复计入。
     """
-    return await _visible_categories(db, type_filter, current_user)
+    del type_filter  # 收支语义自 v1.4.3 起废弃（D2）：参数仅保持接口签名兼容
+    return await _visible_categories(db, current_user)
 
 
-async def _next_sort_order(
-    db: AsyncSession, type_: str, current_user: User | None = None
-) -> int:
-    """新增分类的服务端排序：追加到该类型分组末尾、「其他」之前。
+async def _next_sort_order(db: AsyncSession, current_user: User | None = None) -> int:
+    """新增分类的服务端排序：追加到全列表末尾、「其他」之前。
 
-    规则（设计 §2.2.2）：
+    规则（设计 §8.2.3，v1.4.2 钳制算法作用域由组内改全列表）：
     1. base = 可见集合中非「其他」行的最大 sort_order（空集合按 0）；
-    2. 组内存在「其他」时结果钳制为严格小于其 sort——「其他」恒置尾是硬约束，
-       「其他」本身不在末尾的异常数据同样自愈；
-    3. 组内无「其他」时直接 max+1 追加末尾。
+    2. 全列表存在「其他」时结果钳制为严格小于其 sort——「其他」恒置尾是硬约束，
+       「其他」本身不在末位的异常数据同样自愈；
+    3. 全列表无「其他」时直接 max+1 追加末位。
     """
-    visible = await _visible_categories(db, type_, current_user)
+    visible = await _visible_categories(db, current_user)
     base = max((c.sort_order for c in visible if not _is_other_category(c)), default=0)
     other = next((c for c in visible if _is_other_category(c)), None)
     if other is None:
@@ -103,12 +98,12 @@ async def create_category(
     """Create a new custom category.
 
     sort_order 未提供（None）时由服务端计算追加位置；显式传入则原样写入（向后兼容）。
+    v1.4.3 M8：查重按 name + user_id（跨原收支语义同名亦拒），type 列写占位值。
     """
-    # Check for duplicate name+type for this user
+    # Check for duplicate name for this user
     user_id = current_user.id if current_user else None
     dup_stmt = select(Category).where(
         Category.name == data.name,
-        Category.type == data.type,
         Category.user_id == user_id,
     )
     dup_result = await db.exec(dup_stmt)
@@ -117,11 +112,11 @@ async def create_category(
 
     sort_order = data.sort_order
     if sort_order is None:
-        sort_order = await _next_sort_order(db, data.type, current_user)
+        sort_order = await _next_sort_order(db, current_user)
 
     category = Category(
         name=data.name,
-        type=data.type,
+        type=LEGACY_CATEGORY_TYPE,
         icon=data.icon,
         sort_order=sort_order,
         is_preset=0,
@@ -145,17 +140,17 @@ async def update_category(
     the global preset, creates (or updates) a user-specific copy.
 
     v1.4.2 起：「其他」分类名称不可修改；单个分类 PUT 一律忽略 sort_order
-    （排序只经 M3 的批量重排接口变更）。
+    （排序只经批量重排接口变更）。v1.4.3 M8 起「其他」判据仅按 name。
     """
     category = await db.get(Category, category_id)
     if not category:
         return None
 
-    # 禁改「其他」名（决策 D3）：校验置于 CoW 与普通更新两条路径之前
-    if _is_other_row(category.type, category.name):
+    # 禁改「其他」名（决策 D11）：校验置于 CoW 与普通更新两条路径之前
+    if _is_other_row(category.name):
         new_name = data.name
-        if new_name and not _is_other_row(category.type, new_name):
-            raise ValueError("「其他」分类名称不可修改")
+        if new_name and not _is_other_row(new_name):
+            raise ValueError('"其他"分类名称不可修改')
 
     user_id = current_user.id if current_user else None
     update_data = data.model_dump(exclude_unset=True)
@@ -164,10 +159,9 @@ async def update_category(
 
     # Copy-on-Write: modifying a preset → create/update user copy
     if category.is_preset == 1 and user_id is not None:
-        # Check if user already has a custom copy with same name+type
+        # Check if user already has a custom copy with the same name
         dup_stmt = select(Category).where(
             Category.name == category.name,
-            Category.type == category.type,
             Category.user_id == user_id,
             Category.is_preset == 0,
         )
@@ -214,7 +208,7 @@ async def _set_sort_order(
     """把新排序写入用户可见行：预设行走 Copy-on-Write，全局预设行永不被写脏。
 
     - 用户自有行（is_preset=0）：直接更新；
-    - 预设有用户副本：更新副本；
+    - 预设已有用户副本（同名）：更新副本；
     - 预设无副本：按预设字段建副本（is_preset=0、新 sort_order）后写位。
     """
     if row.is_preset == 0 or user_id is None:
@@ -228,7 +222,6 @@ async def _set_sort_order(
 
     dup_stmt = select(Category).where(
         Category.name == row.name,
-        Category.type == row.type,
         Category.user_id == user_id,
         Category.is_preset == 0,
     )
@@ -249,26 +242,25 @@ async def _set_sort_order(
 
 async def reorder_categories(
     db: AsyncSession,
-    type_: str,
     ids: list[int],
     current_user: User | None = None,
 ) -> list[Category]:
-    """批量重排某类型分组的分类排序（M3）：单次原子提交、归一化为 1..n 连续。
+    """批量重排全量分类排序：单次原子提交、归一化为 1..n 连续。
 
-    规则（设计 §3.2.2）：
-    1. ``ids`` 必须是该用户该类型可见集合的全量有序 id（防漏位）；
+    规则（设计 §8.2.2，v1.4.2 算法作用域从「按类型分组」改「全列表」）：
+    1. ``ids`` 必须是该用户可见集合的全量有序 id（防漏位）；
     2. 「其他」无论提交落点，强制归一化到末位 n（其余行保持相对次序）；
     3. 预设行的改序落到用户副本上，全局预设行 sort_order 永不写脏。
 
     Raises:
         ValueError: 提交与当前可见分类不一致（缺项/多项/重复/本用户无「其他」行）。
     """
-    visible = await _visible_categories(db, type_, current_user)
+    visible = await _visible_categories(db, current_user)
     visible_ids = {c.id for c in visible}
     if len(set(ids)) != len(ids) or set(ids) != visible_ids:
         raise ValueError("排序列表与当前分类不一致")
     if not any(_is_other_category(c) for c in visible):
-        raise ValueError("排序列表与当前分类不一致：缺少「其他」分类")
+        raise ValueError(f"排序列表与当前分类不一致：缺少「{OTHER_CATEGORY_NAME}」分类")
 
     by_id = {c.id: c for c in visible}
     submitted = [by_id[cid] for cid in ids]
@@ -280,7 +272,7 @@ async def reorder_categories(
         await _set_sort_order(db, row, position, user_id)
     await db.commit()
 
-    return await _visible_categories(db, type_, current_user)
+    return await _visible_categories(db, current_user)
 
 
 async def delete_category(
@@ -338,6 +330,8 @@ async def restore_default_categories(
     - Associated records保留, category_id set to NULL
     - Associated budgets deleted
     - Reset preset categories' sort_order to defaults
+
+    v1.4.3 M8：预设复位改按新预设集 **name** 匹配（原按 (name,type)）。
     """
     from app.main import PRESET_CATEGORIES
 
@@ -377,11 +371,10 @@ async def restore_default_categories(
         await db.delete(cat)
         deleted_count += 1
 
-    # Step 2: Reset preset categories' sort_order
+    # Step 2: Reset preset categories' sort_order (仅按 name 定位)
     for preset in PRESET_CATEGORIES:
         stmt = select(Category).where(
             Category.name == preset["name"],
-            Category.type == preset["type"],
             Category.is_preset == 1,
         )
         result = await db.exec(stmt)

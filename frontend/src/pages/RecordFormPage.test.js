@@ -49,6 +49,8 @@ vi.mock('@/stores/useAppStore', () => ({
 import RecordFormPage from './RecordFormPage.vue'
 import recordFormSource from './RecordFormPage.vue?raw'
 import { searchTags } from '@/api/tags'
+// v1.4.3 M8 §10.4：统一分类列表（收支共用）供记账页九宫格断言
+import { getCategories } from '@/api/categories'
 
 describe('RecordFormPage - Leave Guard', () => {
   beforeEach(() => {
@@ -202,5 +204,78 @@ describe('RecordFormPage - 标签搜索全量回归', () => {
     // 渲染源即接口返回的数组：items 直绑 tagSearchResults，无本地 slice
     expect(recordFormSource).toMatch(/:items="tagSearchResults"/)
     expect(recordFormSource).not.toMatch(/tagSearchResults\.value\.slice\(/)
+  })
+})
+
+// ── v1.4.3 M8 分类收支共用：记账页九宫格取全量单列表（任务 §10.4）────────────
+describe('RecordFormPage - M8 分类收支共用统一列表', () => {
+  // 统一后的可见集合：type 列按 D2 保留迁移前原值，前端一律不得读取
+  const UNIFIED_CATEGORIES = [
+    { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food' },
+    { id: 2, name: '出行', type: 'expense', icon: 'mdi-bus' },
+    { id: 9, name: '工资', type: 'income', icon: 'mdi-cash' },
+    { id: 10, name: '红包', type: 'income', icon: 'mdi-cash-plus' },
+    { id: 8, name: '其他', type: 'expense', icon: 'mdi-cash-minus' },
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getCategories.mockResolvedValue(UNIFIED_CATEGORIES.map((c) => ({ ...c })))
+  })
+
+  it('用例10.4a: 收入/支出切换后九宫格数量恒为全量 5，选中项不被重置', async () => {
+    const wrapper = mount(RecordFormPage)
+    await flushPromises()
+
+    // 全量单列表：原收入预设 工资/红包 一并渲染
+    expect(wrapper.vm.currentCategories).toHaveLength(5)
+    expect(wrapper.findAll('.category-chip')).toHaveLength(5)
+
+    // 选中一个「原收入分类」（工资），在支出模式下即可选
+    wrapper.vm.recordType = 'expense'
+    wrapper.vm.categoryId = 9
+    await nextTick()
+    expect(wrapper.findAll('.category-chip')[2].classes()).toContain('active-category')
+
+    // 切到收入 → 数量与选中均不变
+    wrapper.vm.recordType = 'income'
+    await nextTick()
+    expect(wrapper.vm.currentCategories).toHaveLength(5)
+    expect(wrapper.findAll('.category-chip')).toHaveLength(5)
+    expect(wrapper.vm.categoryId).toBe(9)
+
+    // 切回支出 → 同理（原「选中项出组重置」逻辑已随 M8 删除）
+    wrapper.vm.recordType = 'expense'
+    await nextTick()
+    expect(wrapper.vm.currentCategories.map((c) => c.id)).toEqual([1, 2, 9, 10, 8])
+    expect(wrapper.vm.categoryId).toBe(9)
+  })
+
+  it('用例10.4b: 默认选中取全列表首个非「其他」项', async () => {
+    const wrapper = mount(RecordFormPage)
+    await flushPromises()
+
+    expect(wrapper.vm.categoryId).toBe(1)
+
+    // 极端态：全列表仅「其他」→ 兜底仍可选中，不置空
+    getCategories.mockResolvedValueOnce([
+      { id: 8, name: '其他', type: 'expense', icon: 'mdi-cash-minus' },
+    ])
+    const onlyOther = mount(RecordFormPage)
+    await flushPromises()
+    expect(onlyOther.vm.categoryId).toBe(8)
+  })
+
+  it('用例10.4c: 源码红线——分类不再按 cat.type 过滤，着色仍随交易 type', () => {
+    // 分类侧零 type 依赖
+    expect(recordFormSource).not.toMatch(/cats?\.filter\(\(c\)\s*=>\s*c\.type/)
+    expect(recordFormSource).not.toMatch(/cat\.type/)
+    expect(recordFormSource).toMatch(/const currentCategories = computed\(\(\) => categories\.value\)/)
+    // 交易侧语义不变：九宫格/模板色由 recordType（或 tpl.type）驱动
+    expect(recordFormSource).toMatch(
+      /categoryId === cat\.id \? \(recordType === 'expense' \? '#FF6B6B' : '#20C997'\)/
+    )
+    // 「其他」不再作为默认选中项（唯一真源常量本地登记）
+    expect(recordFormSource).toMatch(/const OTHER_CATEGORY_NAME = '其他'/)
   })
 })

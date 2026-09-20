@@ -230,7 +230,7 @@ class TestCsvImportConfirm:
         assert resp.json()["data"]["imported_count"] == 1
 
     async def test_import_creates_new_category(self, auth_client: AsyncClient):
-        """Should create new category when action='create'."""
+        """v1.4.3 M8：action='create' 不再携带 type，新建分类落统一列表 + 占位 type。"""
         csv_content = (
             "amount,type,category_name,tag_name,consume_time,note\n"
             "50.0,expense,新分类,,2024-01-15 12:00,测试"
@@ -242,11 +242,51 @@ class TestCsvImportConfirm:
         resp = await auth_client.post("/api/import/csv", json={
             "cache_id": cache_id,
             "format": "native",
-            "category_mapping": {"新分类": {"action": "create", "type": "expense"}},
+            "category_mapping": {"新分类": {"action": "create"}},
             "tag_mapping": {},
         })
         assert resp.status_code == 200
         assert resp.json()["data"]["imported_count"] == 1
+
+        cats = (await auth_client.get("/api/categories")).json()["data"]
+        created = [c for c in cats if c["name"] == "新分类"]
+        assert len(created) == 1
+        assert created[0]["type"] == "expense"  # 占位值（D2），收支语义已废弃
+        # 导入的分类收支共用：同一分类可挂收入交易
+        rec = await auth_client.post("/api/records", json={
+            "amount": 10.0,
+            "type": "income",
+            "category_id": created[0]["id"],
+            "consume_time": "2024-02-01 12:00",
+        })
+        assert rec.status_code == 200
+
+    async def test_import_create_mapping_ignores_legacy_type_field(
+        self, auth_client: AsyncClient
+    ):
+        """M8 兼容：旧前端仍发 `type: income` → 忽略；同名重复导入不产生第二行。"""
+        csv_content = (
+            "amount,type,category_name,tag_name,consume_time,note\n"
+            "50.0,income,工资外快,,2024-01-15 12:00,测试\n"
+            "60.0,expense,工资外快,,2024-01-16 12:00,测试"
+        )
+        files = {"file": ("test.csv", csv_content.encode("utf-8"), "text/csv")}
+        resp = await auth_client.post("/api/import/csv/preview", files=files)
+        cache_id = resp.json()["data"]["cache_id"]
+
+        resp = await auth_client.post("/api/import/csv", json={
+            "cache_id": cache_id,
+            "format": "native",
+            "category_mapping": {"工资外快": {"action": "create", "type": "income"}},
+            "tag_mapping": {},
+        })
+        assert resp.status_code == 200
+        assert resp.json()["data"]["imported_count"] == 2
+
+        cats = (await auth_client.get("/api/categories")).json()["data"]
+        rows = [c for c in cats if c["name"] == "工资外快"]
+        assert len(rows) == 1, "同名两行（原收入/支出语义）在统一列表下必须合流"
+        assert rows[0]["type"] == "expense"
 
     async def test_import_skips_unmapped_rows(self, auth_client: AsyncClient):
         """Should skip rows without category mapping."""

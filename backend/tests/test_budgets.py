@@ -427,19 +427,35 @@ async def test_year_summary_without_any_budget(client):
 
 @pytest.fixture
 async def expense_category_id(client):
-    """Create an expense category and return its ID."""
+    """Create a category (legacy type column = 'expense') and return its ID.
+
+    v1.4.3 M8：POST /api/categories 不再收 `type`（D2 新行写占位 'expense'）。
+    """
     resp = await client.post(
         "/api/categories",
-        json={"name": "餐饮预算", "type": "expense", "icon": "mdi-food", "sort_order": 1},
+        json={"name": "餐饮预算", "icon": "mdi-food", "sort_order": 1},
     )
     return resp.json()["data"]["id"]
 
 
 @pytest.fixture
-async def income_category_id(client):
-    """Create an income category and return its ID."""
+async def income_category_id(client, db_session):
+    """Create a category carrying a legacy 'income' type value and return its ID.
+
+    v1.4.3 M8：分类收支共用后 `type` 列仅存原值供排查、接口不再写入；本用例覆盖的是
+    budget_service 依 `Category.type` 过滤预算的**旧口径**（随 M12 预算模型重写整体消失），
+    故直改该列，造出「迁移后仍带原 income 值」的存量行，不改服务层行为。
+    """
+    from app.models.category import Category
+
     resp = await client.post(
         "/api/categories",
-        json={"name": "工资预算", "type": "income", "icon": "mdi-wallet", "sort_order": 1},
+        json={"name": "工资预算", "icon": "mdi-wallet", "sort_order": 1},
     )
-    return resp.json()["data"]["id"]
+    category_id = resp.json()["data"]["id"]
+    row = await db_session.get(Category, category_id)
+    assert row is not None
+    row.type = "income"
+    db_session.add(row)
+    await db_session.commit()
+    return category_id

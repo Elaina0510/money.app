@@ -1,21 +1,16 @@
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { getCategories, createCategory, updateCategory, reorderCategories as reorderCategoriesApi, deleteCategory, restoreDefaultCategories } from '@/api/categories'
 import { getTags, createTag, deleteTag } from '@/api/tags'
 import { useAppStore } from './useAppStore'
 
 export const useCategoriesStore = defineStore('categories', () => {
+  // v1.4.3 M8：分类收支共用，`categories` 即服务端返回的**全量单列表**；
+  // 原 expenseCategories / incomeCategories 两个按 type 过滤的 computed 已删除
+  // （全库消费方随 M8 一并去 type 依赖，StatisticsPage 的预算候选属 M12 重写域）。
   const categories = ref([])
   const tags = ref([])
   const loaded = ref(false)
-
-  const expenseCategories = computed(() =>
-    categories.value.filter((c) => c.type === 'expense')
-  )
-
-  const incomeCategories = computed(() =>
-    categories.value.filter((c) => c.type === 'income')
-  )
 
   async function fetchCategories() {
     try {
@@ -65,10 +60,11 @@ export const useCategoriesStore = defineStore('categories', () => {
     }
   }
 
-  async function reorderCategories(type, ids) {
+  // v1.4.3 M8：签名由 `(type, ids)` 收敛为 `(ids)`——一次提交全量可见集合的有序 id
+  async function reorderCategories(ids) {
     const app = useAppStore()
     try {
-      const result = await reorderCategoriesApi({ type, ids })
+      const result = await reorderCategoriesApi({ ids })
       // 唯一对齐手段：整体重拉（预设行 CoW 后 id 会变，不原地替换）；不弹附加成功 toast
       await fetchCategories()
       return result
@@ -125,8 +121,6 @@ export const useCategoriesStore = defineStore('categories', () => {
     categories,
     tags,
     loaded,
-    expenseCategories,
-    incomeCategories,
     fetchCategories,
     fetchTags,
     addCategory,
