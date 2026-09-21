@@ -65,7 +65,25 @@
     <!-- Category Grid Selector -->
     <v-card class="pa-4 mb-4" rounded="xl">
       <div class="text-subtitle-2 font-weight-bold mb-3">选择分类</div>
-      <v-row dense>
+
+      <!-- v1.4.3-boot M2 三态（需求 2.2/2.3）：加载 → 错误（可重试）→ 空（引导）→ 正常九宫格；
+           错误态分支必须在空态之前，两者永不同时出现 -->
+      <div v-if="categoriesLoading" class="category-state pa-6 text-center">
+        <v-progress-circular indeterminate color="primary" size="28" />
+      </div>
+
+      <div v-else-if="categoriesError" class="category-state pa-6 text-center">
+        <v-icon size="40" color="error" class="mb-2">mdi-alert-circle-outline</v-icon>
+        <div class="text-body-2 mb-3">分类加载失败，请检查网络后重试</div>
+        <v-btn variant="tonal" color="primary" size="small" @click="retryLoadCategories">重试</v-btn>
+      </div>
+
+      <div v-else-if="categories.length === 0" class="category-state pa-6 text-center">
+        <v-icon size="40" color="grey" class="mb-2">mdi-shape-outline</v-icon>
+        <div class="text-body-2 text-grey">暂无分类，请先到 设置 → 分类管理 添加分类</div>
+      </div>
+
+      <v-row v-else dense>
         <v-col v-for="cat in currentCategories" :key="cat.id" cols="3" class="text-center">
           <v-btn
             :color="categoryId === cat.id ? (recordType === 'expense' ? '#FF6B6B' : '#20C997') : ''"
@@ -210,7 +228,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter, useRoute, onBeforeRouteLeave } from 'vue-router'
 import { createRecord, updateRecord, getRecord, getQuickTemplates } from '@/api/records'
 import { getCategories } from '@/api/categories'
@@ -244,6 +262,9 @@ const submitting = ref(false)
 const categories = ref([])
 const templates = ref([])
 const recordId = ref(null)
+// v1.4.3-boot M2：分类加载独立状态（loading 初值 true——首帧不闪空态；error 驱动重试入口）
+const categoriesLoading = ref(true)
+const categoriesError = ref(false)
 
 // Tag search state
 const tagSearchQuery = ref('')
@@ -445,44 +466,90 @@ watch(
   { deep: true }
 )
 
-onMounted(async () => {
+// ── v1.4.3-boot M2 加载解耦（需求 2.2 / 设计 §2.2.1）─────────────────────────
+// 三个加载器各自吞异常，任何一路失败都不再牵连其他两路（旧 Promise.all 连坐已废）
+
+async function loadCategories() {
+  categoriesLoading.value = true
+  categoriesError.value = false
   try {
-    const [cats, tpls] = await Promise.all([getCategories(), getQuickTemplates()])
-    categories.value = cats
-    templates.value = tpls || []
-
-    // M8：默认分类取全列表首个非「其他」项（「其他」是末尾兜底位，不做默认选中）
-    const defaultCat = cats.find((c) => c.name !== OTHER_CATEGORY_NAME) || cats[0]
-    if (defaultCat) {
-      categoryId.value = defaultCat.id
-    }
-
-    if (isEdit.value) {
-      recordId.value = parseInt(route.params.id)
-      const record = await getRecord(recordId.value)
-      if (record) {
-        recordType.value = record.type
-        amount.value = String(record.amount)
-        categoryId.value = record.category_id
-        if (record.consume_time) {
-          consumeDate.value = record.consume_time.substring(0, 10)
-          consumeTime.value = record.consume_time.substring(11, 16)
-        }
-        if (record.tag) {
-          selectedTagId.value = record.tag.id
-          selectedTagName.value = record.tag.name
-          tagSearchQuery.value = record.tag.name
-          // Seed tagSearchResults so v-autocomplete displays the tag name immediately
-          tagSearchResults.value = [{ id: record.tag.id, name: record.tag.name }]
-        }
-        note.value = record.note || ''
+    const cats = await getCategories()
+    categories.value = cats || []
+    // M8：默认分类取全列表首个非「其他」项（「其他」是末尾兜底位，不做默认选中）。
+    // 守卫写在**默认选中时刻**（非 onMounted 末尾）：编辑回填可能先于分类到达，
+    // 此时 categoryId 已有值，不得被默认补选覆盖（两序皆收敛到正确终态）。
+    if (categoryId.value === null) {
+      const defaultCat =
+        categories.value.find((c) => c.name !== OTHER_CATEGORY_NAME) || categories.value[0]
+      if (defaultCat) {
+        categoryId.value = defaultCat.id
       }
     }
-    // Save initial snapshot for dirty tracking
-    initialSnapshot = takeSnapshot()
   } catch (e) {
-    console.error('Form load error:', e)
+    console.error('Categories load error:', e)
+    categories.value = []
+    categoriesError.value = true // 可见错误态 + 重试入口，不再静默留白（需求 2.2）
+  } finally {
+    categoriesLoading.value = false
   }
+}
+
+async function loadTemplates() {
+  try {
+    templates.value = (await getQuickTemplates()) || []
+  } catch (e) {
+    // 模板缺失非阻断信息：只清空（模板卡 v-if="templates.length" 自然隐藏），静默降级
+    console.error('Templates load error:', e)
+    templates.value = []
+  }
+}
+
+async function loadRecordForEdit() {
+  try {
+    recordId.value = parseInt(route.params.id)
+    const record = await getRecord(recordId.value)
+    if (!record) return
+    recordType.value = record.type
+    amount.value = String(record.amount)
+    categoryId.value = record.category_id
+    if (record.consume_time) {
+      consumeDate.value = record.consume_time.substring(0, 10)
+      consumeTime.value = record.consume_time.substring(11, 16)
+    }
+    if (record.tag) {
+      selectedTagId.value = record.tag.id
+      selectedTagName.value = record.tag.name
+      tagSearchQuery.value = record.tag.name
+      // Seed tagSearchResults so v-autocomplete displays the tag name immediately
+      tagSearchResults.value = [{ id: record.tag.id, name: record.tag.name }]
+    }
+    note.value = record.note || ''
+  } catch (e) {
+    // 失败只提示不空白：表单保持新建态可供用户自行补录，分类与快照均已不受影响
+    console.error('Record load error:', e)
+    appStore.showToast('账单加载失败', 'error')
+  }
+}
+
+// 错误态「重试」入口：成功即撤错误态，并把系统补选的默认分类并入基线——
+// isDirty 不因重试翻真（与「加载完成即定快照」的既有语义同源）
+async function retryLoadCategories() {
+  await loadCategories()
+  if (!categoriesError.value) {
+    initialSnapshot = takeSnapshot()
+    await nextTick() // 等 dirty watch 落定后按新基线回算
+    isDirty.value = takeSnapshot() !== initialSnapshot
+  }
+}
+
+onMounted(async () => {
+  // v1.4.3-boot M2：三 loader 互不牵连（需求 2.2「加载解耦」）——
+  // 旧实现单 try + Promise.all 让模板接口 500 连坐掉分类赋值，九宫格恒久空白且无任何提示。
+  const tasks = [loadCategories(), loadTemplates()]
+  if (isEdit.value) tasks.push(loadRecordForEdit())
+  await Promise.allSettled(tasks)
+  // 快照恒定落定：dirty 追踪不再被任一加载失败废掉（消解旧 :482 的第三处连坐）
+  initialSnapshot = takeSnapshot()
 })
 </script>
 
@@ -515,6 +582,16 @@ onMounted(async () => {
   font-weight: 700 !important;
   text-align: center;
   height: 60px;
+}
+
+/* v1.4.3-boot M2 分类卡三态（加载/错误/空）：纯居中排布，竖屏与宽屏一致；
+   文字不写死色值，随主题继承，明暗两模式均可读 */
+.category-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 132px;
 }
 
 .category-chip {
