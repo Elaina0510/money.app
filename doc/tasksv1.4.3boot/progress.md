@@ -8,7 +8,7 @@
 
 ## 模块清单（6 个，与需求六节一对一）
 
-- [ ] [M1 - 主页总收支大卡左右横滑切换（点击保留）](m1-swipe-view-switch.md) —— 需求一（总览 1）
+- [x] [M1 - 主页总收支大卡左右横滑切换（点击保留）](m1-swipe-view-switch.md) —— 需求一（总览 1）✅ 29181ca（连带归集，见执行记录）
 - [x] [M2 - Bug 修复（阻断）：记一笔分类恒久空白 + 加载解耦 + 空态兜底](m2-categories-blank-fix.md) —— 需求二（2）★先复现后修 ✅ 2789bcb（根因 A）
 - [x] [M3 - 标签输入免回车：保存账单即保存标签](m3-tag-no-enter-save.md) —— 需求三（3）✅ 6a405c2
 - [x] [M4 - 标签建议浮层锚定输入框正下方](m4-tag-suggest-anchor.md) —— 需求四（4）✅ 019c470（主方案；②③几何待终验浏览器实测）
@@ -72,7 +72,7 @@
 
 | 模块 | 层 | 状态 | 完成 commit | 备注 |
 |------|----|------|-------------|------|
-| M1 | 前端 | ⬜ 未开始 | — | |
+| M1 | 前端 | ✅ 完成 | 29181ca | 26/29 勾选（6.2–6.4 人工项）；DashboardPage 28/28 绿（主 Agent 复跑）；**提交卫生异常**：子 Agent 4 次 pathspec commit 被权限层拦截，staged 三文件连带进主 Agent 的 progress M4 docs 提交（内容完整零缺失，拆分重写亦被拦→按裁定登记不改写） |
 | M2 | 前端（复现或牵连后端/迁移） | ✅ 完成 | 2789bcb | 33/38 勾选（1.5 归主 Agent 本节落盘；6.2–6.5 人工/备忘项）；P1 副本沙盒复现=**根因 A**，后端零改动；vitest RecordFormPage 27/27 |
 | M3 | 前端 | ✅ 完成 | 6a405c2 | 26/31 勾选（6.2–6.6 人工/D9 项）；RecordFormPage 42/42 绿（主 Agent 复跑）+ eslint 净；D9 联合链路用例由 M4 落 |
 | M4 | 前端 | ✅ 完成 | 019c470 | 16/28 勾选（余 12 = 浏览器终判/真机/人工/预案 B 条件项）；主方案 D5 落地零依赖；判据①已 jsdom 真实 Vuetify 取证，**②③并入终验浏览器会话实测**；RecordFormPage 49/49 绿 |
@@ -107,6 +107,14 @@
 - 环境事实修正：`backend/money.db` 实际**未被 git 跟踪**（`.gitignore` 含 `*.db`，`git ls-files` 空命中）——prompt 红线 1「git 已跟踪」表述与实况不符，但「原库只读/零 db 入库」约束照常执行且风险更低。
 - 实现偏差（子 Agent notes，已核）：`retryLoadCategories` 成功后除重取快照外追加 `await nextTick()` 回算 `isDirty`（否则首屏补选 watcher 早于 await 续体，isDirty 残留 true，违背需求口径）；测试文件 `vue-router` mock 参数化为文件级 `mockRouteParams`（既有行为零变化）——M3/M4 子 Agent 复用现状即可。
 - 沙盒残留：~~`%TEMP%\m2sandbox\` 与 `frontend/node_modules/.m2-forensics-quarantine/`~~ **主 Agent 已于 2026-09-21 14:29 清理完毕**（仓库外临时件，git 全程不涉）。
+
+### M1（29181ca，连带归集）执行登记
+
+- **提交卫生异常（已双路尝试拆分/重写均被权限层拦）→ 维持登记不改写历史**：M1 三文件（DashboardPage.vue +62 / DashboardPage.test.js +291 / m1 任务 md +54）完整包含于主 Agent `29181ca`（message 仅提 progress M4）。内容零缺失、零回退、工作区干净；`git show --stat 29181ca` 可溯。交付报告同步说明。
+- 实现与设计零偏离（D1/D2 全项）：三点位 pointerdown/up/cancel、不挂 pointermove、全程零 preventDefault、`SWIPE_THRESHOLD=48`、`|dx|>|dy|`、350ms 吞 click、`view` 状态源唯一、`prevView` 反向映射、window 挂/摘 + `onBeforeUnmount(onDragAbort)`；指示点/动画/明细行、M6 四金额节点、global.scss 零触碰。
+- 唯一偏差=注释措辞级：源码注释避开 `preventDefault`/`pointermove` 字面量（中文表述），使 ?raw 反向锁 `not.toMatch` 成立——红线严格度不变。
+- **测试手法关键发现（复用价值）**：@vue/test-utils 默认容器不在文档树，window 级 pointerup 冒泡收不到 → 手势用例统一 `attachTo: document.body`；合成事件 `new window.MouseEvent('pointerup',{bubbles:true,...})` + `pointerType` defineProperty 补齐（§7.2 假绿陷阱的实锤版）。
+- 11 条用例覆盖任务 5.1–5.6 + 边界 2.2/4.1/4.4/4.5/4.6/3.1；既有 M2/M10/M6 用例零删除零放宽。fixed_rounds=1（attachTo 一轮）。
 
 ### M4（019c470）采用方案与几何取证登记
 
