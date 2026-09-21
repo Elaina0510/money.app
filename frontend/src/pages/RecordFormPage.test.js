@@ -42,22 +42,28 @@ vi.mock('@/api/tags', () => ({
 }))
 
 // Mock stores
+// v1.4.3-boot M3：toast 文案是用例断言对象，但原工厂每次返回**新** vi.fn() 实例（调用记录不可回收）——
+// 参数化为文件级 mockShowToast（沿 M2 把 vue-router mock 参数化为 mockRouteParams 的同一手法）；
+// 既有各用例从未断言 showToast，行为零变化
+const mockShowToast = vi.fn()
+
 vi.mock('@/stores/useAppStore', () => ({
   useAppStore: () => ({
-    showToast: vi.fn(),
+    showToast: (...args) => mockShowToast(...args),
   }),
 }))
 
 // Import component after mocks
 import RecordFormPage from './RecordFormPage.vue'
 import recordFormSource from './RecordFormPage.vue?raw'
-import { searchTags } from '@/api/tags'
+import { searchTags, createTag } from '@/api/tags'
 // v1.4.3 M8 §10.4：统一分类列表（收支共用）供记账页九宫格断言
 import { getCategories } from '@/api/categories'
 // v1.4.3 M4 §5.3：日期弹窗「关闭时才回写」→ 表单 consumeDate/dirty 断言
 import DatePickerPopover from '@/components/common/DatePickerPopover.vue'
 // v1.4.3-boot M2 §5：加载解耦用例需按用例改写模板/回填两路接口行为
-import { getQuickTemplates, getRecord } from '@/api/records'
+// v1.4.3-boot M3 §5：免回车保存用例需断言落库载荷与新建标签调用
+import { getQuickTemplates, getRecord, createRecord, updateRecord } from '@/api/records'
 
 describe('RecordFormPage - Leave Guard', () => {
   beforeEach(() => {
@@ -656,5 +662,361 @@ describe('RecordFormPage - M2 加载解耦与三态', () => {
     expect(recordFormSource).toMatch(/:loading="tagSearching"/)
     // 任务 4.7：401 走 request.js 全局登出链路，本页零特化（不得自行处理）
     expect(recordFormSource).not.toMatch(/401|auth:logout/)
+  })
+})
+
+// ── v1.4.3-boot M3 标签输入免回车：保存账单即保存标签（需求三，任务 §5 八组）────────
+// 痛点：输入新标签文字后不回车直接点保存，文字静默丢失（旧 submit 只读 selectedTagName）。
+// 改造：submit 前置「待确认文字」归一三段 ①防抖结果内精确同名 → ②非防抖 searchTags 兜底
+//      （**查询失败即中止保存**，D4）→ ③确无同名才 createTag。判定口径红线：真实 id 不采信文字。
+// 附录 B 口径处置：既有测试内**不存在**「仅回车/点选才可建标签」的固化用例（全文件 grep「回车」零命中），
+//      故无条件式改写可做；本组以 5.1（直接保存）/ 5.7a（点选）/ 5.7b（回车）把新口径
+//      「三路径（点选/回车/直接保存）皆可建标签」显式化，旧两条路径各留一条回归用例。
+describe('RecordFormPage - M3 标签输入免回车', () => {
+  const M3_CATEGORIES = [
+    { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food' },
+    { id: 2, name: '工资', type: 'income', icon: 'mdi-cash' },
+    { id: 3, name: '出行', type: 'expense', icon: 'mdi-bus' },
+  ]
+  const NEW_TAG_ID = 41 // createTag 桩返回的新标签 id（本组统一，便于断言载荷 tag_id）
+  const PAYLOAD_KEYS = ['amount', 'category_id', 'consume_time', 'note', 'tag_id', 'type']
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getCategories.mockResolvedValue(M3_CATEGORIES.map((c) => ({ ...c })))
+    getQuickTemplates.mockResolvedValue([])
+    getRecord.mockResolvedValue(null)
+    searchTags.mockResolvedValue([]) // 默认：兜底查询无任何同名命中
+    createTag.mockResolvedValue({ id: NEW_TAG_ID, name: '奶茶', category_id: 1 })
+    createRecord.mockResolvedValue({ id: 91 })
+    updateRecord.mockResolvedValue({})
+  })
+
+  afterEach(() => {
+    // 还原文件级默认，绝不泄漏到后续用例组（M4）——沿 M2 组收口手法
+    delete mockRouteParams.id
+    getCategories.mockResolvedValue([
+      { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food' },
+      { id: 2, name: '工资', type: 'income', icon: 'mdi-cash' },
+    ])
+    getQuickTemplates.mockResolvedValue([])
+    getRecord.mockResolvedValue(null)
+    searchTags.mockResolvedValue([])
+    createTag.mockResolvedValue({ id: 1 })
+  })
+
+  // 挂载并填成「可保存」态；query 传值即模拟「只在输入框打字、既不点选也不回车」
+  async function mountReady({ query, amount = '30', categoryId = 1 } = {}) {
+    const wrapper = mount(RecordFormPage)
+    await flushPromises()
+    wrapper.vm.amount = amount
+    wrapper.vm.categoryId = categoryId
+    if (query !== undefined) wrapper.vm.tagSearchQuery = query
+    await nextTick()
+    expect(wrapper.vm.canSubmit).toBe(true)
+    return wrapper
+  }
+
+  it('用例5.1: 输入新标签名不回车不点选 → 保存即建标签并关联，toast 含「已新建标签「奶茶」」', async () => {
+    searchTags.mockResolvedValue([{ id: 7, name: '咖啡' }]) // ②兜底可查但无精确同名
+    const wrapper = await mountReady({ query: '奶茶', categoryId: 3 })
+
+    await wrapper.vm.submit()
+
+    // 归一走完③：以输入文字 + 当前分类建标签
+    expect(createTag).toHaveBeenCalledTimes(1)
+    expect(createTag).toHaveBeenCalledWith({ name: '奶茶', category_id: 3 })
+    expect(createRecord).toHaveBeenCalledTimes(1)
+    const payload = createRecord.mock.calls[0][0]
+    expect(payload.tag_id).toBe(NEW_TAG_ID)
+    // 任务 1.7：data 载荷结构零变化（六键不多不少）
+    expect(Object.keys(payload).sort()).toEqual(PAYLOAD_KEYS)
+    // 需求 3.3：全程无二次确认，toast 合并新建标签提示
+    expect(mockShowToast).toHaveBeenCalledWith('记账成功，已新建标签「奶茶」')
+    expect(wrapper.vm.isDirty).toBe(false)
+    expect(mockPush).toHaveBeenCalledWith('/')
+    expect(wrapper.vm.submitting).toBe(false)
+  })
+
+  it('用例5.2: 防抖结果内已有精确同名 → 零 createTag、零兜底查询，直接关联既有 id', async () => {
+    const wrapper = await mountReady({ query: '奶茶' })
+    wrapper.vm.tagSearchResults = [{ id: 8, name: '奶茶' }, { id: 9, name: '咖啡' }]
+    await nextTick()
+
+    await wrapper.vm.submit()
+
+    expect(searchTags).not.toHaveBeenCalled() // ① 命中即短路，②不再发查询
+    expect(createTag).not.toHaveBeenCalled() // 需求 3.2：同名零创建
+    expect(createRecord).toHaveBeenCalledTimes(1)
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(8)
+    expect(mockShowToast).toHaveBeenCalledWith('记账成功') // 未新建 → 原文案不变
+  })
+
+  it('用例5.3: 防抖结果为空（未回）+ 非防抖兜底查到同名 → 不建标签（锁死归一②）', async () => {
+    searchTags.mockResolvedValue([{ id: 12, name: '奶茶', category_id: 2 }, { id: 9, name: '咖啡' }])
+    const wrapper = await mountReady({ query: '奶茶' })
+    expect(wrapper.vm.tagSearchResults).toEqual([]) // 模拟输入后 200ms 内即点保存
+
+    await wrapper.vm.submit()
+
+    expect(searchTags).toHaveBeenCalledTimes(1)
+    expect(searchTags).toHaveBeenCalledWith('奶茶')
+    expect(createTag).not.toHaveBeenCalled()
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(12)
+    expect(mockShowToast).toHaveBeenCalledWith('记账成功')
+  })
+
+  it('用例5.4（= 边界 4.2）: tagId 为真实 id 时不采信搜索框文字，残留/异变一律丢弃', async () => {
+    const wrapper = await mountReady()
+    wrapper.vm.tagSearchResults = [{ id: 5, name: '健身' }]
+    wrapper.vm.onTagSelected(5) // 点选既有标签（真实 id）
+    await nextTick()
+    expect(wrapper.vm.selectedTagId).toBe(5)
+
+    wrapper.vm.tagSearchQuery = '奶茶' // 选中后又乱敲（误触键盘）
+    await nextTick()
+    await wrapper.vm.submit()
+
+    // 红线 §2.1-5：不得扩大为「文字优先」——既不查询也不建标签，以已选中为准
+    expect(searchTags).not.toHaveBeenCalled()
+    expect(createTag).not.toHaveBeenCalled()
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(5)
+    expect(mockShowToast).toHaveBeenCalledWith('记账成功')
+  })
+
+  it('用例5.4b（任务 2.2）: ✕ 清除已选标签 → tagSearchQuery 同步清空，残留旧名不被自动确认', async () => {
+    const wrapper = await mountReady({ query: '奶茶' })
+    wrapper.vm.tagSearchResults = [{ id: 5, name: '奶茶' }]
+    wrapper.vm.onTagSelected(5)
+    wrapper.vm.tagSearchQuery = '奶茶' // clearable 对 search 重置无强保证：模拟残留
+    await nextTick()
+
+    wrapper.vm.onTagSelected(null) // ✕ 清除走 @update:model-value(null)
+    await nextTick()
+    expect(wrapper.vm.selectedTagId).toBeNull()
+    expect(wrapper.vm.selectedTagName).toBe('')
+    expect(wrapper.vm.tagSearchQuery).toBe('')
+
+    await wrapper.vm.submit()
+    expect(searchTags).not.toHaveBeenCalled()
+    expect(createTag).not.toHaveBeenCalled()
+    expect(createRecord.mock.calls[0][0].tag_id).toBeNull()
+    // 清除分支必须含归零语句（源码锁，防后续重构回退）
+    expect(recordFormSource).toMatch(
+      /function onTagSelected\(tagId\) \{\s*if \(!tagId\) \{[^}]*tagSearchQuery\.value = ''/
+    )
+  })
+
+  it('用例5.5: 编辑模式同口径 → updateRecord 载荷新 tag_id + toast「账单已更新，已新建标签」', async () => {
+    mockRouteParams.id = '42'
+    getRecord.mockResolvedValue({
+      type: 'expense',
+      amount: 12,
+      category_id: 2,
+      consume_time: '2026-05-06 12:30',
+      tag: null,
+      note: '编辑态样本',
+    })
+    searchTags.mockResolvedValue([{ id: 7, name: '咖啡' }])
+    const wrapper = mount(RecordFormPage)
+    await flushPromises()
+    expect(wrapper.vm.isEdit).toBe(true)
+    expect(wrapper.vm.categoryId).toBe(2)
+
+    wrapper.vm.tagSearchQuery = '打车' // 编辑页只输文字，不回车不点选
+    await nextTick()
+    await wrapper.vm.submit()
+
+    expect(createTag).toHaveBeenCalledWith({ name: '打车', category_id: 2 })
+    expect(updateRecord).toHaveBeenCalledTimes(1)
+    expect(updateRecord.mock.calls[0][0]).toBe(42)
+    const payload = updateRecord.mock.calls[0][1]
+    expect(payload.tag_id).toBe(NEW_TAG_ID)
+    expect(Object.keys(payload).sort()).toEqual(PAYLOAD_KEYS)
+    expect(createRecord).not.toHaveBeenCalled()
+    expect(mockShowToast).toHaveBeenCalledWith('账单已更新，已新建标签「打车」')
+    expect(wrapper.vm.isDirty).toBe(false)
+  })
+
+  it('用例5.6: 兜底查询失败 → 中止保存（建标签/落账单零调用）+ toast「标签校验失败」+ dirty 保持 + submitting 复位', async () => {
+    searchTags.mockRejectedValue(new Error('网络错误')) // 校验不可用
+    const wrapper = await mountReady({ query: '奶茶' })
+    expect(wrapper.vm.isDirty).toBe(true)
+
+    await wrapper.vm.submit()
+
+    expect(searchTags).toHaveBeenCalledWith('奶茶')
+    // D4 零调用断言：不得降级为「按无匹配创建」
+    expect(createTag).not.toHaveBeenCalled()
+    expect(createRecord).not.toHaveBeenCalled()
+    expect(updateRecord).not.toHaveBeenCalled()
+    expect(mockShowToast).toHaveBeenCalledWith('标签校验失败，请重试保存')
+    expect(wrapper.vm.isDirty).toBe(true) // 未保存成功 → 脏位保持（离开仍走确认）
+    expect(wrapper.vm.submitting).toBe(false) // finally 复位
+    expect(mockPush).not.toHaveBeenCalled() // 不跳转、停留本页
+    expect(wrapper.vm.selectedTagId).toBeNull() // 未回写，重试走同一段归一
+  })
+
+  it('用例5.7a: 点选旧路径零回退（搜索 → 点选既有标签 → 保存不建标签）', async () => {
+    searchTags.mockResolvedValue([{ id: 8, name: '奶茶', category_id: 1 }])
+    const wrapper = await mountReady()
+
+    wrapper.vm.onTagSearch('奶茶') // 真实防抖入口（200ms）
+    await new Promise((resolve) => setTimeout(resolve, 300))
+    await flushPromises()
+    expect(wrapper.vm.tagSearchResults).toHaveLength(1)
+    wrapper.vm.onTagSelected(8)
+    await nextTick()
+    expect(wrapper.vm.selectedTagId).toBe(8)
+    expect(wrapper.vm.selectedTagName).toBe('奶茶')
+
+    await wrapper.vm.submit()
+    expect(searchTags).toHaveBeenCalledTimes(1) // 只防抖那一次，无兜底查询
+    expect(createTag).not.toHaveBeenCalled()
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(8)
+    expect(mockShowToast).toHaveBeenCalledWith('记账成功')
+  })
+
+  it('用例5.7b: 回车旧路径零回退（回车 temp(-1) 仅 UI 确认 → 保存时归一并创建）', async () => {
+    const wrapper = await mountReady({ query: '奶茶' })
+
+    await wrapper.vm.onCreateTagFromSearch() // @keydown.enter 处理器
+    await nextTick()
+    expect(createTag).not.toHaveBeenCalled() // 回车本身不落库（既有语义不变）
+    expect(wrapper.vm.selectedTagId).toBe(-1)
+    expect(wrapper.vm.selectedTagName).toBe('奶茶')
+
+    await wrapper.vm.submit()
+    // temp(-1) 不进①（id !== -1 过滤）→ 走②兜底 → 无同名 → ③创建，与旧行为一致
+    expect(searchTags).toHaveBeenCalledWith('奶茶')
+    expect(createTag).toHaveBeenCalledTimes(1)
+    expect(createTag).toHaveBeenCalledWith({ name: '奶茶', category_id: 1 })
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(NEW_TAG_ID)
+    expect(mockShowToast).toHaveBeenCalledWith('记账成功，已新建标签「奶茶」')
+  })
+
+  it('用例5.8: 未保存即离开 → 仅改标签文字零落库、不置脏、不新增确认拦截', async () => {
+    const wrapper = mount(RecordFormPage)
+    await flushPromises()
+
+    wrapper.vm.tagSearchQuery = '奶茶' // 只打字，不提交
+    await nextTick()
+    expect(wrapper.vm.isDirty).toBe(false) // tagSearchQuery 不入快照（任务 2.3 维持现状）
+
+    wrapper.vm.handleBack()
+    expect(wrapper.vm.showLeaveDialog).toBe(false) // 无新确认拦截
+    expect(mockBack).toHaveBeenCalledTimes(1)
+    expect(createTag).not.toHaveBeenCalled()
+    expect(createRecord).not.toHaveBeenCalled()
+    expect(searchTags).not.toHaveBeenCalled()
+
+    await wrapper.unmount() // 离开即丢弃：归一只发生在 submit() 内
+    expect(createTag).not.toHaveBeenCalled()
+    expect(createRecord).not.toHaveBeenCalled()
+  })
+
+  it('边界4.1: 选中后又原样输入同名 → pending 为空 → 直接关联原标签、零创建零查询', async () => {
+    const wrapper = await mountReady()
+    wrapper.vm.tagSearchResults = [{ id: 6, name: '奶茶' }]
+    wrapper.vm.onTagSelected(6)
+    wrapper.vm.tagSearchQuery = '奶茶' // 与已选标签名逐字相同
+    await nextTick()
+
+    await wrapper.vm.submit()
+    expect(searchTags).not.toHaveBeenCalled()
+    expect(createTag).not.toHaveBeenCalled()
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(6)
+  })
+
+  it('边界4.3: 输入仅空白 → trim 后为空 → 不触发归一（零查询零创建，tag_id null）', async () => {
+    const wrapper = await mountReady({ query: '   ' })
+
+    await wrapper.vm.submit()
+    expect(searchTags).not.toHaveBeenCalled()
+    expect(createTag).not.toHaveBeenCalled()
+    expect(createRecord).toHaveBeenCalledTimes(1)
+    expect(createRecord.mock.calls[0][0].tag_id).toBeNull()
+    expect(mockShowToast).toHaveBeenCalledWith('记账成功')
+  })
+
+  it('边界4.4: 回车 temp(-1) 未动直接保存 → 兜底同名即关联，否则创建（语义严格不劣化）', async () => {
+    // 分支 A：兜底查到同名 → 关联既有（旧实现此处会建出重复标签）
+    searchTags.mockResolvedValueOnce([{ id: 21, name: '奶茶' }])
+    const existing = await mountReady({ query: '奶茶' })
+    await existing.vm.onCreateTagFromSearch()
+    await existing.vm.submit()
+    expect(createTag).not.toHaveBeenCalled()
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(21)
+
+    // 分支 B：确无同名 → 创建（与旧行为一致）
+    searchTags.mockResolvedValueOnce([])
+    const fresh = await mountReady({ query: '咖啡' })
+    await fresh.vm.onCreateTagFromSearch()
+    await fresh.vm.submit()
+    expect(createTag).toHaveBeenCalledWith({ name: '咖啡', category_id: 1 })
+    expect(createRecord.mock.calls[1][0].tag_id).toBe(NEW_TAG_ID)
+  })
+
+  it('边界4.5: 同名判定严格 === —— 大小写/全半角不算同名，一律走创建（不做归一化模糊）', async () => {
+    searchTags.mockResolvedValue([{ id: 31, name: 'milktea' }])
+    const lower = await mountReady({ query: 'MilkTea' })
+    await lower.vm.submit()
+    expect(createTag).toHaveBeenCalledTimes(1)
+    expect(createTag).toHaveBeenCalledWith({ name: 'MilkTea', category_id: 1 })
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(NEW_TAG_ID)
+
+    searchTags.mockResolvedValue([{ id: 33, name: 'coffee' }])
+    const fullWidth = await mountReady({ query: 'ｃｏｆｆｅｅ' })
+    await fullWidth.vm.submit()
+    expect(createTag).toHaveBeenLastCalledWith({ name: 'ｃｏｆｆｅｅ', category_id: 1 })
+    expect(createRecord.mock.calls[1][0].tag_id).toBe(NEW_TAG_ID)
+  })
+
+  it('用例5.9: 源码红线——归一三段顺序 + 判定口径 + 载荷结构零变化 + 旧路径/模板区域未动', () => {
+    // 判定口径（§2.1-5 红线）：仅 null / -1 采信文字，真实 id 一律不采信
+    expect(recordFormSource).toMatch(
+      /const pending =\s*tagId === -1 \|\| tagId == null\s*\?\s*\(tagSearchQuery\.value \|\| selectedTagName\.value \|\| ''\)\.trim\(\)\s*:\s*''/
+    )
+    // 三段顺序：①防抖结果内精确同名（排除 temp -1）→ ②非防抖兜底 → ③createTag
+    const step1 = recordFormSource.indexOf('tagSearchResults.value.find((t) => t.id !== -1')
+    const step2 = recordFormSource.indexOf('const fresh = await searchTags(pending).catch(() => null)')
+    const abort = recordFormSource.indexOf("appStore.showToast('标签校验失败，请重试保存')")
+    const step3 = recordFormSource.indexOf('const newTag = await createTagData({ name: pending')
+    expect(step1).toBeGreaterThan(-1)
+    expect(step2).toBeGreaterThan(step1)
+    expect(abort).toBeGreaterThan(step2)
+    expect(step3).toBeGreaterThan(abort) // 中止分支在创建之前，绝不被绕过
+    // 严格 === 判同名，无归一化模糊
+    expect(recordFormSource).toMatch(/t\.name === pending/)
+    expect(recordFormSource).not.toMatch(/toLowerCase\(\)|normalize\(|fullWidth/)
+    // data 载荷六键原样（任务 1.7）
+    expect(recordFormSource).toMatch(
+      /const data = \{\s*amount: parseFloat\(amount\.value\),\s*type: recordType\.value,\s*category_id: categoryId\.value,\s*consume_time: `\$\{consumeDate\.value\} \$\{consumeTime\.value\}`,\s*tag_id: tagId \|\| null,\s*note: note\.value \|\| null,\s*\}/
+    )
+    // 需求 3.3：toast 合并新建标签提示，且无二次确认弹窗
+    expect(recordFormSource).toMatch(/记账成功，已新建标签「\$\{createdTagName\}」/)
+    expect(recordFormSource).toMatch(/账单已更新，已新建标签「\$\{createdTagName\}」/)
+    expect(recordFormSource).not.toMatch(/window\.confirm|showTagConfirm|确认新建标签/)
+    // 任务 2.3：tagSearchQuery 不入快照、不进 dirty 追踪（维持现状）
+    const snap = recordFormSource.slice(
+      recordFormSource.indexOf('function takeSnapshot()'),
+      recordFormSource.indexOf('function handleBack()')
+    )
+    expect(snap).toMatch(/selectedTagName: selectedTagName\.value/)
+    expect(snap).not.toMatch(/tagSearchQuery/)
+    expect(recordFormSource).toMatch(
+      /\[recordType, amount, categoryId, consumeDate, consumeTime, selectedTagId, selectedTagName, note\]/
+    )
+    expect(recordFormSource).not.toMatch(/watch\(\s*\[[^\]]*tagSearchQuery/s)
+    // 旧路径绑定点与「按回车创建」提示原文不动；建标签→存账单顺序不变（§3.2.2）
+    expect(recordFormSource).toMatch(/@keydown\.enter="onCreateTagFromSearch"/)
+    expect(recordFormSource).toMatch(/@update:model-value="onTagSelected"/)
+    expect(recordFormSource).toMatch(/无匹配标签，按回车创建「\{\{ tagSearchQuery \}\}」/)
+    expect(recordFormSource.indexOf('await createTagData({ name: pending')).toBeLessThan(
+      recordFormSource.indexOf('const data = {')
+    )
+    // M4 交接点（§4.2.2）：本模块不触碰标签浮层模板区域
+    expect(recordFormSource).toMatch(/transition="fab-transition"/)
+    expect(recordFormSource).not.toMatch(/tag-field-anchor|menuProps|menu-props/)
   })
 })

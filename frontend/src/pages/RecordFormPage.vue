@@ -362,6 +362,9 @@ function onTagSelected(tagId) {
   if (!tagId) {
     selectedTagId.value = null
     selectedTagName.value = ''
+    // v1.4.3-boot M3（任务 2.2 / 设计 §3.2.1 尾注）：Vuetify clearable 对 search 重置无强保证，
+    // 残留的旧标签名会被下次保存的归一逻辑「自动确认」重新关联，违背用户清除意图 → 同步清空
+    tagSearchQuery.value = ''
     return
   }
   const tag = tagSearchResults.value.find((t) => t.id === tagId)
@@ -418,16 +421,41 @@ async function submit() {
   if (!canSubmit.value) return
   submitting.value = true
   try {
-    // If tag name is entered but no matching tag exists (or temp ID), create it first
+    // ── v1.4.3-boot M3 待确认文字归一三段（需求三 / 设计 §3.2.1，D4）─────────────
+    // 输入框有文字但未点选未回车时，旧实现只读 selectedTagName → 文字静默丢失。
+    // 判定口径（红线）：仅「未选中任何标签」(null) 或「回车 temp 占位」(-1) 才采信文字；
+    // tagId 为真实 id 时以已选中为准、不采信搜索框文字——勿改成「文字优先」（误触会建垃圾标签）。
     let tagId = selectedTagId.value
-    if (selectedTagName.value && (!tagId || tagId === -1)) {
-      const newTag = await createTagData({
-        name: selectedTagName.value.trim(),
-        category_id: categoryId.value,
-      })
-      tagId = newTag.id
+    const pending =
+      tagId === -1 || tagId == null
+        ? (tagSearchQuery.value || selectedTagName.value || '').trim()
+        : ''
+    let createdTagName = ''
+    if (pending) {
+      // ① 现有防抖结果内精确同名优先（严格 ===，不做大小写/全半角归一化模糊；排除 temp -1）
+      let exact = tagSearchResults.value.find((t) => t.id !== -1 && t.name === pending)
+      // ② 200ms 防抖窗口内结果可能未发出/未返回/未刷新：保存时刻补一次**非防抖**查询兜底
+      if (!exact) {
+        const fresh = await searchTags(pending).catch(() => null)
+        if (fresh === null) {
+          // 校验不可用 = 无法证明「无同名标签」：后端无查重、Tag.name 无唯一约束（设计 §3.3），
+          // 宁可不保存也不静默造重复 → 中止本次保存（不建标签不落账单），finally 统一复位 submitting
+          appStore.showToast('标签校验失败，请重试保存')
+          return
+        }
+        exact = (fresh || []).find((t) => t.name === pending)
+      }
+      if (exact) {
+        tagId = exact.id // 同名 → 直接关联既有标签，零创建（需求 3.2）
+      } else {
+        // ③ 确无同名才新建；顺序维持现状「先建标签 → 再存账单」（设计 §3.2.2）
+        const newTag = await createTagData({ name: pending, category_id: categoryId.value })
+        tagId = newTag.id
+        createdTagName = pending // toast 提示用（需求 3.3）
+      }
     }
 
+    // 载荷结构零变化（任务 1.7）：仅 tag_id 取上面归一结果
     const data = {
       amount: parseFloat(amount.value),
       type: recordType.value,
@@ -436,12 +464,17 @@ async function submit() {
       tag_id: tagId || null,
       note: note.value || null,
     }
+    // 无二次确认弹窗（需求 3.3）；新建标签时合并提示，否则维持原文案
     if (isEdit.value) {
       await updateRecord(recordId.value, data)
-      appStore.showToast('账单已更新')
+      appStore.showToast(
+        createdTagName ? `账单已更新，已新建标签「${createdTagName}」` : '账单已更新'
+      )
     } else {
       await createRecord(data)
-      appStore.showToast('记账成功')
+      appStore.showToast(
+        createdTagName ? `记账成功，已新建标签「${createdTagName}」` : '记账成功'
+      )
     }
     isDirty.value = false
     router.push('/')
