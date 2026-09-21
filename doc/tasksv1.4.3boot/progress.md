@@ -12,7 +12,7 @@
 - [x] [M2 - Bug 修复（阻断）：记一笔分类恒久空白 + 加载解耦 + 空态兜底](m2-categories-blank-fix.md) —— 需求二（2）★先复现后修 ✅ 2789bcb（根因 A）
 - [ ] [M3 - 标签输入免回车：保存账单即保存标签](m3-tag-no-enter-save.md) —— 需求三（3）
 - [ ] [M4 - 标签建议浮层锚定输入框正下方](m4-tag-suggest-anchor.md) —— 需求四（4）
-- [ ] [M5 - 账单页年份箭头常驻 + 边界置灰 + 尺寸回退 x-small](m5-year-nav-always-visible.md) —— 需求五（5）
+- [x] [M5 - 账单页年份箭头常驻 + 边界置灰 + 尺寸回退 x-small](m5-year-nav-always-visible.md) —— 需求五（5）✅ 4ae8269
 - [x] [M6 - 金额红/绿配色全站恢复 + 列表金额格式对齐](m6-amount-color-restore.md) —— 需求六（6）✅ b03a881
 
 ## 开发顺序（设计附录 A）
@@ -76,7 +76,7 @@
 | M2 | 前端（复现或牵连后端/迁移） | ✅ 完成 | 2789bcb | 33/38 勾选（1.5 归主 Agent 本节落盘；6.2–6.5 人工/备忘项）；P1 副本沙盒复现=**根因 A**，后端零改动；vitest RecordFormPage 27/27 |
 | M3 | 前端 | ⬜ 未开始 | — | 依赖 M2 合入 |
 | M4 | 前端 | ⬜ 未开始 | — | 依赖 M3 合入；与 M3 联合验收 |
-| M5 | 前端 | ⬜ 未开始 | — | 含测试红线改写 |
+| M5 | 前端 | ✅ 完成 | 4ae8269 | 20/24 勾选（3.2+6.2–6.4 人工项）；RecordListPage.test.js 58/58 绿（主 Agent 复跑）；含 2 处已裁定执行级偏差（见执行记录） |
 | M6 | 前端 | ✅ 完成 | b03a881 | 18/23 勾选（6.2–6.6 为人工项）；vitest 新增 12 条、M6 相关 105/105 绿；主 Agent 独立复跑通过；含特异度提级修正（见下） |
 
 ## 开工登记（2026-09-21，基线 4200ac3）
@@ -106,7 +106,14 @@
 - **发布备忘增量（重要）**：① 现场库处于「v1.4.2 迁移未跑完」半截态，发布窗口应先补跑 `migrate_to_v1.4.2.py`（其正是 kind 列来源）；② `migrate_to_v1.4.3.py` 对该库形制（budgets 无 user_id 唯一约束混合格）当前**跑不通**（FK 检查 70 违规回滚）——原 6.5 备忘的迁移窗口程序须按此修订执行预案，交付报告展开。
 - 环境事实修正：`backend/money.db` 实际**未被 git 跟踪**（`.gitignore` 含 `*.db`，`git ls-files` 空命中）——prompt 红线 1「git 已跟踪」表述与实况不符，但「原库只读/零 db 入库」约束照常执行且风险更低。
 - 实现偏差（子 Agent notes，已核）：`retryLoadCategories` 成功后除重取快照外追加 `await nextTick()` 回算 `isDirty`（否则首屏补选 watcher 早于 await 续体，isDirty 残留 true，违背需求口径）；测试文件 `vue-router` mock 参数化为文件级 `mockRouteParams`（既有行为零变化）——M3/M4 子 Agent 复用现状即可。
-- 沙盒残留（仓库外，git 不涉）：`%TEMP%\m2sandbox\`（db 副本+日志）与 `frontend/node_modules/.m2-forensics-quarantine/`（一次性取证用例，vitest include 不命中）——主 Agent 终验阶段清理。
+- 沙盒残留：~~`%TEMP%\m2sandbox\` 与 `frontend/node_modules/.m2-forensics-quarantine/`~~ **主 Agent 已于 2026-09-21 14:29 清理完毕**（仓库外临时件，git 全程不涉）。
+
+### M5（4ae8269）执行偏差与改写登记
+
+- 附录 B 点名改写全部落地：年份组 6 处 `toHaveLength(0)`→「在场且禁用」（`findArrowBtn` helper 收拢在场断言，零删除零放宽）；尺寸红线正向断言翻转 + 删除固化回退目标的旧反向断言、代之以「不再指回 small/16」两条反向锁；:590 筛选组、M6 金额块与 :1165 icon 回退断言未触碰。
+- 偏差①：jsdom 未装 Vuetify 时 `v-btn` 为自定义元素无 `.props()`——disabled 判据改读落地属性 `disabled="true"/"false"` + `wrapper.vm.leftDisabled/rightDisabled` 双端口径互锁（等价，任务书 `props('disabled')` 手法在本文件不可用）。
+- 偏差②：设计 §5.2.1 参考代码属性序与 §5.4 要求正则冲突，实现按「:disabled、class 在前，size 紧邻 @click」排列，语义零损失（`vue/attributes-order` 已 off）。
+- 3.2 禁用态 opacity 可辨性：子 Agent 未新增任何 scoped 样式，留真机判定（若判不清仅允许 `.year-nav-btn[disabled]` 微调）。
 
 ### M6（b03a881）设计与实现偏差登记
 
@@ -129,6 +136,12 @@
 - 6.4 人工：浅色模式零变化不回退；深色下标题/正文/说明文字颜色体系不受影响（抽查设置页/详情页文本）——**P4 浅色同点位复拍覆盖前半，后半人工**
 - 6.5 判别预案：若浅色也见不到红绿 → 属 `record.type` 字段缺失/改名另一根因，转 M2 §1 环境排查流程补查后修，验收标准不变
 - 6.6 明暗、竖/宽屏自查清单执行
+
+### M5
+- 3.2 禁用态可辨性：Vuetify `v-btn--disabled`（--v-disabled-opacity .38）明暗两主题肉眼可辨；若真机判不清，仅允许 `.year-nav-btn[disabled]` scoped 内微调 opacity，不改非禁用态
+- 6.2 人工：最新年份右灰左可点；翻到 minYear 双灰但均在；无账单用户双灰在场（需求验收 1）
+- 6.3 人工：箭头明显比 v1.4.3 小一档；月份点选/居中/跨年高亮不回退（需求验收 2）
+- 6.4 人工：明暗两主题禁用态可辨；竖/宽屏布局无挤乱
 
 ## 阻塞清单
 
