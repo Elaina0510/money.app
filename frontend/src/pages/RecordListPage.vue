@@ -20,14 +20,16 @@
     <!-- Month Switcher：需求三——整体放大 + 选中月滚动居中（居中逻辑见 centerSelectedMonth） -->
     <v-card class="pa-3 mb-3" rounded="xl">
       <div class="d-flex align-center">
+        <!-- M5（需求五）：两箭头常驻，边界改置灰禁用（原摘除节点即「没有前进按钮」痛点） -->
         <v-btn
-          v-if="selectedYear > minYear"
           icon
           variant="text"
-          size="small"
+          :disabled="leftDisabled"
+          class="year-nav-btn"
+          size="x-small"
           @click="prevYear"
         >
-          <v-icon size="20">mdi-chevron-left</v-icon>
+          <v-icon size="16">mdi-chevron-left</v-icon>
         </v-btn>
         <div ref="monthScroller" class="month-scroller">
           <div
@@ -57,13 +59,14 @@
           </div>
         </div>
         <v-btn
-          v-if="selectedYear < currentYear"
           icon
           variant="text"
-          size="small"
+          :disabled="rightDisabled"
+          class="year-nav-btn"
+          size="x-small"
           @click="nextYear"
         >
-          <v-icon size="20">mdi-chevron-right</v-icon>
+          <v-icon size="16">mdi-chevron-right</v-icon>
         </v-btn>
       </div>
     </v-card>
@@ -167,7 +170,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { getRecords, getEarliestYear } from '@/api/records'
 import { formatAmount } from '@/utils/format'
@@ -200,6 +203,12 @@ const selectedYear = ref(new Date().getFullYear())
 const currentYear = new Date().getFullYear()
 const minYear = ref(null) // null = 未加载；加载后为当前用户最早记录年份
 
+// M5（需求五）：箭头常驻后边界不再摘除节点，而是转 disabled 置灰。
+// D6：minYear 未加载（null）按「已到边界」处理 → 保守向置灰，不出现可点的越界箭头；
+// 接口失败时 loadEarliestYear 回退 minYear=currentYear，左箭头同样是「灰色在场」而非消失。
+const leftDisabled = computed(() => selectedYear.value <= (minYear.value ?? selectedYear.value))
+const rightDisabled = computed(() => selectedYear.value >= currentYear)
+
 // 需求三：选中月滚动居中。monthScroller = 月份条横滚容器，chipRefs[m-1] = 第 m 个月的外层 wrapper
 const monthScroller = ref(null)
 const chipRefs = ref([])
@@ -226,7 +235,7 @@ async function centerSelectedMonth({ smooth = true } = {}) {
 async function loadEarliestYear() {
   try {
     const result = await getEarliestYear()
-    // 无记录用户：minYear = 当前年 → 上一年箭头隐藏
+    // 无记录用户：minYear = 当前年 → 左箭头置灰在场（M5：不再摘除节点）
     minYear.value = result?.earliest_year ?? currentYear
   } catch {
     minYear.value = currentYear // 接口异常兜底：退化为"仅当前年"，不阻塞账单浏览
@@ -244,6 +253,8 @@ async function selectMonth(month, { smooth = true } = {}) {
   await centerSelectedMonth({ smooth })
 }
 
+// M5：箭头已改常驻 + disabled，但两函数内的边界守卫保留不删（双保险：
+// disabled 挡鼠标点击，守卫挡键盘/程序化调用 vm.prevYear() 的越界翻年）
 async function prevYear() {
   if (minYear.value !== null && selectedYear.value - 1 < minYear.value) return
   selectedYear.value--

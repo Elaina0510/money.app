@@ -296,6 +296,9 @@ describe('RecordListPage - Category Icons', () => {
 
 // ---------------------------------------------------------------------------
 // M3 需求二：账单页年份切换（竖屏可见 + 往前到最早记录年、往后不超当前年）
+// M5 需求五改写：两箭头改为**常驻**，边界不再摘除节点而是转 disabled 置灰——
+//   本组原「箭头不存在 = toHaveLength(0)」六处口径全部反转为「在场且 disabled=true」。
+//   节点常驻（toHaveLength(1)）与置灰两条判据同时锁，防止回退成 v-if 摘除。
 // ---------------------------------------------------------------------------
 import { getRecords, getEarliestYear } from '@/api/records'
 
@@ -314,6 +317,23 @@ function findArrow(wrapper, icon) {
   return wrapper.findAll('v-btn').filter((btn) => btn.text().includes(icon))
 }
 
+// M5：取常驻箭头按钮本体——先断言节点在场（摘除即红线），再交给调用方判 disabled
+function findArrowBtn(wrapper, icon) {
+  const arrows = findArrow(wrapper, icon)
+  expect(arrows, `M5 红线：${icon} 箭头应常驻 DOM（边界只置灰、不摘除）`).toHaveLength(1)
+  return arrows[0]
+}
+
+// M5：读常驻箭头的 disabled 判定（true=置灰禁用 / false=可点），调用点用 expect 明示。
+// 本文件未安装 Vuetify 插件 → v-btn 是同名自定义元素（DOMWrapper 无 props()），
+// 实测 Vue 把 :disabled 落地为字符串属性 disabled="true"/"false"；HTML 布尔属性形态
+// （空串=在场）一并视为禁用。这与任务书「props('disabled')===true」是同一判据的 DOM 形态，
+// 判定真值另由 M5 用例2 的 leftDisabled/rightDisabled 单元直接对 vm 断言，两端口径互锁。
+function arrowDisabled(wrapper, icon) {
+  const value = findArrowBtn(wrapper, icon).attributes('disabled')
+  return value === 'true' || value === ''
+}
+
 describe('RecordListPage - 年份切换', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -328,9 +348,9 @@ describe('RecordListPage - 年份切换', () => {
     await flushPromises()
     await nextTick()
 
-    // 当前年时右箭头隐藏（不能往后翻），翻到上一年两侧箭头同时存在
-    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(1)
-    expect(findArrow(wrapper, 'mdi-chevron-right')).toHaveLength(0)
+    // M5 改写：当前年时右箭头**在场但置灰**（原口径「不能往后翻 → 右箭头不存在」）；左箭头可点
+    expect(arrowDisabled(wrapper, 'mdi-chevron-left')).toBe(false)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-right')).toBe(true)
 
     wrapper.vm.prevYear()
     await nextTick()
@@ -342,9 +362,12 @@ describe('RecordListPage - 年份切换', () => {
       expect(btn.classes()).not.toContain('d-none')
       expect(btn.classes()).not.toContain('d-md-flex')
     }
+    // 翻到中间年后两侧同时可点（常驻 + 不置灰）
+    expect(arrowDisabled(wrapper, 'mdi-chevron-left')).toBe(false)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-right')).toBe(false)
   })
 
-  it('用例2a: selectedYear === minYear 时左箭头不存在', async () => {
+  it('用例2a: selectedYear === minYear 时左箭头在场且禁用', async () => {
     getEarliestYear.mockResolvedValue({ earliest_year: currentYear - 2 })
     const wrapper = mount(RecordListPage)
     await flushPromises()
@@ -354,13 +377,14 @@ describe('RecordListPage - 年份切换', () => {
     await nextTick()
     expect(wrapper.vm.selectedYear).toBe(currentYear - 1)
     expect(wrapper.vm.minYear).toBe(currentYear - 2)
-    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(1)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-left')).toBe(false)
 
     wrapper.vm.prevYear()
     await nextTick()
     expect(wrapper.vm.selectedYear).toBe(currentYear - 2)
-    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(0)
-    expect(findArrow(wrapper, 'mdi-chevron-right')).toHaveLength(1)
+    // M5 改写：到达最早年 → 左箭头灰色在场（原「不存在」）；右箭头仍在场可点
+    expect(arrowDisabled(wrapper, 'mdi-chevron-left')).toBe(true)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-right')).toBe(false)
 
     // 双保险守卫：已到最早年，再点不会更早
     wrapper.vm.prevYear()
@@ -368,7 +392,7 @@ describe('RecordListPage - 年份切换', () => {
     expect(wrapper.vm.selectedYear).toBe(currentYear - 2)
   })
 
-  it('用例2b: selectedYear === currentYear 时右箭头不存在', async () => {
+  it('用例2b: selectedYear === currentYear 时右箭头在场且禁用', async () => {
     getEarliestYear.mockResolvedValue({ earliest_year: currentYear - 3 })
     const wrapper = mount(RecordListPage)
     await flushPromises()
@@ -376,12 +400,13 @@ describe('RecordListPage - 年份切换', () => {
 
     wrapper.vm.prevYear()
     await nextTick()
-    expect(findArrow(wrapper, 'mdi-chevron-right')).toHaveLength(1)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-right')).toBe(false)
 
     wrapper.vm.nextYear()
     await nextTick()
     expect(wrapper.vm.selectedYear).toBe(currentYear)
-    expect(findArrow(wrapper, 'mdi-chevron-right')).toHaveLength(0)
+    // M5 改写：回到当前年 → 右箭头灰色在场（原「不存在」）
+    expect(arrowDisabled(wrapper, 'mdi-chevron-right')).toBe(true)
 
     // 已在当前年，再点不会超过当前年
     wrapper.vm.nextYear()
@@ -389,27 +414,125 @@ describe('RecordListPage - 年份切换', () => {
     expect(wrapper.vm.selectedYear).toBe(currentYear)
   })
 
-  it('用例3: earliest_year=null（无账单用户）时左箭头不存在', async () => {
+  it('用例3: earliest_year=null（无账单用户）时两箭头均在且双灰', async () => {
     getEarliestYear.mockResolvedValue({ earliest_year: null })
     const wrapper = mount(RecordListPage)
     await flushPromises()
     await nextTick()
 
     expect(wrapper.vm.minYear).toBe(currentYear)
-    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(0)
-    expect(findArrow(wrapper, 'mdi-chevron-right')).toHaveLength(0)
+    // M5 改写：无账单用户由「双箭头消失」改正为「双灰但均在」（需求 5.1/5.2）
+    expect(arrowDisabled(wrapper, 'mdi-chevron-left')).toBe(true)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-right')).toBe(true)
   })
 
-  it('接口异常时兜底为仅当前年，账单列表功能不受阻塞', async () => {
+  it('接口异常时兜底为仅当前年，左箭头灰色在场，账单列表功能不受阻塞', async () => {
     getEarliestYear.mockRejectedValue(new Error('网络异常'))
     const wrapper = mount(RecordListPage)
     await flushPromises()
     await nextTick()
 
     expect(wrapper.vm.minYear).toBe(currentYear)
-    expect(findArrow(wrapper, 'mdi-chevron-left')).toHaveLength(0)
+    // 需求 5.5（任务 2.3）：catch 回退 minYear=currentYear → leftDisabled=true，箭头不消失
+    expect(arrowDisabled(wrapper, 'mdi-chevron-left')).toBe(true)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-right')).toBe(true)
     expect(getRecords).toHaveBeenCalled()
     expect(wrapper.vm.records).toEqual([])
+  })
+})
+
+// ---------------------------------------------------------------------------
+// M5 需求五：年份箭头常驻 + 边界置灰 + 尺寸回退 x-small（设计 §5.4）
+//   上组是「口径反转改写」；本组把常驻/置灰两条判据独立固化：
+//   用例1 三态 × 左右两钮参数化矩阵 · 用例2 leftDisabled/rightDisabled 单元（D6）
+//   · 用例3 ?raw 箭头区零 v-if + x-small/16 + 无 tooltip
+// ---------------------------------------------------------------------------
+describe('RecordListPage - 年份箭头常驻与边界置灰（M5）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setViewport(375)
+    getEarliestYear.mockResolvedValue({ earliest_year: currentYear - 3 })
+    getRecords.mockResolvedValue({ items: [], total: 0, page: 1, total_pages: 1 })
+  })
+
+  // 任务 5.3：两按钮任何年份组合均在 DOM —— currentYear / 中间年 / minYear 三态 × 左右两钮
+  // 行格式：[状态标签, selectedYear 相对 currentYear 的偏移, 期望左 disabled, 期望右 disabled]
+  it.each([
+    ['当前年（右边界）', 0, false, true],
+    ['中间年（无边界）', -2, false, false],
+    ['最早年 minYear（左边界）', -3, true, false],
+  ])(
+    '用例1: 矩阵 %s —— 左右箭头均在 DOM，置灰位符合边界',
+    async (_label, offset, leftOff, rightOff) => {
+      const wrapper = mount(RecordListPage)
+      await flushPromises()
+      for (let i = 0; i < -offset; i++) {
+        await wrapper.vm.prevYear() // 逐年翻到目标态（守卫允许范围内翻年）
+      }
+      await nextTick()
+      expect(wrapper.vm.selectedYear).toBe(currentYear + offset)
+
+      expect(arrowDisabled(wrapper, 'mdi-chevron-left')).toBe(leftOff)
+      expect(arrowDisabled(wrapper, 'mdi-chevron-right')).toBe(rightOff)
+      wrapper.unmount()
+    }
+  )
+
+  // 任务 5.4（D6）：minYear=null → true；minYear=currentYear → true；minYear<selectedYear → false
+  it('用例2: leftDisabled 三态判定（含 null 保守向）与 rightDisabled 判定', async () => {
+    // 首帧 minYear 未加载（接口挂起不返回）→ D6 按已到边界处理：置灰而非消失/可点
+    getEarliestYear.mockReturnValue(new Promise(() => {}))
+    const wrapper = mount(RecordListPage)
+    await flushPromises()
+    await nextTick()
+
+    expect(wrapper.vm.minYear).toBeNull()
+    expect(wrapper.vm.leftDisabled).toBe(true)
+    expect(wrapper.vm.rightDisabled).toBe(true) // selectedYear === currentYear
+    expect(arrowDisabled(wrapper, 'mdi-chevron-left')).toBe(true) // 常驻首帧即灰（任务 4.2）
+
+    // minYear = currentYear（无账单用户 / 接口失败回退同值）→ 左灰在场
+    wrapper.vm.minYear = currentYear
+    await nextTick()
+    expect(wrapper.vm.leftDisabled).toBe(true)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-left')).toBe(true)
+
+    // minYear < selectedYear → 左箭头放开
+    wrapper.vm.minYear = currentYear - 2
+    await nextTick()
+    expect(wrapper.vm.leftDisabled).toBe(false)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-left')).toBe(false)
+
+    // 已翻到非当前年 → 右箭头放开；回到 currentYear 即灰（任务 4.3）
+    wrapper.vm.selectedYear = currentYear - 1
+    await nextTick()
+    expect(wrapper.vm.rightDisabled).toBe(false)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-right')).toBe(false)
+
+    wrapper.vm.selectedYear = currentYear
+    await nextTick()
+    expect(wrapper.vm.rightDisabled).toBe(true)
+    expect(arrowDisabled(wrapper, 'mdi-chevron-right')).toBe(true)
+    wrapper.unmount()
+  })
+
+  // 任务 5.5 + 1.1/1.2/1.3：箭头区 ?raw 红线——常驻（零 v-if="selectedYear"）、x-small/16、
+  // :disabled 绑定、year-nav-btn 类、禁用态不加 tooltip/提示文案
+  it('用例3: ?raw 箭头区 v-if="selectedYear" 零命中 + 尺寸 x-small/16 + 无 tooltip', () => {
+    // 箭头区 = 两个年份按钮的开标签（不含年份注释行的 v-if="selectedYear !== currentYear"）
+    const navBtnTags = (recordListSource.match(/<v-btn[^>]*>/g) ?? []).filter((tag) =>
+      /@click="(prev|next)Year"/.test(tag)
+    )
+    expect(navBtnTags).toHaveLength(2)
+    for (const tag of navBtnTags) {
+      expect(tag).not.toMatch(/v-if="selectedYear/)
+      expect(tag).toMatch(/:disabled="(left|right)Disabled"/)
+      expect(tag).toMatch(/size="x-small"/)
+      expect(tag).toContain('year-nav-btn')
+      expect(tag).not.toMatch(/tooltip|title=/i)
+    }
+    expect(recordListSource).toMatch(/<v-icon size="16">mdi-chevron-left<\/v-icon>/)
+    expect(recordListSource).toMatch(/<v-icon size="16">mdi-chevron-right<\/v-icon>/)
   })
 })
 
@@ -1040,11 +1163,14 @@ describe('RecordListPage - 月份条居中与放大（M3）', () => {
     expect(recordListSource).toMatch(/min-width:\s*64px/)
     expect(recordListSource).not.toMatch(/min-width:\s*48px/)
     expect(recordListSource).toMatch(/class="text-subtitle-2 font-weight-medium"\s+size="default"/)
-    // 外层卡片 pa-2 → pa-3；年份箭头 x-small/small → small/20
+    // 外层卡片 pa-2 → pa-3；年份箭头 M5（需求五）由 small/20 回退为 x-small/16
     expect(recordListSource).toMatch(/<v-card class="pa-3 mb-3" rounded="xl">/)
-    expect(recordListSource).toMatch(/size="small"\s+@click="prevYear"[\s\S]{0,60}<v-icon size="20">/)
-    expect(recordListSource).toMatch(/size="small"\s+@click="nextYear"[\s\S]{0,60}<v-icon size="20">/)
-    expect(recordListSource).not.toMatch(/variant="text"\s+size="x-small"/)
+    expect(recordListSource).toMatch(/size="x-small"\s+@click="prevYear"[\s\S]{0,60}<v-icon size="16">/)
+    expect(recordListSource).toMatch(/size="x-small"\s+@click="nextYear"[\s\S]{0,60}<v-icon size="16">/)
+    // M5 反向红线：原断言 not.toMatch(/variant="text"\s+size="x-small"/) 固化的正是本次回退目标，
+    // 故删除并改为「箭头不得再指回 v1.4.3 的 small/20 放大档」
+    expect(recordListSource).not.toMatch(/size="small"\s+@click="(prev|next)Year"/)
+    expect(recordListSource).not.toMatch(/<v-icon size="20">mdi-chevron/)
   })
 
   it('用例9: 选中态失色修复 + 居中红线（?raw 不含 selectedYear === currentYear 限定、无 scrollIntoView 调用点）', () => {
