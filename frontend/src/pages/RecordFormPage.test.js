@@ -64,6 +64,15 @@ import DatePickerPopover from '@/components/common/DatePickerPopover.vue'
 // v1.4.3-boot M2 §5：加载解耦用例需按用例改写模板/回填两路接口行为
 // v1.4.3-boot M3 §5：免回车保存用例需断言落库载荷与新建标签调用
 import { getQuickTemplates, getRecord, createRecord, updateRecord } from '@/api/records'
+// v1.4.3-boot M4 §6.3/6.4/6.7：锚定结构断言需挂载**真实** Vuetify 组件
+// （无 Vuetify 时 v-autocomplete 是未知自定义元素，内部 VMenu/overlay 根本不渲染 → 无从判断挂载点）
+// 取包内聚合 ESM 构建而非 'vuetify/components' 分栏：后者每组件 import 兄弟 .css，
+// vitest 默认 externalize node_modules → Node 侧 "Unknown file extension .css" 直接炸（样式另有 dist/vuetify.css，测试不需要）。
+import {
+  createVuetify,
+  components as vuetifyComponents,
+  directives as vuetifyDirectives,
+} from 'vuetify/dist/vuetify.esm.js'
 
 describe('RecordFormPage - Leave Guard', () => {
   beforeEach(() => {
@@ -1015,8 +1024,317 @@ describe('RecordFormPage - M3 标签输入免回车', () => {
     expect(recordFormSource.indexOf('await createTagData({ name: pending')).toBeLessThan(
       recordFormSource.indexOf('const data = {')
     )
-    // M4 交接点（§4.2.2）：本模块不触碰标签浮层模板区域
+    // M4 交接点（§4.2.2）：本模块不触碰标签浮层模板区域。
+    // v1.4.3-boot M4 已按 D5 落地（任务 6.5 回归红线）：原「M4 机制尚未存在」的负向锁
+    // （not.toMatch tag-field-anchor|menuProps）随 M4 合入必然为假，改锁为「控件本体绑定不变 +
+    // M4 仅新增 wrap/:menu-props」的正向口径——M3 归一逻辑的消费面（selectedTagId/tagSearchQuery）零改名。
     expect(recordFormSource).toMatch(/transition="fab-transition"/)
-    expect(recordFormSource).not.toMatch(/tag-field-anchor|menuProps|menu-props/)
+    expect(recordFormSource).toMatch(/v-model="selectedTagId"/)
+    expect(recordFormSource).toMatch(/v-model:search="tagSearchQuery"/)
+    expect(recordFormSource).toMatch(/:menu-props="tagMenuProps"/)
+  })
+})
+
+// ── v1.4.3-boot M4 标签建议浮层锚定输入框正下方（需求四，任务 §6 6.1–6.4 + 6.5 回归红线 + 6.7 D9）──
+// 痛点：建议层是 v-autocomplete 内部 VMenu teleport 到 body 的游离浮层（覆盖式定位、与输入框无父子关系），
+//      页面滚动/软键盘弹起时漂移。主方案（D5 / 设计 §4.2.1）：标签区外套 .tag-field-anchor(position:relative)
+//      + :menu-props 透传 { attach: 容器元素, maxHeight: 240, contentClass: 'tag-suggest-menu' }
+//      + scoped !important 锁 left/width。控件本体/v-model/搜索/选中/M3 归一逻辑零改动（§4.2.2 交接点）。
+// 断言边界（prompt §7.7）：jsdom 无布局引擎 → 内联 top 参照系与 computed left/width 无真值可测，
+//      故用「props 透传断言（6.1）+ ?raw 源码断言（6.2/6.5）+ 真实 Vuetify 挂载结构断言（6.3/6.4/6.7）」组合；
+//      几何三点判据之 ②③ 由浏览器实测终判（P4）。
+describe('RecordFormPage - M4 标签建议层锚定', () => {
+  const M4_CATEGORIES = [
+    { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food' },
+    { id: 3, name: '出行', type: 'expense', icon: 'mdi-bus' },
+  ]
+  const NEW_TAG_ID = 51
+  const TAGS_MILK = [
+    { id: 101, name: '奶茶', category_id: 1 },
+    { id: 102, name: '牛奶', category_id: 1 },
+  ]
+
+  const live = [] // 真实 Vuetify 用例挂进 document.body，逐用例卸载防串味
+
+  // jsdom 未实现真实浏览器内建的两个观察者 API，而真实 Vuetify 组件（VProgressCircular /
+  // VLazyScope 等）构造时即用 → 本组用例的最小替身：ResizeObserver 空转（jsdom 无布局可观测）、
+  // IntersectionObserver 恒判「可见」（否则 v-lazy 内容永不渲染）。仅测试侧补齐，零改产品代码与配置。
+  if (typeof globalThis.ResizeObserver === 'undefined') {
+    globalThis.ResizeObserver = class StubResizeObserver {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+  }
+  if (typeof globalThis.IntersectionObserver === 'undefined') {
+    globalThis.IntersectionObserver = class StubIntersectionObserver {
+      constructor(cb) {
+        this.cb = cb
+      }
+
+      observe(target) {
+        // 真实浏览器异步投递回调：同步回调会在 patch 期间触发响应式更新而打烂 Vue 补丁状态
+        setTimeout(() => {
+          try {
+            this.cb([{ target, isIntersecting: true, intersectionRatio: 1 }], this)
+          } catch {
+            /* 用例已卸载：丢弃迟到回调 */
+          }
+        }, 0)
+      }
+
+      unobserve() {}
+      disconnect() {}
+      takeRecords() {
+        return []
+      }
+    }
+  }
+  // 同上：Vuetify 的 connected 定位策略要监听 visualViewport（软键盘弹起 → 重算几何），
+  // jsdom 无 VisualViewport 实现 → 给一个静态视口替身；视口随键盘变化是真机项（任务 7.4 人工）。
+  if (typeof globalThis.visualViewport === 'undefined') {
+    globalThis.visualViewport = {
+      width: 1024,
+      height: 768,
+      offsetLeft: 0,
+      offsetTop: 0,
+      scale: 1,
+      addEventListener() {},
+      removeEventListener() {},
+    }
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getCategories.mockResolvedValue(M4_CATEGORIES.map((c) => ({ ...c })))
+    getQuickTemplates.mockResolvedValue([])
+    getRecord.mockResolvedValue(null)
+    searchTags.mockResolvedValue([]) // 默认：无同名命中
+    createTag.mockResolvedValue({ id: NEW_TAG_ID, name: '奶茶', category_id: 1 })
+    createRecord.mockResolvedValue({ id: 91 })
+    updateRecord.mockResolvedValue({})
+  })
+
+  afterEach(async () => {
+    // attachTo 的组件由 unmount 自行摘除；不再手动清空 body（会让仍在收尾的 overlay 补丁踩空节点）
+    for (const w of live) await w.unmount()
+    live.length = 0
+    // 还原文件级默认，绝不泄漏到后续用例组（沿 M2/M3 收口手法）
+    delete mockRouteParams.id
+    getCategories.mockResolvedValue([
+      { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food' },
+      { id: 2, name: '工资', type: 'income', icon: 'mdi-cash' },
+    ])
+    getQuickTemplates.mockResolvedValue([])
+    getRecord.mockResolvedValue(null)
+    searchTags.mockResolvedValue([])
+    createTag.mockResolvedValue({ id: 1 })
+  })
+
+  // 真实 Vuetify 挂载（attachTo 文档：teleport/attach 定位需真实文档树位置）
+  async function mountReal() {
+    const wrapper = mount(RecordFormPage, {
+      attachTo: document.body,
+      global: { plugins: [createVuetify({ components: vuetifyComponents, directives: vuetifyDirectives })] },
+    })
+    live.push(wrapper)
+    await flushPromises()
+    return wrapper
+  }
+
+  // 200ms 防抖 + overlay 挂载过渡（VMenu 过渡/v-lazy 需要额外帧）
+  async function settle(ms = 320) {
+    await new Promise((resolve) => setTimeout(resolve, ms))
+    await flushPromises()
+    await nextTick()
+    await flushPromises()
+  }
+
+  const anchorOf = (wrapper) => wrapper.find('.tag-field-anchor').element
+  const contentOf = (wrapper) => anchorOf(wrapper).querySelector('.v-overlay__content')
+
+  // 在真实输入框里打字并等建议层就绪
+  async function typeIntoTagField(wrapper, text) {
+    const input = wrapper.find('.tag-field-anchor input')
+    expect(input.exists()).toBe(true)
+    await input.trigger('click')
+    await input.trigger('focus')
+    await input.setValue(text)
+    await settle()
+    return input
+  }
+
+  it('用例6.1: menuProps 透传——attach 即锚定容器元素本体（对象同一性）、maxHeight 240、contentClass 含 tag-suggest-menu', async () => {
+    const wrapper = mount(RecordFormPage)
+    await flushPromises()
+
+    const anchor = wrapper.find('.tag-field-anchor')
+    expect(anchor.exists()).toBe(true)
+    // ref 挂载后恒可用：attach 必须**就是**那个 DOM 元素（同一性断言，非「形状相似」）
+    expect(wrapper.vm.tagMenuProps.attach).toBe(anchor.element)
+    expect(wrapper.vm.tagFieldAnchorRef).toBe(anchor.element)
+    // 需求 4.3：最大高 + 内滚走 VMenu 原生 prop（不由 CSS 兜、也不新增组件）
+    expect(wrapper.vm.tagMenuProps.maxHeight).toBe(240)
+    expect(String(wrapper.vm.tagMenuProps.contentClass)).toContain('tag-suggest-menu')
+    // 降级回落：ref 未挂载（理论竞态）→ false = body 现状，锁在源码口径上（设计 §4.3）
+    expect(recordFormSource).toMatch(/attach:\s*tagFieldAnchorRef\.value\s*\?\?\s*false/)
+    // menuProps 经 :menu-props 单一入口透传，且只有标签控件挂锚（其余浮层零改动）
+    expect(recordFormSource.match(/:menu-props="tagMenuProps"/g)).toHaveLength(1)
+    await wrapper.unmount()
+  })
+
+  it('用例6.2: ?raw 源码红线——容器 relative + !important 锁 left/width + max-height 内滚 + fab-transition 保留', () => {
+    // 锚定参照系：wrap 必须 relative（overlay absolute 的定位原点）
+    expect(recordFormSource).toMatch(/\.tag-field-anchor\s*\{\s*position:\s*relative;\s*\}/)
+    // 覆写块：left/width 两条 !important 锁死水平对齐与同宽（非 important 压不住策略写的内联值）
+    expect(recordFormSource).toMatch(/\.tag-field-anchor\s+:deep\(\.tag-suggest-menu\)\s*\{/)
+    const deep = recordFormSource.slice(
+      recordFormSource.indexOf('.tag-field-anchor :deep(.tag-suggest-menu)'),
+      recordFormSource.indexOf('.template-chip')
+    )
+    expect(deep).toMatch(/left:\s*0\s*!important;/)
+    expect(deep).toMatch(/width:\s*100%\s*!important;/)
+    expect(deep).toMatch(/max-height:\s*240px;/)
+    expect(deep).toMatch(/overflow-y:\s*auto;/)
+    expect(deep).toMatch(/border-radius:\s*12px;/)
+    // §十四 展开动画统一口径红线：沿用调用点 fab-transition，M4 不引入新动画体系
+    expect(recordFormSource).toMatch(/transition="fab-transition"/)
+    expect(deep).not.toMatch(/transition|animation/)
+    expect(recordFormSource).not.toMatch(/tag-suggest-panel|v-text-field[\s\S]{0,80}tag-suggest/)
+  })
+
+  it('用例6.3: 真实 Vuetify——输入触发搜索后建议层渲染在 .tag-field-anchor 子树内（teleport-to-element 生效 + v-overlay--absolute 结构侧证）', async () => {
+    searchTags.mockResolvedValue(TAGS_MILK.map((t) => ({ ...t })))
+    const wrapper = await mountReal()
+
+    await typeIntoTagField(wrapper, '奶')
+    expect(searchTags).toHaveBeenCalledWith('奶')
+    expect(wrapper.vm.tagSearchResults).toHaveLength(2)
+
+    const anchor = anchorOf(wrapper)
+    const overlay = anchor.querySelector('.v-overlay')
+    const content = contentOf(wrapper)
+    // 判据①的结构侧证：overlay 根节点进了 wrap 容器，且因 attach 翻成 absolute 定位（不再是 body 下的 fixed 游离层）
+    expect(overlay).not.toBeNull()
+    expect(overlay.classList.contains('v-overlay--absolute')).toBe(true)
+    expect(overlay.parentElement).not.toBe(document.body)
+    expect(content).not.toBeNull()
+    expect(content.classList.contains('tag-suggest-menu')).toBe(true) // contentClass 确实落到 overlay content
+    expect(content.closest('.tag-field-anchor')).toBe(anchor) // 父子关系成立 → 随容器滚动吸附
+    // maxHeight 走 VMenu 原生 prop 且落到 DOM 内联样式（需求 4.3 内滚 + 最大高，非 JS 对象自嗨）
+    expect(content.style.maxHeight).toBe('240px')
+    expect(anchor.querySelector('.v-overlay-container .v-overlay--absolute')).toBe(overlay)
+    // 建议项在锚定层内可读可点（25 条内滚由 maxHeight 240 保证，见 6.2）
+    expect(content.textContent).toContain('奶茶')
+    expect(content.textContent).toContain('牛奶')
+  })
+
+  it('用例6.4: no-data 空态槽在同一锚定层内展示（「无匹配标签」位于 .tag-field-anchor 子树，零改动）', async () => {
+    searchTags.mockResolvedValue([]) // 查无同名
+    const wrapper = await mountReal()
+
+    await typeIntoTagField(wrapper, '全新标签')
+    const content = contentOf(wrapper)
+    expect(content).not.toBeNull()
+    expect(content.textContent).toContain('无匹配标签，按回车创建「全新标签」')
+    // 空态未外迁成第二块浮层：槽位仍在同一控件模板内（任务 5.5）
+    expect(recordFormSource).toMatch(/<template v-slot:no-data>/)
+    expect(anchorOf(wrapper).querySelectorAll('.v-overlay__content')).toHaveLength(1)
+  })
+
+  it('用例6.5: 回归红线——M4 只加模板/样式，M3 归一链路与控件公开面零改动', async () => {
+    searchTags.mockResolvedValue([])
+    const wrapper = mount(RecordFormPage) // 与 M3 组同口径（无 Vuetify，纯逻辑面）
+    await flushPromises()
+
+    wrapper.vm.amount = '30'
+    wrapper.vm.categoryId = 1
+    wrapper.vm.tagSearchQuery = '奶茶'
+    await nextTick()
+    await wrapper.vm.submit()
+
+    // 归一三段照旧：无同名 → ③建标签 → tag_id 入载荷 → 合并 toast
+    expect(searchTags).toHaveBeenCalledWith('奶茶')
+    expect(createTag).toHaveBeenCalledWith({ name: '奶茶', category_id: 1 })
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(NEW_TAG_ID)
+    expect(mockShowToast).toHaveBeenCalledWith('记账成功，已新建标签「奶茶」')
+
+    // 被既有测试消费的公开面不得因 M4 改名
+    for (const key of [
+      'onTagSearch',
+      'onTagSelected',
+      'onCreateTagFromSearch',
+      'tagSearchResults',
+      'tagSearching',
+      'tagSearchQuery',
+      'selectedTagId',
+      'selectedTagName',
+      'submit',
+      'canSubmit',
+    ]) {
+      expect(wrapper.vm[key]).toBeDefined()
+    }
+    // 控件本体既有绑定原样在场（浮层改造未吞事件/未换控件）
+    expect(recordFormSource).toMatch(/v-model="selectedTagId"/)
+    expect(recordFormSource).toMatch(/v-model:search="tagSearchQuery"/)
+    expect(recordFormSource).toMatch(/@update:search="onTagSearch"/)
+    expect(recordFormSource).toMatch(/@update:model-value="onTagSelected"/)
+    expect(recordFormSource).toMatch(/@keydown\.enter="onCreateTagFromSearch"/)
+    expect(recordFormSource).toMatch(/:items="tagSearchResults"/)
+    // 控件未换成 v-text-field（预案 B 未启用），也无自绘建议层
+    expect(recordFormSource).toMatch(/<v-autocomplete/)
+    expect(recordFormSource).not.toMatch(/tag-suggest-panel/)
+    // 任务 5.4：✕ 与浮层焦点沿用 VMenu 默认（点选即关）——不新增 persistent、不覆写 closeOnContentClick
+    expect(recordFormSource).not.toMatch(/persistent|close-on-content-click|closeOnContentClick/)
+    await wrapper.unmount()
+  })
+
+  // ── 6.7 D9 联合验收链路（M3 + M4 合流的自动化承载；真机链路/软键盘项仍留人工）──────
+  it('用例6.7a（D9）: 真实输入 → 锚定建议层出现 → 层内点选 → 点保存：关联既有标签零创建', async () => {
+    searchTags.mockResolvedValue(TAGS_MILK.map((t) => ({ ...t })))
+    const wrapper = await mountReal()
+
+    await typeIntoTagField(wrapper, '奶')
+    const content = contentOf(wrapper)
+    expect(content).not.toBeNull()
+    const options = Array.from(content.querySelectorAll('.v-list-item'))
+    expect(options).toHaveLength(2)
+
+    options[0].dispatchEvent(new window.MouseEvent('click', { bubbles: true })) // 层内点选（非 vm 直调）
+    await settle(50)
+    expect(wrapper.vm.selectedTagId).toBe(101)
+    expect(wrapper.vm.selectedTagName).toBe('奶茶')
+
+    wrapper.vm.amount = '28'
+    await nextTick()
+    const submitBtn = wrapper.find('button.submit-btn')
+    expect(submitBtn.exists()).toBe(true)
+    await submitBtn.trigger('click')
+    await settle(50)
+
+    expect(createTag).not.toHaveBeenCalled() // 点选路径：零建标签（需求 3.5 旧路径不回退）
+    expect(createRecord).toHaveBeenCalledTimes(1)
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(101)
+    expect(mockShowToast).toHaveBeenCalledWith('记账成功')
+  })
+
+  it('用例6.7b（D9）: 真实输入 → 不点选不回车 → 直接点保存：锚定层在位时免回车仍建标签并关联', async () => {
+    searchTags.mockResolvedValue([]) // ②兜底亦无同名 → 走 ③创建
+    const wrapper = await mountReal()
+
+    await typeIntoTagField(wrapper, '打车')
+    expect(wrapper.vm.selectedTagId).toBeNull() // 未点选、未回车
+    expect(wrapper.find('.tag-field-anchor').element.contains(contentOf(wrapper))).toBe(true)
+
+    wrapper.vm.amount = '18'
+    await nextTick()
+    await wrapper.find('button.submit-btn').trigger('click')
+    await settle(50)
+
+    expect(createTag).toHaveBeenCalledTimes(1)
+    expect(createTag).toHaveBeenCalledWith({ name: '打车', category_id: 1 })
+    expect(createRecord.mock.calls[0][0].tag_id).toBe(NEW_TAG_ID)
+    expect(mockShowToast).toHaveBeenCalledWith('记账成功，已新建标签「打车」')
+    expect(wrapper.vm.submitting).toBe(false)
   })
 })

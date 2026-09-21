@@ -144,32 +144,38 @@
       <!-- Tag Input (Search Autocomplete) -->
       <div class="mb-3">
         <div class="text-caption text-grey mb-1">标签</div>
-        <v-autocomplete
-          v-model="selectedTagId"
-          v-model:search="tagSearchQuery"
-          transition="fab-transition"
-          :items="tagSearchResults"
-          item-title="name"
-          item-value="id"
-          placeholder="输入标签名称搜索"
-          hide-details
-          variant="outlined"
-          density="compact"
-          clearable
-          no-filter
-          :loading="tagSearching"
-          @update:search="onTagSearch"
-          @update:model-value="onTagSelected"
-          @keydown.enter="onCreateTagFromSearch"
-        >
-          <template v-slot:no-data>
-            <v-list-item v-if="tagSearchQuery && tagSearchQuery.length >= 1">
-              <v-list-item-title class="text-caption text-grey">
-                无匹配标签，按回车创建「{{ tagSearchQuery }}」
-              </v-list-item-title>
-            </v-list-item>
-          </template>
-        </v-autocomplete>
+        <!-- v1.4.3-boot M4（需求四 / 设计 §4.2.1，D5）：锚定容器 = 建议层的新定位参照系。
+             position:relative 使内部 VMenu（attach 后 absolute）以本容器为几何原点，
+             随页面滚动天然吸附输入框，不再漂移成游离浮层；控件本体与 v-model/搜索/选中逻辑零改动。 -->
+        <div ref="tagFieldAnchorRef" class="tag-field-anchor">
+          <v-autocomplete
+            v-model="selectedTagId"
+            v-model:search="tagSearchQuery"
+            transition="fab-transition"
+            :items="tagSearchResults"
+            item-title="name"
+            item-value="id"
+            placeholder="输入标签名称搜索"
+            hide-details
+            variant="outlined"
+            density="compact"
+            clearable
+            no-filter
+            :loading="tagSearching"
+            :menu-props="tagMenuProps"
+            @update:search="onTagSearch"
+            @update:model-value="onTagSelected"
+            @keydown.enter="onCreateTagFromSearch"
+          >
+            <template v-slot:no-data>
+              <v-list-item v-if="tagSearchQuery && tagSearchQuery.length >= 1">
+                <v-list-item-title class="text-caption text-grey">
+                  无匹配标签，按回车创建「{{ tagSearchQuery }}」
+                </v-list-item-title>
+              </v-list-item>
+            </template>
+          </v-autocomplete>
+        </div>
       </div>
       <v-divider class="mb-3" />
 
@@ -271,6 +277,17 @@ const tagSearchQuery = ref('')
 const tagSearchResults = ref([])
 const tagSearching = ref(false)
 let searchDebounceTimer = null
+
+// ── v1.4.3-boot M4 标签建议层锚定（需求四 / 设计 §4.2.1，D5）─────────────────
+// Vuetify 的 VSelect 把 menuProps 直传内部 VMenu（3.12.6 源码核验），attach 传元素即把
+// overlay 挂进该容器并以它为定位参照 → 滚动/软键盘弹起时不再漂移。
+// ref 未挂载（理论竞态）时回落 false = body 现状，降级无损、不算回退（设计 §4.3）。
+const tagFieldAnchorRef = ref(null)
+const tagMenuProps = computed(() => ({
+  attach: tagFieldAnchorRef.value ?? false,
+  maxHeight: 240, // 需求 4.3：最大高 + 内滚（VMenu 原生 prop，不引入新体系）
+  contentClass: 'tag-suggest-menu', // scoped !important 锁 left/width 的覆写锚点
+}))
 
 // v1.4.3 M8：分类收支共用，全量单列表即记账可选分类（不再按交易 type 过滤）；
 // 九宫格图标/选中色继续按**交易** type 着色（records.type 语义不变）
@@ -640,6 +657,22 @@ onMounted(async () => {
 
 .active-category {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* v1.4.3-boot M4 标签建议层锚定（需求四 / 设计 §4.2.1）：
+   attach 后 overlay 是本容器后代 → :deep 可达。上缘紧贴由 connected 策略几何保证，
+   水平对齐与同宽由下面两条 !important 锁死（覆写策略写在 .v-overlay__content 上的内联值，
+   非 important 压不住）；max-height + overflow-y 承需求 4.3「25 条内滚、不撑爆视口」。 */
+.tag-field-anchor {
+  position: relative;
+}
+
+.tag-field-anchor :deep(.tag-suggest-menu) {
+  left: 0 !important;
+  width: 100% !important;
+  border-radius: 12px;
+  max-height: 240px;
+  overflow-y: auto;
 }
 
 .template-chip {
