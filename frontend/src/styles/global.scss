@@ -286,6 +286,27 @@ body {
   color: #E6E1E5 !important;
 }
 
+/* ── v1.4.3-boot M6：红/绿语义金额专用类 ─────────────────────────
+   紧邻上方深色文字规则（.v-theme--dark .text-h5/.text-h6/.text-subtitle-x/
+   .font-weight-bold 与 .text-body-1/.text-body-2 强制色，:275-287）之后，
+   与之互注：明暗两主题同色（#FF6B6B/#20C997 深底浅底均可辨），这里的
+   !important 是「对抗上方 .v-theme--dark 排版类强制色」的显式让渡——
+   本组声明与深色文字体系并存，**互不削弱**（需求六红线：深色规则不删不削弱）。
+   金额节点一律用本组类，禁止再写内联 color（防回归测试锁）。 */
+.amount-expense { color: #FF6B6B !important; }   /* 支出红：配 − 前缀 */
+.amount-income  { color: #20C997 !important; }   /* 收入绿：配 + 前缀 */
+.amount-neutral { color: #9E9E9E !important; }   /* 结余零值灰（沿 balanceColor 现值） */
+
+/* 特异度提级（深色下真正生效的必要条件）：上方深色块是 `.v-theme--dark + 排版类` 的
+   (0,2,0) 复合选择器，而层叠在「同为 author 声明 + 同为 !important」时**仍按特异度择优**
+   （源序只用于打平），故单类 (0,1,0) 即便带 !important 也依旧被压成白/浅灰。
+   沿用本文件既定的「重复类名提级 + !important」手法（见上方 M14 slide-y 时长收敛）把本组
+   提升到 (0,2,0) 并借助**紧邻其后的源序**胜出——深色规则一字未改，只是被显式让位。 */
+.amount-expense.amount-expense { color: #FF6B6B !important; }
+.amount-income.amount-income   { color: #20C997 !important; }
+.amount-neutral.amount-neutral { color: #9E9E9E !important; }
+/* .amount-node 为无样式测试锚点类（仅供 ?raw/DOM 断言「金额节点走类而非内联」），不定义样式 */
+
 /* 副标题/说明文字：中灰（提高对比度） */
 .v-theme--dark .text-caption {
   color: #C8C3CE !important;

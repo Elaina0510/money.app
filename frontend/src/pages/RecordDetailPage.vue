@@ -30,8 +30,8 @@
           {{ record.type === 'expense' ? '支出' : '收入' }}
         </div>
         <div
-          class="amount-display font-weight-bold"
-          :style="{ color: record.type === 'expense' ? '#FF6B6B' : '#20C997' }"
+          class="amount-display font-weight-bold amount-node"
+          :class="record.type === 'expense' ? 'amount-expense' : 'amount-income'"
         >
           {{ record.type === 'expense' ? '-' : '+' }}{{ formatAmount(record.amount) }}
         </div>

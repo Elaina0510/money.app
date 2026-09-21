@@ -134,10 +134,10 @@
             <template v-slot:append>
               <div class="d-flex align-center">
                 <div
-                  class="font-weight-bold text-body-1 mr-2"
-                  :style="{ color: record.type === 'expense' ? '#FF6B6B' : '#20C997' }"
+                  class="font-weight-bold text-body-1 mr-2 amount-node"
+                  :class="record.type === 'expense' ? 'amount-expense' : 'amount-income'"
                 >
-                  {{ record.type === 'expense' ? '-' : '+' }}{{ record.amount }}
+                  {{ record.type === 'expense' ? '-' : '+' }}{{ formatAmount(record.amount) }}
                 </div>
                 <v-icon size="small" color="grey-lighten-1">mdi-chevron-right</v-icon>
               </div>
@@ -170,6 +170,7 @@
 import { ref, onMounted, watch, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { getRecords, getEarliestYear } from '@/api/records'
+import { formatAmount } from '@/utils/format'
 import { useRecordsStore } from '@/stores/useRecordsStore'
 import { useAppStore } from '@/stores/useAppStore'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'

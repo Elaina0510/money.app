@@ -47,7 +47,7 @@
         <v-card class="pa-3 text-center summary-card" rounded="xl">
           <v-icon color="#FF6B6B" size="24" class="mb-1">mdi-trending-down</v-icon>
           <div class="text-caption text-grey">支出</div>
-          <div class="text-body-1 font-weight-bold" style="color: #FF6B6B">
+          <div class="text-body-1 font-weight-bold amount-node amount-expense">
             {{ formatAmount(summary?.total_expense || 0) }}
           </div>
         </v-card>
@@ -56,7 +56,7 @@
         <v-card class="pa-3 text-center summary-card" rounded="xl">
           <v-icon color="#20C997" size="24" class="mb-1">mdi-trending-up</v-icon>
           <div class="text-caption text-grey">收入</div>
-          <div class="text-body-1 font-weight-bold" style="color: #20C997">
+          <div class="text-body-1 font-weight-bold amount-node amount-income">
             {{ formatAmount(summary?.total_income || 0) }}
           </div>
         </v-card>
@@ -65,7 +65,10 @@
         <v-card class="pa-3 text-center summary-card" rounded="xl">
           <v-icon :color="balanceColor" size="24" class="mb-1">mdi-wallet</v-icon>
           <div class="text-caption text-grey">结余</div>
-          <div class="text-body-1 font-weight-bold" :style="{ color: balanceColor }">
+          <div
+            class="text-body-1 font-weight-bold amount-node"
+            :class="balance > 0 ? 'amount-income' : balance < 0 ? 'amount-expense' : 'amount-neutral'"
+          >
             {{ formatAmount(balance) }}
           </div>
         </v-card>

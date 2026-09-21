@@ -92,6 +92,8 @@ const ROW_SLOT_STUBS = {
     template: '<div><slot name="prepend" /><slot /><slot name="append" /></div>',
   },
 }
+// M6 起行金额颜色由 global.scss 的 .amount-* 专用类承载（内联 style 在深色主题下被排版
+// !important 压制）；本组色值正则改作「专用类声明值」断言用。
 // jsdom 的 cssstyle 会把十六进制色序列化为 rgb()，两种写法都视为命中
 const EXPENSE_COLOR = /#FF6B6B|rgb\(255,\s*107,\s*107\)/i
 const INCOME_COLOR = /#20C997|rgb\(32,\s*201,\s*151\)/i
@@ -177,9 +179,11 @@ describe('RecordListPage - Category Icons', () => {
     expect(rowIcon.attributes('color')).toBe('primary')
     expect(rowIcon.text()).toContain('mdi-food')
     // 支出语义仍由金额红 + 「-」前缀表达
+    // 【v1.4.3-boot M6 口径反转】红/绿由内联 style → .amount-expense 专用类（深色主题下内联被
+    // .v-theme--dark 排版 !important 压制，设计 §6.1）；金额文本改过 formatAmount 完整格式。
     const amount = wrapper.find('.record-card .font-weight-bold')
-    expect(amount.attributes('style')).toMatch(EXPENSE_COLOR)
-    expect(amount.text()).toContain('-100')
+    expect(amount.classes()).toContain('amount-expense')
+    expect(amount.text()).toBe('-¥100.00')
   })
 
   it('should render same entry-avatar primary scheme for income rows with green amount (M10)', async () => {
@@ -202,10 +206,10 @@ describe('RecordListPage - Category Icons', () => {
     const avatar = wrapper.find('.entry-avatar')
     expect(avatar.exists()).toBe(true)
     expect(avatar.find('v-icon').attributes('color')).toBe('primary')
-    // 收入语义由金额绿 + 「+」前缀表达
+    // 收入语义由金额绿 + 「+」前缀表达（M6：内联 style → .amount-income 专用类）
     const amount = wrapper.find('.record-card .font-weight-bold')
-    expect(amount.attributes('style')).toMatch(INCOME_COLOR)
-    expect(amount.text()).toContain('+1000')
+    expect(amount.classes()).toContain('amount-income')
+    expect(amount.text()).toBe('+¥1,000.00')
   })
 
   it('should display tag name when available', async () => {
@@ -1163,12 +1167,13 @@ describe('RecordListPage - 行图标 primary 色系统一（M10）', () => {
 
   it('用例3: 图标仍是分类图标且缺失回退 mdi-circle；金额区红/绿 + −/+ 前缀口径不动', () => {
     expect(recordListSource).toMatch(/\{\{\s*record\.category_icon\s*\|\|\s*'mdi-circle'\s*\}\}/)
-    // 金额仅此处保留收支色（任务 2.2 金额区不动）
+    // 【v1.4.3-boot M6 改写，任务 5.4】金额色由内联三元 → .amount-* 专用类（深色红线见 M6 组用例1），
+    // 金额文本改过 formatAmount；红/绿与 −/+ 前缀语义口径不动（D7）
     expect(recordListSource).toMatch(
-      /color:\s*record\.type === 'expense'\s*\?\s*'#FF6B6B'\s*:\s*'#20C997'/,
+      /:class="record\.type === 'expense' \? 'amount-expense' : 'amount-income'"/,
     )
     expect(recordListSource).toMatch(
-      /\{\{\s*record\.type === 'expense'\s*\?\s*'-'\s*:\s*'\+'\s*\}\}\s*\{\{\s*record\.amount\s*\}\}/,
+      /\{\{\s*record\.type === 'expense'\s*\?\s*'-'\s*:\s*'\+'\s*\}\}\s*\{\{\s*formatAmount\(record\.amount\)\s*\}\}/,
     )
   })
 })
@@ -1222,5 +1227,134 @@ describe('RecordListPage - 批量操作条进出对称动画（M14）', () => {
     expect(recordListSource).not.toMatch(/slideDown|@keyframes/)
     // 不接原点：条贴列表顶部，位移方向即触发语境（任务 7.2）
     expect(recordListSource).not.toMatch(/batch-bar[\s\S]{0,80}transformOrigin/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// v1.4.3-boot M6（需求六）：金额红/绿配色全站恢复 + 列表金额格式对齐
+//   根因（设计 §6.1）：深色主题 .v-theme--dark .font-weight-bold / .text-body-x 以
+//   color: … !important 压制内联配色（样式表 !important > 内联）→ 深色下红绿全灭。
+//   修复（D7）：新增 .amount-expense/.amount-income/.amount-neutral 专用类（!important、
+//   明暗同色）+ 七节点内联→类迁移；**深色排版强制规则不删不削弱**（红线 2，用例1b 锁）。
+//   本组承载设计 §6.4 用例 1（global.scss raw）/ 2、3（本页 ?raw + DOM）/ 5（format.js 导出面）；
+//   用例 4（既有固化用例改写）落在本文件 M10 组：DOM 两条 + ?raw 用例3 两条。
+//   其余四文件 ?raw（用例 2 全站汇总）与统计页三卡/结余三态（用例 3）见 StatisticsPage.test.js。
+// ---------------------------------------------------------------------------
+import * as formatApi from '@/utils/format'
+
+/** 取 global.scss 里某个类选择器（可传 "amount-expense.amount-expense" 双类）的声明块 */
+function cssClassRule(source, className) {
+  const escaped = className.replace(/\./g, '\\.')
+  const hit = source.match(new RegExp(`\\.${escaped}\\s*\\{[^}]*\\}`))
+  expect(hit, `global.scss 未定义 .${className}`).toBeTruthy()
+  return hit[0]
+}
+
+describe('RecordListPage - 金额红/绿语义专用类配色（M6）', () => {
+  const globalStyles = readSourceFile(join('src', 'styles', 'global.scss'))
+  const formatSource = readSourceFile(join('src', 'utils', 'format.js'))
+
+  it('用例1（设计 §6.4-1 / 任务 5.1）: global.scss 三张专用类声明在场且带 !important、明暗同色', () => {
+    expect(cssClassRule(globalStyles, 'amount-expense')).toMatch(/color:\s*#FF6B6B\s*!important/)
+    expect(cssClassRule(globalStyles, 'amount-income')).toMatch(/color:\s*#20C997\s*!important/)
+    expect(cssClassRule(globalStyles, 'amount-neutral')).toMatch(/color:\s*#9E9E9E\s*!important/)
+    // 类色值与原内联口径逐字相同 → 浅色模式零变化（色值正则复用为类色值锁）
+    expect(cssClassRule(globalStyles, 'amount-expense')).toMatch(EXPENSE_COLOR)
+    expect(cssClassRule(globalStyles, 'amount-income')).toMatch(INCOME_COLOR)
+    // 特异度提级声明同色同重要度在场：深色块为 .v-theme--dark + 排版类的 (0,2,0) 复合选择器，
+    // 而层叠在「同为 author + 同为 !important」时按特异度择优 → 单类 (0,1,0) 深色下仍会被压白，
+    // 必须有双类提级（仓库既定手法，见 global.scss M14 slide-y 收敛）本模块才真正生效
+    expect(cssClassRule(globalStyles, 'amount-expense.amount-expense')).toMatch(
+      /color:\s*#FF6B6B\s*!important/,
+    )
+    expect(cssClassRule(globalStyles, 'amount-income.amount-income')).toMatch(
+      /color:\s*#20C997\s*!important/,
+    )
+    expect(cssClassRule(globalStyles, 'amount-neutral.amount-neutral')).toMatch(
+      /color:\s*#9E9E9E\s*!important/,
+    )
+    // .amount-node 仅测试锚点，不得定义任何样式
+    expect(globalStyles).not.toMatch(/\.amount-node\s*\{/)
+  })
+
+  it('用例1b（红线 2 / 任务 1.2）: 深色排版强制规则逐字在场——修复未削弱全局可读性规则', () => {
+    expect(globalStyles).toMatch(
+      /\.v-theme--dark \.text-h5,\s*\.v-theme--dark \.text-h6,\s*\.v-theme--dark \.text-subtitle-1,\s*\.v-theme--dark \.text-subtitle-2,\s*\.v-theme--dark \.font-weight-bold\s*\{\s*color: #FFFFFF !important;\s*\}/,
+    )
+    expect(globalStyles).toMatch(
+      /\.v-theme--dark \.text-body-1,\s*\.v-theme--dark \.text-body-2\s*\{\s*color: #E6E1E5 !important;\s*\}/,
+    )
+    // 源序锁：提级块与深色块同为 (0,2,0)，打平时后出现者胜 → 提级块必须始终排在其之后
+    const darkIdx = globalStyles.indexOf('.v-theme--dark .font-weight-bold')
+    expect(darkIdx).toBeGreaterThan(-1)
+    for (const cls of ['amount-expense', 'amount-income', 'amount-neutral']) {
+      expect(globalStyles.indexOf(`.${cls}.${cls}`)).toBeGreaterThan(darkIdx)
+    }
+  })
+
+  it('用例2（设计 §6.4-2 / 任务 5.2）: 本页 ?raw——行金额挂语义类与锚点类，内联三元色与裸金额零残留', () => {
+    expect(recordListSource).toMatch(
+      /class="font-weight-bold text-body-1 mr-2 amount-node"/,
+    )
+    expect(recordListSource).toMatch(
+      /:class="record\.type === 'expense' \? 'amount-expense' : 'amount-income'"/,
+    )
+    // 反向红线：内联 :style 三元色、未经 formatAmount 的裸金额、静态内联色
+    expect(recordListSource).not.toMatch(/:style="\{ color: record\.type/)
+    expect(recordListSource).not.toMatch(/\{\{\s*record\.amount\s*\}\}/)
+    expect(recordListSource).not.toMatch(/style="color: #FF|style="color: #20/)
+    // 格式对齐的依赖面：本页此前零引用 formatAmount
+    expect(recordListSource).toMatch(/\{\{\s*formatAmount\(record\.amount\)\s*\}\}/)
+    expect(recordListSource).toMatch(/import \{ formatAmount \} from '@\/utils\/format'/)
+    // 前缀维持 ASCII '-'（不引入 U+2212 作前缀字面量）
+    expect(recordListSource).toMatch(/\? '-'\s*:\s*'\+'/)
+    expect(recordListSource).not.toMatch(/'[−]'/)
+  })
+
+  it('用例3（设计 §6.4-3 / 任务 5.3）: DOM 行金额 = 语义类 + 锚点类，文本为 −¥128.00 完整格式', async () => {
+    const wrapper = mount(RecordListPage, { global: { stubs: ROW_SLOT_STUBS } })
+    await flushPromises()
+
+    wrapper.vm.records = [
+      {
+        id: 1,
+        type: 'expense',
+        amount: 128,
+        category_icon: 'mdi-food',
+        category_name: '餐饮',
+        consume_time: '2026-06-06 12:00',
+      },
+      {
+        id: 2,
+        type: 'income',
+        amount: 3000,
+        category_icon: 'mdi-cash',
+        category_name: '工资',
+        consume_time: '2026-06-05 09:00',
+      },
+    ]
+    await nextTick()
+
+    const amounts = wrapper.findAll('.record-card .amount-node')
+    expect(amounts).toHaveLength(2)
+    expect(amounts[0].classes()).toContain('amount-expense')
+    expect(amounts[1].classes()).toContain('amount-income')
+    // 同屏一红一绿、前缀一 − 一 +，且金额为千分位 + 两位小数完整格式
+    expect(amounts[0].text()).toBe('-¥128.00')
+    expect(amounts[1].text()).toBe('+¥3,000.00')
+    for (const node of amounts) {
+      expect(node.text()).toMatch(/^[+-]¥[\d,]+\.\d{2}$/)
+      // 颜色不再走内联 style（否则深色下被排版 !important 压制）
+      expect(node.attributes('style')).toBeUndefined()
+    }
+    wrapper.unmount()
+  })
+
+  it('用例5（设计 §6.4-5 / 任务 5.5）: utils/format.js 导出面收敛——死助手 getTypeColor 已删除', () => {
+    expect(formatApi.getTypeColor).toBeUndefined()
+    expect(typeof formatApi.formatAmount).toBe('function')
+    expect(formatSource).not.toMatch(/getTypeColor/)
+    // 配色真源唯一在 CSS 类：JS 侧不保留红绿字面量副本（防漂移，D7「删除」分支）
+    expect(formatSource).not.toMatch(/#FF6B6B|#20C997/)
   })
 })

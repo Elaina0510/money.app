@@ -75,7 +75,7 @@
         <v-card class="pa-4 text-center today-card" rounded="xl">
           <v-icon color="#FF6B6B" size="28" class="mb-1">mdi-trending-down</v-icon>
           <div class="text-caption text-grey">期间支出</div>
-          <div class="text-h6 font-weight-bold" style="color: #FF6B6B">
+          <div class="text-h6 font-weight-bold amount-node amount-expense">
             {{ formatAmount(summary?.total_expense || 0) }}
           </div>
         </v-card>
@@ -84,7 +84,7 @@
         <v-card class="pa-4 text-center today-card" rounded="xl">
           <v-icon color="#20C997" size="28" class="mb-1">mdi-trending-up</v-icon>
           <div class="text-caption text-grey">期间收入</div>
-          <div class="text-h6 font-weight-bold" style="color: #20C997">
+          <div class="text-h6 font-weight-bold amount-node amount-income">
             {{ formatAmount(summary?.total_income || 0) }}
           </div>
         </v-card>
@@ -116,7 +116,7 @@
             <v-icon size="small" :color="item.color">{{ item.icon || 'mdi-circle' }}</v-icon>
           </v-avatar>
           <div class="flex-grow-1 text-body-2">{{ item.category_name }}</div>
-          <div class="text-body-2 font-weight-bold" style="color: #FF6B6B">
+          <div class="text-body-2 font-weight-bold amount-node amount-expense">
             {{ formatAmount(item.total) }}
           </div>
         </div>
@@ -162,8 +162,8 @@
           </v-list-item-subtitle>
           <template v-slot:append>
             <div
-              class="font-weight-bold text-body-1"
-              :style="{ color: record.type === 'expense' ? '#FF6B6B' : '#20C997' }"
+              class="font-weight-bold text-body-1 amount-node"
+              :class="record.type === 'expense' ? 'amount-expense' : 'amount-income'"
             >
               {{ record.type === 'expense' ? '-' : '+' }}{{ formatAmount(record.amount) }}
             </div>

@@ -97,7 +97,7 @@ import {
   updateBudget,
   deleteBudget,
 } from '@/api/budgets'
-import { getByCategory, getTrend } from '@/api/statistics'
+import { getSummary, getByCategory, getTrend } from '@/api/statistics'
 import StatisticsPage from './StatisticsPage.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 // v1.4.3 M14：预算对话框外壳收编断言所需
@@ -940,5 +940,119 @@ describe('v1.4.3 M14 预算新增/编辑对话框收编 AppDialog', () => {
 
     wrapper.unmount()
     rectSpy.mockRestore()
+  })
+})
+
+// ---------------------------------------------------------------------------
+// v1.4.3-boot M6（需求六）：金额红/绿配色全站恢复——全站汇总锁 + 统计页摘要卡
+//   根因：深色主题排版类 !important 压制内联配色（设计 §6.1）→ 七节点内联→类迁移。
+//   本组承载设计 §6.4 用例 2（五文件 ?raw 汇总，含无独立测试文件的 RecordDetailPage.vue）
+//   与用例 3（本页摘要卡 DOM + 结余三态→类映射参数化）。
+//   三张专用类与深色强制规则的红线锁在 RecordListPage.test.js M6 组用例1/1b，不重复定义。
+// ---------------------------------------------------------------------------
+const M6_AMOUNT_NODES = [
+  { file: 'RecordListPage.vue', label: '#1 账单列表行金额' },
+  { file: 'DashboardPage.vue', label: '#2/#7/#8 主页期间卡·排行金额·近账行' },
+  { file: 'RecordDetailPage.vue', label: '#3 详情页大数字' },
+  { file: 'StatisticsPage.vue', label: '#4/#5/#6 统计页三卡' },
+]
+
+function readPageSource(file) {
+  return fs.readFileSync(path.resolve(cwd(), 'src/pages', file), 'utf8')
+}
+
+describe('v1.4.3-boot M6 金额红/绿语义专用类（全站配色恢复）', () => {
+  it('用例2a（设计 §6.4-2 / 任务 5.2）: 四页金额节点一律挂 amount-* 语义类，文字金额零内联 color', () => {
+    for (const { file, label } of M6_AMOUNT_NODES) {
+      const src = readPageSource(file)
+      expect(src, `${label}（${file}）未挂语义色类`).toMatch(/amount-expense/)
+      expect(src, `${label}（${file}）未挂 amount-node 锚点`).toMatch(/amount-node/)
+      // 防扩散锁（设计 §6.2.4）：文字金额节点不得再写内联 color
+      expect(src, `${label}（${file}）残留 :style 内联色`).not.toMatch(/:style="\{ color:/)
+      expect(src, `${label}（${file}）残留静态内联色`).not.toMatch(/style="color: #FF|style="color: #20/)
+    }
+    // global.scss 三张专用类在场（同段落声明，色值 !important 锁见 RecordListPage.test.js 用例1）
+    for (const cls of ['amount-expense', 'amount-income', 'amount-neutral']) {
+      expect(globalStyleSource).toMatch(new RegExp(`\\.${cls}\\s*\\{`))
+    }
+    // 排版类（字号/字重）全部保留——只把颜色让给专用类
+    expect(globalStyleSource).toMatch(/\.v-theme--dark \.font-weight-bold/)
+  })
+
+  it('用例2b（设计 §6.4-2）: 详情页大数字同型迁移——文本口径（−/+ + formatAmount）不动', () => {
+    const detail = readPageSource('RecordDetailPage.vue')
+    expect(detail).toMatch(/class="amount-display font-weight-bold amount-node"/)
+    expect(detail).toMatch(
+      /:class="record\.type === 'expense' \? 'amount-expense' : 'amount-income'/,
+    )
+    expect(detail).toMatch(
+      /\{\{\s*record\.type === 'expense'\s*\?\s*'-'\s*:\s*'\+'\s*\}\}\s*\{\{\s*formatAmount\(record\.amount\)\s*\}\}/,
+    )
+    // 前缀维持 ASCII '-'（不引入 U+2212 作前缀字面量）
+    expect(detail).not.toMatch(/'[−]'/)
+    // v-avatar / v-icon 的 :color 属性不在禁列（图标色不受排版规则压制），原样保留
+    expect(detail).toMatch(/<v-icon :color="record\.type === 'expense' \? '#FF6B6B' : '#20C997'/)
+  })
+
+  it('用例2c（设计 §6.4-2）: 统计页三卡挂类，balanceColor 仅供同行 v-icon 消费', () => {
+    // #4/#5 静态类（支出恒红 / 收入恒绿，无需三元）
+    expect(statisticsPageSource).toMatch(
+      /class="text-body-1 font-weight-bold amount-node amount-expense"/,
+    )
+    expect(statisticsPageSource).toMatch(
+      /class="text-body-1 font-weight-bold amount-node amount-income"/,
+    )
+    // #6 结余三值 :class 三元
+    expect(statisticsPageSource).toMatch(
+      /:class="balance > 0 \? 'amount-income' : balance < 0 \? 'amount-expense' : 'amount-neutral'"/,
+    )
+    expect(statisticsPageSource).not.toMatch(/:style="\{ color: balanceColor \}/)
+    // balanceColor 保留但消费方收敛为图标：全文仅「定义 + v-icon」两处命中，div 行零命中
+    expect((statisticsPageSource.match(/balanceColor/g) || [])).toHaveLength(2)
+    expect(statisticsPageSource).toMatch(/<v-icon :color="balanceColor"/)
+    expect(statisticsPageSource.split('\n').filter((l) => l.includes('<div') && l.includes('balanceColor'))).toHaveLength(0)
+  })
+
+  it('用例3（设计 §6.4-3 / 任务 5.3）: 摘要三卡 DOM 挂语义类且不带内联 style', async () => {
+    getSummary.mockResolvedValue({ total_income: 3000, total_expense: 128 })
+    const wrapper = await mountPage()
+
+    const cards = wrapper.findAll('.summary-card')
+    expect(cards).toHaveLength(3)
+    expect(cards[0].find('.amount-node').classes()).toContain('amount-expense')
+    expect(cards[0].find('.amount-node').text()).toBe('¥128.00')
+    expect(cards[1].find('.amount-node').classes()).toContain('amount-income')
+    expect(cards[1].find('.amount-node').text()).toBe('¥3,000.00')
+    for (const card of cards) {
+      expect(card.find('.amount-node').attributes('style')).toBeUndefined()
+      expect(card.find('.amount-node').text()).toMatch(/^¥[\d,]+\.\d{2}$/)
+    }
+    wrapper.unmount()
+  })
+
+  // 结余三态→类映射参数化展开（任务 5.3；零值灰沿 balanceColor 现值 #9E9E9E）
+  const BALANCE_CASES = [
+    { name: '正结余', income: 3000, expense: 128, cls: 'amount-income', text: '¥2,872.00' },
+    { name: '负结余', income: 128, expense: 3000, cls: 'amount-expense', text: '¥-2,872.00' },
+    { name: '零结余', income: 500, expense: 500, cls: 'amount-neutral', text: '¥0.00' },
+  ]
+
+  for (const c of BALANCE_CASES) {
+    it(`用例3·三态${c.name}（任务 5.3）: 结余 ${c.income} − ${c.expense} → .${c.cls}`, async () => {
+      getSummary.mockResolvedValue({ total_income: c.income, total_expense: c.expense })
+      const wrapper = await mountPage()
+
+      const balanceNode = wrapper.findAll('.summary-card')[2].find('.amount-node')
+      expect(balanceNode.classes()).toContain(c.cls)
+      expect(balanceNode.text()).toBe(c.text)
+      // 三态一律不再走内联 style（原 :style="{ color: balanceColor }" 在深色下被压制）
+      expect(balanceNode.attributes('style')).toBeUndefined()
+      wrapper.unmount()
+    })
+  }
+
+  afterEach(() => {
+    // 复位为本文件头 mock 工厂的默认值，避免污染后续（若有）用例
+    getSummary.mockResolvedValue({ total_income: 0, total_expense: 0 })
   })
 })

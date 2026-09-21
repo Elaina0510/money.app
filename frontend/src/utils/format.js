@@ -40,13 +40,6 @@ export function formatFileSize(bytes) {
 }
 
 /**
- * Get record type color
- */
-export function getTypeColor(type) {
-  return type === 'expense' ? '#FF6B6B' : '#20C997'
-}
-
-/**
  * Get type label
  */
 export function getTypeLabel(type) {

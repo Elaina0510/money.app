@@ -312,8 +312,9 @@ const ROW_SLOT_STUBS = {
     template: '<div><slot name="prepend" /><slot /><slot name="append" /></div>',
   },
 }
-const EXPENSE_COLOR = /#FF6B6B|rgb\(255,\s*107,\s*107\)/i
-const INCOME_COLOR = /#20C997|rgb\(32,\s*201,\s*151\)/i
+// 【v1.4.3-boot M6】原 EXPENSE_COLOR / INCOME_COLOR 内联色正则随用例 4 的
+// attributes('style') → classes() 改写一并删除（否则 lint no-unused-vars）；
+// 红/绿与灰的色值锁改由 global.scss 的 .amount-* 声明承载，断言见 RecordListPage.test.js M6 组用例1。
 
 async function mountRows(items) {
   getRecords.mockResolvedValue({ items, total: items.length, page: 1, total_pages: 1 })
@@ -371,12 +372,13 @@ describe('DashboardPage - 最近账单行图标 primary 色系统一（M10）', 
     const rows = wrapper.findAll('.record-card')
     expect(rows).toHaveLength(2)
 
+    // 【v1.4.3-boot M6 改写】内联 style → .amount-* 专用类（色值与原内联逐字相同，见 global.scss）
     const expenseAmount = rows[0].find('.font-weight-bold')
-    expect(expenseAmount.attributes('style')).toMatch(EXPENSE_COLOR)
+    expect(expenseAmount.classes()).toContain('amount-expense')
     expect(expenseAmount.text()).toBe('-¥58.50')
 
     const incomeAmount = rows[1].find('.font-weight-bold')
-    expect(incomeAmount.attributes('style')).toMatch(INCOME_COLOR)
+    expect(incomeAmount.classes()).toContain('amount-income')
     expect(incomeAmount.text()).toBe('+¥3,000.00')
     wrapper.unmount()
   })
@@ -388,5 +390,78 @@ describe('DashboardPage - 最近账单行图标 primary 色系统一（M10）', 
     expect(dashboardSource).toMatch(/<v-avatar class="entry-avatar mr-2" size="42">/)
     // 「分类支出排行」卡带色板图标非列表行图标，按任务 3.3 保持不动
     expect(dashboardSource).toMatch(/:color="item\.color \+ '20'"/)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// v1.4.3-boot M6（需求六）：主页四处金额节点内联色 → .amount-* 专用类
+//   迁移表（设计 §6.2.2）：#7 期间支出卡 / 期间收入卡、#8 分类支出排行金额、
+//   #2 最近账单行金额（三元）。深色排版强制规则与 global.scss 三张类的红线锁
+//   在 RecordListPage.test.js M6 组用例1/1b 单点承载，本组只锁主页节点。
+// ---------------------------------------------------------------------------
+describe('DashboardPage - 金额红/绿语义专用类配色（M6）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getRecords.mockReset()
+    getSummary.mockReset()
+    getByCategory.mockReset()
+  })
+
+  async function mountAmountNodes() {
+    getRecords.mockResolvedValue({ items: RECORDS, total: 2, page: 1, total_pages: 1 })
+    getSummary.mockResolvedValue({ total_income: 3000, total_expense: 128, transaction_count: 2 })
+    getByCategory.mockResolvedValue({
+      items: [{ category_name: '餐饮', total: 128, color: '#8B7E74', icon: 'mdi-food' }],
+    })
+    const wrapper = mount(DashboardPage, { global: { stubs: ROW_SLOT_STUBS } })
+    await settle()
+    return wrapper
+  }
+
+  it('用例2（设计 §6.4-2 / 任务 5.2）: 四处节点挂语义类 + amount-node 锚点，内联 color 零残留', () => {
+    // #7 期间两卡（静态语义类）
+    expect(dashboardSource).toMatch(/class="text-h6 font-weight-bold amount-node amount-expense"/)
+    expect(dashboardSource).toMatch(/class="text-h6 font-weight-bold amount-node amount-income"/)
+    // #8 分类支出排行金额（语义恒支出 → 静态红类，无三元）
+    expect(dashboardSource).toMatch(
+      /class="text-body-2 font-weight-bold amount-node amount-expense"/,
+    )
+    // #2 最近账单行金额（三元类）
+    expect(dashboardSource).toMatch(/class="font-weight-bold text-body-1 amount-node"/)
+    expect(dashboardSource).toMatch(
+      /:class="record\.type === 'expense' \? 'amount-expense' : 'amount-income'"/,
+    )
+    // 反向红线（防扩散 §6.2.4）：文字金额节点不再出现内联 color
+    expect(dashboardSource).not.toMatch(/:style="\{ color:/)
+    expect(dashboardSource).not.toMatch(/style="color: #FF|style="color: #20/)
+    // 排版类全部保留（字号/字重不受影响，只把颜色让给专用类）
+    expect(dashboardSource).toMatch(/text-h6 font-weight-bold amount-node/)
+    expect(dashboardSource).toMatch(/text-body-2 font-weight-bold amount-node/)
+  })
+
+  it('用例3（设计 §6.4-3 / 任务 5.3）: DOM 四类金额节点挂语义类且不带内联 style', async () => {
+    const wrapper = await mountAmountNodes()
+    const nodes = wrapper.findAll('.amount-node')
+    // 期间两卡 + 排行一条 + 最近账单两行 = 五处
+    expect(nodes).toHaveLength(5)
+
+    const [periodExpense, periodIncome, rankAmount, rowExpense, rowIncome] = nodes
+    expect(periodExpense.classes()).toContain('amount-expense')
+    expect(periodExpense.text()).toBe('¥128.00')
+    expect(periodIncome.classes()).toContain('amount-income')
+    expect(periodIncome.text()).toBe('¥3,000.00')
+    expect(rankAmount.classes()).toContain('amount-expense')
+    expect(rankAmount.text()).toBe('¥128.00')
+    expect(rowExpense.classes()).toContain('amount-expense')
+    expect(rowExpense.text()).toBe('-¥58.50')
+    expect(rowIncome.classes()).toContain('amount-income')
+    expect(rowIncome.text()).toBe('+¥3,000.00')
+
+    for (const node of nodes) {
+      // 内联 style 归零 → 颜色只可能来自专用类（深色下不再被排版 !important 压制）
+      expect(node.attributes('style')).toBeUndefined()
+      expect(node.text()).toMatch(/^[+-]?¥[\d,]+\.\d{2}$/)
+    }
+    wrapper.unmount()
   })
 })
