@@ -12,7 +12,7 @@
 - [x] 1.2 步骤②：categories 500 → 查后端日志栈——表结构类错误（no such column/constraint）→ **根因 B（迁移缺失）**，走 §6 发布窗口程序不改代码；业务异常 → **根因 C（后端缺陷）**，pytest 最小复现用例后修后端（mypy 基线零新增）
 - [x] 1.3 步骤③：categories 200 且 `data: []` → **根因 D（可见集合为空）**：走 §3 空态兜底 + 设置页恢复预设既有链路；判定预设 seed 缺失则同时修 `init_preset_data` 触发条件
 - [x] 1.4 步骤④：现场 dist 版本核对（index.html 引用 hash vs 仓库重建产物）——过旧则重建部署（终验统一重建口径）
-- [ ] 1.5 复现结论登记 progress.md 备注（主 Agent 落盘）；若根因非 A 且代码修改范围扩大 → 回写设计 §2.2.0 ※本项归主 Agent（子 Agent 禁触碰 progress.md），结论已随 M2 完成报告 notes 移交
+- [x] 1.5 复现结论登记 progress.md 备注（主 Agent 落盘）；若根因非 A 且代码修改范围扩大 → 回写设计 §2.2.0 ※本项归主 Agent（子 Agent 禁触碰 progress.md），结论已随 M2 完成报告 notes 移交（主 Agent 已落盘，根因 A）
 
 ## 2. 加载解耦（设计 §2.2.1，script 重构，无论根因都实施）
 
