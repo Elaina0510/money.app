@@ -11,7 +11,7 @@
 - [ ] [M1 - 主页总收支大卡左右横滑切换（点击保留）](m1-swipe-view-switch.md) —— 需求一（总览 1）
 - [x] [M2 - Bug 修复（阻断）：记一笔分类恒久空白 + 加载解耦 + 空态兜底](m2-categories-blank-fix.md) —— 需求二（2）★先复现后修 ✅ 2789bcb（根因 A）
 - [x] [M3 - 标签输入免回车：保存账单即保存标签](m3-tag-no-enter-save.md) —— 需求三（3）✅ 6a405c2
-- [ ] [M4 - 标签建议浮层锚定输入框正下方](m4-tag-suggest-anchor.md) —— 需求四（4）
+- [x] [M4 - 标签建议浮层锚定输入框正下方](m4-tag-suggest-anchor.md) —— 需求四（4）✅ 019c470（主方案；②③几何待终验浏览器实测）
 - [x] [M5 - 账单页年份箭头常驻 + 边界置灰 + 尺寸回退 x-small](m5-year-nav-always-visible.md) —— 需求五（5）✅ 4ae8269
 - [x] [M6 - 金额红/绿配色全站恢复 + 列表金额格式对齐](m6-amount-color-restore.md) —— 需求六（6）✅ b03a881
 
@@ -75,7 +75,7 @@
 | M1 | 前端 | ⬜ 未开始 | — | |
 | M2 | 前端（复现或牵连后端/迁移） | ✅ 完成 | 2789bcb | 33/38 勾选（1.5 归主 Agent 本节落盘；6.2–6.5 人工/备忘项）；P1 副本沙盒复现=**根因 A**，后端零改动；vitest RecordFormPage 27/27 |
 | M3 | 前端 | ✅ 完成 | 6a405c2 | 26/31 勾选（6.2–6.6 人工/D9 项）；RecordFormPage 42/42 绿（主 Agent 复跑）+ eslint 净；D9 联合链路用例由 M4 落 |
-| M4 | 前端 | ⬜ 未开始 | — | 依赖 M3 合入；与 M3 联合验收 |
+| M4 | 前端 | ✅ 完成 | 019c470 | 16/28 勾选（余 12 = 浏览器终判/真机/人工/预案 B 条件项）；主方案 D5 落地零依赖；判据①已 jsdom 真实 Vuetify 取证，**②③并入终验浏览器会话实测**；RecordFormPage 49/49 绿 |
 | M5 | 前端 | ✅ 完成 | 4ae8269 | 20/24 勾选（3.2+6.2–6.4 人工项）；RecordListPage.test.js 58/58 绿（主 Agent 复跑）；含 2 处已裁定执行级偏差（见执行记录） |
 | M6 | 前端 | ✅ 完成 | b03a881 | 18/23 勾选（6.2–6.6 为人工项）；vitest 新增 12 条、M6 相关 105/105 绿；主 Agent 独立复跑通过；含特异度提级修正（见下） |
 
@@ -107,6 +107,15 @@
 - 环境事实修正：`backend/money.db` 实际**未被 git 跟踪**（`.gitignore` 含 `*.db`，`git ls-files` 空命中）——prompt 红线 1「git 已跟踪」表述与实况不符，但「原库只读/零 db 入库」约束照常执行且风险更低。
 - 实现偏差（子 Agent notes，已核）：`retryLoadCategories` 成功后除重取快照外追加 `await nextTick()` 回算 `isDirty`（否则首屏补选 watcher 早于 await 续体，isDirty 残留 true，违背需求口径）；测试文件 `vue-router` mock 参数化为文件级 `mockRouteParams`（既有行为零变化）——M3/M4 子 Agent 复用现状即可。
 - 沙盒残留：~~`%TEMP%\m2sandbox\` 与 `frontend/node_modules/.m2-forensics-quarantine/`~~ **主 Agent 已于 2026-09-21 14:29 清理完毕**（仓库外临时件，git 全程不涉）。
+
+### M4（019c470）采用方案与几何取证登记
+
+- **采用结论：主方案（D5 menuProps attach），预案 B 未启用**。零新增依赖、零新动画体系；控件本体/v-model/搜索/选中/M3 归一逻辑零改动；`transition="fab-transition"` 保留在场（?raw 锁）。
+- 三点判据：① 已取证并测试锁定（仓内**首个真实 Vuetify 挂载用例组**：`.tag-field-anchor .v-overlay-container .v-overlay--absolute` 命中=overlay 进 wrap、attach 生效；`.v-overlay__content` 带 `tag-suggest-menu` + 内联 `max-height:240px`）；②③ 需真实布局，子 Agent 无 browser-use 且 headless Edge 自采被权限层拦阻 → **移交主 Agent 终验浏览器会话实测**（与 M6 深色截图同环境），任一不符且 CSS 不可救 → 按 §4.2.3 切预案 B（另计 3 轮）。
+- 测试基建：真实 Vuetify 走 `vuetify/dist/vuetify.esm.js` 聚合构建；ResizeObserver/IntersectionObserver（异步投递）/visualViewport 三替身——仅测试文件内，零改配置与产品代码。
+- 既有测试必要改写 1 处：M3 用例 5.9 末行反向锁（锁「M4 机制尚不存在」时序事实，M4 落地必假）→ 正向锁 `v-model`+`:menu-props` 在场。非放宽。
+- 登记：`fab-transition` 在 Vuetify 3.12 VAutocomplete 未声明该 prop → 作未知 attribute 落 `<input>`（与设计 §4.1 defaults.VMenu 对 VSelect 不生效注记同源）；红线要求沿用现状未改。
+- 卫生：M4 提交用 pathspec 限定（当时 M1 文件已 staged，未被卷入）。
 
 ### M3（6a405c2）执行登记
 
@@ -157,6 +166,17 @@
 - 6.4 人工：点选/回车两条旧路径不回退
 - 6.5 与 M4 联合验收链路（D9，用例见 m4 任务文件 §6）——**用例由 M4 自动化承载（§6.7 a/b），人工仅真机链路终判**
 - 6.6 人工：明暗、竖/宽屏自查
+
+### M4
+- 7.2 人工·真机竖屏：输入时建议层紧贴输入框正下方、同宽；选中后表单布局无跳动（需求验收）
+- 7.3 人工：打开建议层后滚动页面，层与输入框保持吸附
+- 7.4 人工：软键盘弹起不脱节；建议多条内滚、不挡保存按钮
+- 7.5 人工：展开动画与站内其他浮层观感一致（§十四 口径）；深浅主题
+- 5.1 页面滚动中浮层打开吸附真值（机制已具备，真机/浏览器项）
+- 5.2 后半 贴底空间不足 connected 策略自动翻转上方（真机自查覆盖，需求 4.3）
+- 5.3 软键盘弹起 visualViewport resize 重算；失准即触发预案 B 判定
+- 3.2/3.3 几何判据②③——**主 Agent 终验浏览器实测**（非人工项，实测结论落本节后更新）
+- 4.1 预案 B 切换决策：待②③实测 + 真机三场景任一不达标且 CSS 不可救才触发
 
 ## 阻塞清单
 

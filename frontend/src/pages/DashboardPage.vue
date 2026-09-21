@@ -21,12 +21,14 @@
           </div>
         </div>
 
-        <!-- 点按区：视图标签 + 大数字 + 三点指示；普通 div click，不参与滚动链 -->
+        <!-- 点按区：视图标签 + 大数字 + 三点指示；普通 div click，不参与滚动链。
+             v1.4.3-boot M1（需求一）：同区域追加 pointerdown 支持左右横滑切换，点击循环保留 -->
         <div
           class="overview-cycle-area mb-3"
           role="button"
           aria-label="切换收支视图"
           @click="cycleView"
+          @pointerdown="onPointerDown"
         >
           <Transition name="amount-switch" mode="out-in">
             <div :key="view">
@@ -175,7 +177,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRouter } from 'vue-router'
 import { getRecords } from '@/api/records'
 import { getSummary, getByCategory } from '@/api/statistics'
@@ -196,9 +198,60 @@ const view = ref('expense')
 const nextView = { income: 'expense', expense: 'balance', balance: 'income' }
 const viewLabel = { income: '收入', expense: '支出', balance: '结余' }
 
-function cycleView() {
-  view.value = nextView[view.value]
+// v1.4.3-boot M1（需求一 · 设计 §1.2.1 / D2 方向映射）：滑动与点击共用 view 单一状态源。
+// prevView 是 nextView 的反向映射，循环顺序维持 支出→结余→收入→支出；
+// 指示点与 amount-switch 动画仍绑 view，滑动天然联动，零改动。
+const prevView = { expense: 'income', balance: 'expense', income: 'balance' }
+
+// dir>0 = 前进（左滑 dx<0 / 点击），dir<0 = 后退（右滑 dx>0）
+function stepView(dir) {
+  view.value = dir > 0 ? nextView[view.value] : prevView[view.value]
 }
+
+function cycleView() {
+  // 滑动动作尾巴派发的 click 在窗口内吞掉（D2），不双跳
+  if (Date.now() < suppressClickUntil.value) return
+  stepView(1)
+}
+
+// v1.4.3-boot M1（需求一 · 设计 §1.2.2 / D1）：原生 Pointer Events 三点位手势
+// （pointerdown / pointerup / pointercancel）——不监听 move 阶段（判定只在 pointerup
+// 发生一次，拖动过程零采样零视觉反馈）、不阻止任何默认行为（不阻断 click 链与键盘
+// Enter→cycleView 路径）；触摸 + 鼠标单套代码，零新增依赖。
+const SWIPE_THRESHOLD = 48 // px，需求建议 40–50 区间取中（D2）
+const drag = { active: false, x0: 0, y0: 0 }
+const suppressClickUntil = ref(0)
+
+function onPointerDown(e) {
+  // 鼠标仅响应左键；触摸/笔无 button 语义差异
+  if (e.pointerType === 'mouse' && e.button !== 0) return
+  drag.active = true
+  drag.x0 = e.clientX
+  drag.y0 = e.clientY
+  // up/cancel 挂 window：拖出区域外松手同样兜得住（测试合成事件须 bubbles: true）
+  window.addEventListener('pointerup', onPointerUp)
+  window.addEventListener('pointercancel', onDragAbort)
+}
+
+function onPointerUp(e) {
+  // 终点坐标取 pointerup 自身（无需 move 阶段采样）
+  const dx = e.clientX - drag.x0
+  const dy = e.clientY - drag.y0
+  if (Math.abs(dx) > SWIPE_THRESHOLD && Math.abs(dx) > Math.abs(dy)) {
+    stepView(dx < 0 ? 1 : -1)
+    suppressClickUntil.value = Date.now() + 350 // 吞掉滑动后的尾巴 click（D2）
+  }
+  onDragAbort()
+}
+
+// 幂等清理：复位 active + 摘掉两个 window 监听（正常松手 / pointercancel / 卸载共用）
+function onDragAbort() {
+  drag.active = false
+  window.removeEventListener('pointerup', onPointerUp)
+  window.removeEventListener('pointercancel', onDragAbort)
+}
+
+onBeforeUnmount(onDragAbort)
 
 // 金额口径沿用现状：千分位 + 两位小数，负数渲染为 "-1,234.56"
 function fmtMoney(val) {
@@ -283,6 +336,9 @@ onMounted(async () => {
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
+  /* 需求一（M1）：纵向滚动交还原生浏览器（不劫持页面滚动，滚动接管致 pointercancel
+     → 不误判为滑动）；横向手势归 JS 判定 */
+  touch-action: pan-y;
 }
 
 .view-label {

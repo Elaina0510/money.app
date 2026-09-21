@@ -465,3 +465,294 @@ describe('DashboardPage - 金额红/绿语义专用类配色（M6）', () => {
     wrapper.unmount()
   })
 })
+
+// ---------------------------------------------------------------------------
+// v1.4.3-boot M1（需求一）：主页总收支大卡左右横滑切换（点击保留）——设计 §1.4
+//   任务 5.1–5.6 六组编号用例 + §4 边界补测（2.2 鼠标非左键 / 4.4 pointercancel 清理 /
+//   4.5 加载中滑动 / 4.6 快速连续滑动）+ 3.1 手势隔离复查。
+//   合成事件红线（prompt §七-2）：up/cancel 监听挂在 window 上 → 合成事件必须冒泡形
+//   `new MouseEvent('pointerup', { bubbles: true, clientX, clientY })`（jsdom 无
+//   PointerEvent 构造器，以 MouseEvent 替身；Event 默认 bubbles:false，漏写将静默收
+//   不到 → 用例假绿）。构造器经 window 取（eslint 全局表未声明 MouseEvent）。
+// ---------------------------------------------------------------------------
+
+function pointerEvent(type, x, y, init = {}) {
+  return new window.MouseEvent(type, { bubbles: true, clientX: x, clientY: y, ...init })
+}
+
+// 与原生 PointerEvent 对齐的替身：jsdom MouseEvent 无 pointerType，需按用例显式补
+function withPointerType(event, pointerType) {
+  Object.defineProperty(event, 'pointerType', { value: pointerType })
+  return event
+}
+
+function areaEl(wrapper) {
+  return wrapper.find('.overview-cycle-area').element
+}
+
+// 一次完整滑动手势：区域 pointerdown → 区域 pointerup（冒泡到 window 单次判定）
+async function swipeOnce(wrapper, x0, y0, x1, y1) {
+  const el = areaEl(wrapper)
+  el.dispatchEvent(pointerEvent('pointerdown', x0, y0))
+  el.dispatchEvent(pointerEvent('pointerup', x1, y1))
+  await settle()
+}
+
+const SWIPE_SUMMARY = { total_income: 3000, total_expense: 1234.56, transaction_count: 7 }
+
+// 手势用例必须挂进文档树：up/cancel 监听在 window 上，VTU 默认容器是脱离 document 的
+// div，事件冒泡断在容器根 → window 永远收不到（环境假红，非实现问题）。attachTo 后
+// 冒泡链完整：区域 → …… → document → window，与真机一致。
+async function mountSwipe(summaryData = SWIPE_SUMMARY) {
+  getRecords.mockResolvedValue({ items: RECORDS, total: 2, page: 1, total_pages: 1 })
+  getSummary.mockResolvedValue(summaryData)
+  getByCategory.mockResolvedValue({ items: [] })
+  const wrapper = mount(DashboardPage, { attachTo: document.body })
+  await settle()
+  return wrapper
+}
+
+describe('DashboardPage - 总收支大卡左右横滑切换（M1）', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getRecords.mockReset()
+    getSummary.mockReset()
+    getByCategory.mockReset()
+  })
+
+  it('用例1（任务 5.1）: 左滑 dx=−60 → 支出→结余「一步且仅一步」，标签/指示点随同一 view 联动', async () => {
+    const wrapper = await mountSwipe()
+    expect(wrapper.vm.view).toBe('expense')
+
+    await swipeOnce(wrapper, 200, 300, 140, 300)
+
+    // 一步：落在 balance 而非连跳到 income
+    expect(wrapper.vm.view).toBe('balance')
+    expect(viewLabelText(wrapper)).toBe('结余')
+    expect(activeDotIndex(wrapper)).toBe(2)
+    expect(numberText(wrapper)).toBe(money(3000 - 1234.56))
+
+    await settle()
+    expect(wrapper.vm.view).toBe('balance') // 且仅一步：动画收尾后不追加、不回弹
+    wrapper.unmount()
+  })
+
+  it('用例2（任务 5.2）: 右滑 dx=+60 → 支出→收入（prevView 反向映射 = nextView 逆运算）', async () => {
+    const wrapper = await mountSwipe()
+
+    await swipeOnce(wrapper, 140, 300, 200, 300)
+
+    expect(wrapper.vm.view).toBe('income')
+    expect(viewLabelText(wrapper)).toBe('收入')
+    expect(activeDotIndex(wrapper)).toBe(0)
+    expect(numberText(wrapper)).toBe(money(3000))
+    wrapper.unmount()
+  })
+
+  it('用例3（任务 5.3）: 未达阈值 dx=+30、恰达阈值 dx=−48（严格 >）、斜向 dx=60/dy=90 均不判滑动', async () => {
+    const wrapper = await mountSwipe()
+
+    await swipeOnce(wrapper, 200, 300, 230, 300) // dx=+30 < 48
+    expect(wrapper.vm.view).toBe('expense')
+
+    await swipeOnce(wrapper, 300, 300, 252, 300) // dx=−48：阈值边界不满足严格大于
+    expect(wrapper.vm.view).toBe('expense')
+
+    await swipeOnce(wrapper, 200, 300, 260, 390) // dx=+60 / dy=+90：主轴为纵向
+    expect(wrapper.vm.view).toBe('expense')
+    expect(viewLabelText(wrapper)).toBe('支出')
+
+    // 任务 4.1：未达标手势不置抑制窗口 → click 链完好，点击循环照常前进一位
+    await wrapper.find('.overview-cycle-area').trigger('click')
+    await settle()
+    expect(wrapper.vm.view).toBe('balance')
+    wrapper.unmount()
+  })
+
+  it('用例4（任务 5.4）: 纯 trigger(click) 点击循环保留（既有 M2 用例3 口径回归基线）', async () => {
+    const wrapper = await mountSwipe()
+    const area = wrapper.find('.overview-cycle-area')
+
+    await area.trigger('click')
+    await settle()
+    expect(wrapper.vm.view).toBe('balance')
+
+    await area.trigger('click')
+    await settle()
+    expect(wrapper.vm.view).toBe('income')
+
+    await area.trigger('click')
+    await settle()
+    expect(wrapper.vm.view).toBe('expense') // 闭环：支出→结余→收入→支出不改
+    wrapper.unmount()
+  })
+
+  it('用例5（任务 5.5）: 滑动后尾巴 click 被 350ms 窗口吞掉（只切一次），窗口外点击恢复（fake timers）', async () => {
+    const wrapper = await mountSwipe()
+    expect(wrapper.vm.view).toBe('expense')
+    expect(wrapper.vm.suppressClickUntil).toBe(0)
+
+    vi.useFakeTimers()
+    try {
+      vi.setSystemTime(2000000)
+      const el = areaEl(wrapper)
+
+      el.dispatchEvent(pointerEvent('pointerdown', 200, 300))
+      el.dispatchEvent(pointerEvent('pointerup', 140, 300)) // dx=−60 → balance
+      expect(wrapper.vm.view).toBe('balance')
+      expect(wrapper.vm.suppressClickUntil).toBe(2000000 + 350) // D2：窗口 = now + 350ms
+
+      // 同一手势尾巴派发的 click（touch 滑动后与桌面拖拽后浏览器都必派）→ 吞掉
+      el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+      expect(wrapper.vm.view).toBe('balance')
+
+      vi.advanceTimersByTime(300) // 2000300 仍在窗口内
+      el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+      expect(wrapper.vm.view).toBe('balance')
+
+      vi.advanceTimersByTime(100) // 2000400 已过窗口 → 点击恢复
+      el.dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+      expect(wrapper.vm.view).toBe('income')
+    } finally {
+      vi.useRealTimers()
+    }
+    wrapper.unmount()
+  })
+
+  it('用例6（任务 5.6）: ?raw 手势红线——pan-y / 阈值 48 / 卸载清理 / 零默认行为阻止 / 不监听 move 阶段', () => {
+    // 滑动容器 touch-action（D1：纵向滚动交还原生，横滑归 JS）
+    expect(dashboardSource).toMatch(/\.overview-cycle-area \{[^}]*touch-action:\s*pan-y;/)
+    // 阈值 48px（D2）
+    expect(dashboardSource).toMatch(/const SWIPE_THRESHOLD = 48/)
+    // 卸载清理（需求通用约束·性能）
+    expect(dashboardSource).toMatch(/onBeforeUnmount\(onDragAbort\)/)
+    // up/cancel 挂 window（与本组合成事件 bubbles 口径配对）+ 幂等摘除
+    expect(dashboardSource).toMatch(/window\.addEventListener\('pointerup', onPointerUp\)/)
+    expect(dashboardSource).toMatch(/window\.addEventListener\('pointercancel', onDragAbort\)/)
+    expect(dashboardSource).toMatch(/window\.removeEventListener\('pointerup', onPointerUp\)/)
+    expect(dashboardSource).toMatch(/window\.removeEventListener\('pointercancel', onDragAbort\)/)
+    // 实现红线：零默认行为阻止（不阻断 click 链与键盘 Enter→cycleView）+ 不监听 move 阶段
+    expect(dashboardSource).not.toMatch(/preventDefault/)
+    expect(dashboardSource).not.toMatch(/pointermove/)
+    // 点击保留：@click 与 @pointerdown 同区并存
+    expect(dashboardSource).toMatch(/@click="cycleView"/)
+    expect(dashboardSource).toMatch(/@pointerdown="onPointerDown"/)
+    // 状态源唯一（§8-1）：滑动与点击都走 stepView，prevView 为 nextView 反向映射
+    expect(dashboardSource).toMatch(/const prevView = \{ expense: 'income', balance: 'expense', income: 'balance' \}/)
+    expect(dashboardSource).toMatch(
+      /function stepView\(dir\) \{[^}]*dir > 0 \? nextView\[view\.value\] : prevView\[view\.value\]/,
+    )
+    expect(dashboardSource).toMatch(/if \(Date\.now\(\) < suppressClickUntil\.value\) return/)
+    expect(dashboardSource).toMatch(/stepView\(1\)/)
+    expect(dashboardSource).toMatch(/stepView\(dx < 0 \? 1 : -1\)/)
+  })
+
+  it('用例7（任务 4.4）: pointercancel（纵向滚动接管）→ 清理监听不残留，后续 pointerup 不误判', async () => {
+    const wrapper = await mountSwipe()
+    const el = areaEl(wrapper)
+
+    el.dispatchEvent(pointerEvent('pointerdown', 200, 300))
+    window.dispatchEvent(pointerEvent('pointercancel', 200, 300))
+    expect(wrapper.vm.view).toBe('expense')
+
+    // 监听已摘除：无新 pointerdown 的 pointerup 不产生任何判定
+    el.dispatchEvent(pointerEvent('pointerup', 100, 300))
+    await settle()
+    expect(wrapper.vm.view).toBe('expense')
+
+    // 下一次完整手势照常工作（既不残留也不丢失）
+    await swipeOnce(wrapper, 200, 300, 140, 300)
+    expect(wrapper.vm.view).toBe('balance')
+    wrapper.unmount()
+  })
+
+  it('用例8（任务 2.2）: 鼠标非左键 pointerdown 直接 return（不记起点、不挂监听）；左键同位移必切', async () => {
+    const wrapper = await mountSwipe()
+    const el = areaEl(wrapper)
+
+    el.dispatchEvent(withPointerType(pointerEvent('pointerdown', 200, 300, { button: 2 }), 'mouse'))
+    el.dispatchEvent(withPointerType(pointerEvent('pointerup', 100, 300, { button: 2 }), 'mouse'))
+    await settle()
+    expect(wrapper.vm.view).toBe('expense')
+    // 安全网：若守卫失效残留了 window 监听，此处摘净以免污染后续用例
+    window.dispatchEvent(pointerEvent('pointercancel', 0, 0))
+
+    // 对照：左键（button 0）同位移走满手势链路
+    el.dispatchEvent(withPointerType(pointerEvent('pointerdown', 200, 300, { button: 0 }), 'mouse'))
+    el.dispatchEvent(withPointerType(pointerEvent('pointerup', 100, 300, { button: 0 }), 'mouse'))
+    await settle()
+    expect(wrapper.vm.view).toBe('balance')
+    wrapper.unmount()
+  })
+
+  it('用例9（任务 4.6）: 快速连续滑动每次 pointerup 恰一步，末态=最后一次 view，无残留节点', async () => {
+    const wrapper = await mountSwipe({
+      total_income: 2000,
+      total_expense: 500,
+      transaction_count: 2,
+    })
+    const el = areaEl(wrapper)
+
+    // 四段左滑不 await：expense→balance→income→expense→balance
+    for (let i = 0; i < 4; i += 1) {
+      el.dispatchEvent(pointerEvent('pointerdown', 200, 300))
+      el.dispatchEvent(pointerEvent('pointerup', 140, 300))
+    }
+    expect(wrapper.vm.view).toBe('balance')
+
+    await settle()
+    expect(wrapper.vm.view).toBe('balance') // mode="out-in" 排队后末态不漂移
+    expect(wrapper.findAll('.amount-number')).toHaveLength(1)
+    expect(wrapper.findAll('.view-dot')).toHaveLength(3)
+    expect(activeDotIndex(wrapper)).toBe(2)
+    expect(viewLabelText(wrapper)).toBe('结余')
+    expect(numberText(wrapper)).toBe(money(2000 - 500))
+    wrapper.unmount()
+  })
+
+  it('用例10（任务 4.5）: summary 加载中滑动照常切换视图，数值 || 0 兜底（现状行为）', async () => {
+    let resolveSummary
+    getRecords.mockResolvedValue({ items: [], total: 0, page: 1, total_pages: 1 })
+    getByCategory.mockResolvedValue({ items: [] })
+    getSummary.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveSummary = resolve
+        }),
+    )
+    const wrapper = mount(DashboardPage, { attachTo: document.body })
+    await nextTick()
+
+    expect(wrapper.vm.summary).toBeNull()
+    expect(numberText(wrapper)).toBe(money(0))
+
+    await swipeOnce(wrapper, 200, 300, 140, 300) // → balance
+    expect(wrapper.vm.view).toBe('balance')
+    expect(viewLabelText(wrapper)).toBe('结余')
+    expect(numberText(wrapper)).toBe(money(0))
+
+    resolveSummary({ total_income: 800, total_expense: 300.25, transaction_count: 4 })
+    await settle()
+    expect(wrapper.vm.view).toBe('balance') // 数据到达不回滚视图
+    expect(numberText(wrapper)).toBe(money(800 - 300.25))
+    wrapper.unmount()
+  })
+
+  it('用例11（任务 3.1）: 手势隔离复查——右上跳统计区不在点按区内，其 pointer 链零交叉', async () => {
+    const wrapper = await mountSwipe()
+
+    // 结构隔离：.overview-jump 不是 .overview-cycle-area 的后代
+    expect(wrapper.find('.overview-cycle-area').find('.overview-jump').exists()).toBe(false)
+
+    const jump = wrapper.find('.overview-jump').element
+    jump.dispatchEvent(pointerEvent('pointerdown', 300, 100))
+    jump.dispatchEvent(pointerEvent('pointerup', 100, 100)) // 大位移也不判滑动（无监听）
+    await settle()
+    expect(wrapper.vm.view).toBe('expense')
+
+    // 点按区自身手势不受影响
+    await swipeOnce(wrapper, 200, 300, 140, 300)
+    expect(wrapper.vm.view).toBe('balance')
+    wrapper.unmount()
+  })
+})
