@@ -62,11 +62,11 @@
 
 ## 终验清单（设计附录 A，批 3）
 
-- [ ] 全部 vitest 绿；`RecordFormPage.test.js` M2/M3/M4 三组 + 既有组全量
-- [ ] 深色模式逐处截图核验 M6 七节点位置清单
-- [ ] 真机（竖屏触摸滑动 + 软键盘 + 滚动）三场景过 M1/M4
-- [ ] `frontend/dist` 统一重建 + gzip 对比
-- [ ] M2 若落根因 B：发布窗口执行 `backend/migrate_to_v1.4.3.py`（停服→备份→核对 [OK]→部署），本批不新增迁移脚本
+- [x] 全部 vitest 绿；`RecordFormPage.test.js` M2/M3/M4 三组 + 既有组全量（389/389，15 files）
+- [x] 深色模式逐处截图核验 M6 七节点位置清单——**in-app browser 无可见 surface 无法出图，改 computed-color 数值取证全通过**（证据 `screenshots/v1.4.3-boot/p4-forensics-evidence.md`）；肉眼观感终判留人工
+- [ ] 真机（竖屏触摸滑动 + 软键盘 + 滚动）三场景过 M1/M4——人工清单
+- [x] `frontend/dist` 统一重建 + gzip 对比（534,154 → 535,410，**+1,256B ≈ +1.2KB**，符合「增量≈0」预期）
+- [x] M2 未落根因 B（=根因 A）——原备忘不执行；**新增发布备忘**：现场库需先补跑 `migrate_to_v1.4.2.py`（quick_templates.kind 缺失实证），`migrate_to_v1.4.3.py` 对该库形制跑不通（FK 70 违规回滚）详见执行记录 M2
 
 ## 进度统计
 
@@ -125,6 +125,9 @@
 - 登记：`fab-transition` 在 Vuetify 3.12 VAutocomplete 未声明该 prop → 作未知 attribute 落 `<input>`（与设计 §4.1 defaults.VMenu 对 VSelect 不生效注记同源）；红线要求沿用现状未改。
 - 卫生：M4 提交用 pathspec 限定（当时 M1 文件已 staged，未被卷入）。
 
+- **主 Agent 终验实测终判（2026-09-21，真实浏览器会话，详见 `screenshots/v1.4.3-boot/p4-forensics-evidence.md`）**：建议层经事件序列实际打开——① `content.closest('.tag-field-anchor')===true` + `.v-overlay--absolute` 命中=直证成立；② wrap computed `position:relative`、content absolute attach 于其内、`--v-overlay-anchor-origin:top left` 在场，且 inline `top:-1929px` 恰等于 `contentRect.top - wrapRect.top`（11.56−1940.56）**算术实证参照系=wrap 容器内坐标**；③ scoped CSS 实下发 `{ left:0px !important; width:100% !important; max-height:240px }`、computed `left:0px` 直证，`width` 像素值受 in-app browser viewport=0×0 使 Vuetify 内联 `max-width:0` 钳制（真实视口下 activator 宽=输入框宽，100%×wrap 即等宽）——**三点无任何「不符」信号 → 主方案维持、预案 B 不触发（§4.2.3 前提不成立）**。像素等宽/软键盘/滚动吸附按原口径留真机人工（M4 清单 7.2/7.3/5.1/5.3）。`fab-transition-*` 类在场，§十四不回退。附带实证：#/add 分类九宫格 14 类完整渲染（M2 真浏览器旁证）。
+- 环境事实：本会话 in-app browser 无可见 surface（viewport 0×0、visibilityState=hidden）→ `take_screenshot` 与真指针 click 被 `NATIVE_BROWSER_VIEWPORT_UNAVAILABLE` 拒；**深色截图核验改以 getComputedStyle 数值取证替代（与图像取色等价硬判据）**，证据文件同上。
+
 ### M3（6a405c2）执行登记
 
 - 归一三段严格照设计 §3.2.1 落地（精确同名 `===` → 非防抖兜底、失败**中止保存**零调用锁死 → `createTag`）；✕ 清除同步清空 `tagSearchQuery`；`data` 六键载荷零变化；「文字优先」扩大由 5.4/5.9 源码正则锁死。
@@ -142,7 +145,7 @@
 
 ### M6（b03a881）设计与实现偏差登记
 
-- **特异度提级修正（对设计 §6.2.1 参考代码的必要偏离，待 P4 截图终判）**：设计单类 `.amount-expense{...!important}` 特异度 (0,1,0)，打不过红线块 `.v-theme--dark .font-weight-bold` 的 (0,2,0) 同 !important（同 important 按特异度择优，源序仅打平用）→ 深色下金额仍会被压色。实现保留三张单类声明逐字在场 + 紧邻其后追加「重复类名提级」双类声明（`.amount-expense.amount-expense` 等，沿仓内 M14 slide-y 既有手法）追平 (0,2,0) 并以源序胜出。红线块逐字未动（diff 纯新增，测试反向锁内容与源序）。**若 P4 深色截图判不符 → 按 §4.2.3 类推处置**。
+- **特异度提级修正（对设计 §6.2.1 参考代码的必要偏离）——已经主 Agent P4 真实浏览器 computed-color 实证通过**：深色下七节点金额全部正确呈现红 `rgb(255,107,107)`/绿 `rgb(32,201,151)`、未回退成白/灰，非金额 `.font-weight-bold` 文字（如 "Money App"）仍为白 `rgb(255,255,255)` 不受污染（详见「终验记录」+ `screenshots/v1.4.3-boot/p4-forensics-evidence.md`）。**背景**：设计单类 `.amount-expense{...!important}` 特异度 (0,1,0)，打不过红线块 `.v-theme--dark .font-weight-bold` 的 (0,2,0) 同 !important（同 important 按特异度择优，源序仅打平用）→ 逐字照抄会深色压色。实现保留三张单类声明逐字在场 + 紧邻其后追加「重复类名提级」双类声明（`.amount-expense.amount-expense` 等，沿仓内 M14 slide-y 既有手法）追平 (0,2,0) 并以源序胜出。红线块逐字未动（diff 纯新增，测试反向锁内容与源序）。
 - jsdom 对 !important+特异度实现不完整（子 Agent 控制实验证实）→ 深色真值判定完全依赖 P4 浏览器截图，jsdom 侧仅 ?raw/DOM 断言——与设计口径一致。
 - 测试改写范围比任务点名多两处（同属金额块、格式变更后必红的旧口径固化）：`RecordListPage.test.js` M10 组 :181-182/:207-208 `attributes('style')`→`classes()` + 金额文本改 `formatAmount` 形制；:1165 icon 回退断言逐字保留；M5 箭头组 :313-406、筛选组 :586、尺寸红线均未触碰。非删除、非放宽。
 - `DashboardPage.test.js` 孤儿常量 `EXPENSE_COLOR`/`INCOME_COLOR` 按 §8.6 陷阱预案删除，色值锁改造复用于 `RecordListPage.test.js` M6 用例 1。
@@ -184,7 +187,12 @@
 - 5.2 后半 贴底空间不足 connected 策略自动翻转上方（真机自查覆盖，需求 4.3）
 - 5.3 软键盘弹起 visualViewport resize 重算；失准即触发预案 B 判定
 - 3.2/3.3 几何判据②③——**主 Agent 终验浏览器实测**（非人工项，实测结论落本节后更新）
-- 4.1 预案 B 切换决策：待②③实测 + 真机三场景任一不达标且 CSS 不可救才触发
+- 4.1 预案 B 切换决策：待②③实测 + 真机三场景任一不达标且 CSS 不可救才触发——**主 Agent 终验已裁定不触发（见执行记录 M4 终判）**
+
+### M1
+- 6.2 人工·真机竖屏：左右横滑大数字区，松手瞬间恰切一次、无中途蹦数、无一滑多跳；轻点仍可循环；上下滑页面不受影响
+- 6.3 人工·宽屏鼠标：按住横拖达标；快速连续滑动无动画错位
+- 6.4 人工：明暗主题抽查（纯交互零色改）；指示点随视图同步高亮；不回退 v1.4.3 §十一/§十四 项
 
 ## 阻塞清单
 
@@ -193,3 +201,21 @@
 ## 巡查外发现（不扩大改动面，留交付报告供裁定）
 
 - `frontend/src/pages/HistoryPage.vue:80`：`-/+` 前缀 + 裸 `{{ record.amount }}`，无内联 color、不在 §6.1 七节点清单与 D8 巡查终版命中内 → 按范围外保留。
+- 统计页预算卡文案渲染 `¥¥0.00`（双 ¥ 符号，P4 浏览器会话实测发现）：既有缺陷，不在本批六模块修复域 → 保留，建议另立批次。
+
+## 终验记录（2026-09-21，第一轮全绿）
+
+| 命令 | 结果 | 基线对照 |
+|------|------|----------|
+| `npm test`（vitest 全量） | **389 passed / 15 files** | 基线 326 → 只增不减（+63：M2 11 / M3 15 / M4 7+ / M5 / M6 12 / M1 11 等） |
+| `npm run lint` | 0 error / 2 warnings | 与基线一致（既有 2 warn 零新增） |
+| `npm run build` | 成功 | dist gzip 534,154 → **535,410（+1,256B）**，符合预期≈0 口径 |
+| `pytest tests/` | 245 passed（22 warnings） | 与基线一致（后端零改动） |
+| `mypy app/` | Found 90 errors in 14 files | **基线零新增**口径通过 |
+| `ruff check app/ tests/` | All checks passed | 一致 |
+
+- D9 联合链路：`RecordFormPage.test.js` 用例 6.7a/6.7b 在场且绿（真实 Vuetify 挂载「输入→锚定层→点选→保存」与「输入→免回车保存」）。
+- M2/M3/M4 三组 + 既有组：RecordFormPage.test.js 49/49（主 Agent 独立复跑）。
+- `backend/money.db` SHA256 终验复核 = `f8e0c5de…46405` 与开工登记值**逐字一致**（P1 原件未动证明；终验另起全新 verify.db 沙盒，收工后已删除）。
+- P4 浏览器核验：M6 深色七节点 computed-color 全达标 + 浅色对照一致；M4 三点判据实测无「不符」信号 → 主方案维持、预案 B 不触发。截图出图受 in-app browser 无可见 surface 限制，数值取证+证据文件替代，观感终判留人工。
+- dist 重建提交：见 `chore(v1.4.3-boot): 终验重建 frontend/dist`（本轮唯一 dist 提交，模块提交零 dist 已逐模块核验）。
