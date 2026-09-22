@@ -10,7 +10,7 @@
 
 - [x] [M1 - 分类拖拽排序永远可用](m1-category-drag-always-on.md) —— 需求一（前端去禁用 + 后端 reorder 家族置尾归一 + 根因复核）✅ `045dc45`
 - [x] [M2 - 「其他支出 / 其他收入」归并入「其他」](m2-merge-other-categories.md) —— 需求二（一次性迁移脚本，幂等，零运行期代码）✅ `3692f20`
-- [ ] [M3 - 预算「不选=全部」+ 删光转休眠](m3-budget-dynamic-all-dormant.md) —— 需求三（Budget.dormant + 校验放开 + 级联改向 + 前端置灰）⏳ 后端半区 M3b 完成（工作区未提交），待 M3f 前端半区 + 整模块一次性提交
+- [x] [M3 - 预算「不选=全部」+ 删光转休眠](m3-budget-dynamic-all-dormant.md) —— 需求三（Budget.dormant + 校验放开 + 级联改向 + 前端置灰）✅ `ddc68f3`（M3b 后端半区 + M3f 前端半区，整模块一次性提交）
 
 ## 开发顺序（设计附录 A）
 
@@ -90,7 +90,7 @@ M1 → M2 → M3
 |------|----|------|-------------|------|
 | M1 | 前端 + 后端（category_service） | ✅ 完成 | `045dc45` | 守门先行；pytest 252+1skip / vitest 390 / mypy 基线零新增 / ruff·eslint 绿；主 Agent 复跑核验通过 |
 | M2 | 后端（迁移脚本 + 测试） | ✅ 完成 | `3692f20` | 泳道1；pytest 294+0skip / mypy 基线零新增 / ruff 绿；P3 断言自动转绿（未编辑 test_categories_reorder.py）；主 Agent 复跑核验通过 |
-| M3 | 后端（模型/服务/路由/脚本）+ 前端（统计页） | ⬜ M3b 完成待 M3f | （M3f 提交） | 泳道2；M3b 后端半区工作区未提交，pytest 63 组全绿 + 全量 294，mypy 90 基线；M3f 待做前端半区 + 整模块一次性提交 |
+| M3 | 后端（模型/服务/路由/脚本）+ 前端（统计页） | ✅ 完成 | `ddc68f3` | 泳道2；M3b 后端半区 + M3f 前端半区整模块一次性提交；pytest 294 / vitest 397 / mypy 90 基线 / ruff·eslint 绿；主 Agent 复跑 + P4 实测核验通过 |
 
 ## 模块执行记录
 
@@ -114,22 +114,54 @@ M1 → M2 → M3
 - **M3b 合理偏离（记录，属行号/标识符定位与新语义）**：① `dormant` 用本文件 SQLModel `Field(sa_column=Column(Integer,NOT NULL DEFAULT 0))` 而非 `Mapped[int]`（全文无 Mapped 惯例，列形等同）；② 仓内无 `BudgetDetail` pydantic 类，响应契约为 `_build_detail` dict，故 dormant 落该 dict（不新建类、不扩面）；③ SQLite DDL 即时提交 → §1.4「单事务」如实改为「失败终态=列已加未回填（良性漏标，动态全部渲染、编辑保存归位）」+ 只读 `_warn_if_unbackfilled`（绝不改写）、无回滚开关；④ backfill 加只读探测（无 scope_mode 列 / 缺 budget_categories 表 → 加列但 backfilled=0 记 `skipped_reason`）；⑤ 现场库副本实测正是该极旧形（budgets 8 列无 scope_mode，6 行）→ 演练加列 1 / backfilled 0 / 二次 no-op / integrity ok。
 - **⚠️ 登记关注（M3b 上报，越出 M3 涉及文件清单，本期不扩围修）**：`app/services/export_service.py:182-201` budgets 导出列集合硬编码 8 列、**不含 `dormant`** → 备份→还原后休眠行会以 `dormant=0`（动态全部）回归。现有导出/导入往返用例全绿、不影响本期门槛。列入交付报告「遗留关注」，是否补列留人工/后续批次裁定。
 
+### M3f（done · 整模块 `ddc68f3` · fixed_rounds 1 · 前端 13 项勾选）
+- 前端 `StatisticsPage.vue`：删 `budgetIncludeEmpty`→`budgetFormValid` 牵连 + `budgetScopeError` 红字/渲染节点（include 空选可保存）；label/`budgetScopeTip` 新文案「一个都不选即统计全部分类支出」；`isDormant` 单点、`budget-card--dormant` 仅 `opacity:.55` 一档（明暗通用、零新色值）、chip「保留」、`scopeSummary`/`scopeHint` 前端自出、进度条恒 0、明细钮靠空数组自然隐藏；`totalBudget/totalSpent` 求和前 `filter(!isDormant)`；`openBudgetEditDialog` 零特殊回填。`StatisticsPage.test.js` +7 用例（390→397）。
+- 对接确认：严格以响应 `dormant` 键判休眠（不由 include 空集自推）；全仓无 `deleted_budgets` 前端引用；未改一行 M3b 后端。
+- **合理偏离（记录）**：`scopeSummary`/`scopeHint` 的 **include 空集非休眠** 分支由旧「未知分类」只读态改为「全部分类 / 统计全部分类支出（含后续新增分类）」，与后端 8.12 同向——否则 9.2 出现「花费=当月全额、覆盖却写未知分类」自相矛盾。
+
+## 终验记录（§6.2，主 Agent 亲执，基线 HEAD `a90e102`）
+
+**六命令全绿（终验提交前）：**
+| 命令 | 结果 | 对照 |
+|------|------|------|
+| `npm test` | 397 passed (15 files) | 基线 389，只增不减 |
+| `npm run lint` | 0 errors / 2 warnings | 基线同形（CsvMappingDialog） |
+| `npm run build` | 成功 | dist 重建 535,537 B gzip，**+127 B / +0.12 KB**（预期增量小 ✅） |
+| `pytest tests/` | 294 passed, 0 skipped | 基线 245+… ，P3 §5.4 由 skip 转实断言（0 skipped 硬证） |
+| `mypy app/` | 90 errors / 14 files | 基线零新增 |
+| `ruff check app/ tests/` | All checks passed | 基线 clean |
+
+**跨模块闭环核验：** ✅ `test_categories_reorder.py::test_other_family_rank_matches_m2_script_constants` 为实断言（pytest 0 skipped）；✅ `migrate_to_v1.4.3boot2_dormant.py` 头含 D11 执行窗口注释；✅ `routers/categories.py` 文案含 `dormant_count>0` 休眠分支（M=0 不提）。
+
+**money.db 原库保护复核：** 终验全程后 SHA256 仍 `f8e0c5de303c46f4…`，与开工登记逐字一致（未动、未 `git add -f`、`.p4sandbox` 内 *.db 被 `*.db` ignore、演练后已删）。
+
+**P4 浏览器实测（副本演练 + 三链路）——环境受限，如实登记：**
+- 本会话 in-app browser **无可见视口**（viewport 0×0，`visibilityState=hidden`）→ `take_screenshot` 与 pointer 类动作（click/**真实指针拖拽**）被系统拒绝。故**未能产出 `screenshots/v1.4.3-boot2/` 截图，也未做真实指针拖拽**；此两项连同明暗×竖/宽屏观感一并留**人工真机终判**。未以 DOM 绿虚构「拖拽已真机验证」。
+- **已取得的运行态实证（browser DOM 快照 + 副本/新库 HTTP 端到端）：**
+  - **M1**：现场副本经两脚本后，前端分类页实渲 14 行、**13 个 `.drag-handle` + 1 个 `.drag-handle-placeholder`（仅「其他」）、拖拽列表无 disabled 属性**（锁已去，D7 把手规则成立）；HTTP reorder 把「其他」放中部提交 → 200 且落库「其他」归一到末位、非家族保持提交序。
+  - **M2**：现场库**副本**发布窗口序演练——dormant（加列/backfill 探测跳过，因库为 pre-v1.4.3 无 scope_mode）→ categories（三家族行归并为单「其他」keeper id=34、其他支出/收入计数=0、records 重定向至 keeper、`foreign_key_check` 违规数与原库同为 70 即**新增 0**）；浏览器分类页确认单「其他」置尾、无旧名行。
+  - **M3**：当前 schema 新库 HTTP 端到端——D5 dynamic-all(include 空) spent==exclude(空)当月总额 100.0；7.1 新建分类并记账后 dynamic-all **免重存自动计入**（100→150）；删唯一关联分类 → 响应 `dormant_budgets≥1`、预算**仍在列表** + `dormant=true` + spent=0 + details=[]；年汇总 total 777→0（**D10 剔除休眠**）同时月列表仍返回该行；PUT 重保存 → dormant 清 0（**无独立唤醒接口**）。
+- **现场库限制登记（重要，非本批缺陷）**：`migrate_to_v1.4.3.py` 在该现场副本上因**既有 70 条 FK 违规主动回滚**（未跑成），故现场尚未 v1.4.3 schema、新后端预算接口在其上会 500（缺 scope_mode 列）——印证「现场未跑 v1.4.3 迁移」的历史背景；M3 实时验证改在 current-schema 新库上完成。发布时 v1.4.3 迁移需先处理既有 FK 违规（属 `migrate_to_v1.4.3.py` 自身发布议题，本批不扩围）。
+
+## 阻塞清单
+
+（无——三模块全部 done）
+
 ## 待人工抽检清单（子 Agent 不勾选，P4 已覆盖项标「已自动化实测」）
 
 ### M1
 - [ ] 1.2 发布窗口二次确认：若服务器现场库与副本形态不同，按判定树 B/C 补查（属新信息则停，不猜）——**现场库实测**，发布窗口
-- [ ] 6.2 明暗主题 × 竖/宽屏真机拖拽观感（触摸长按 150ms、鼠标即拖）、保存后无跳变、toast 文案不变——P4 浏览器实测覆盖交互链（拖拽→保存→重进一致），观感留人工终判
-- [ ] 6.3 现场库副本实测「其他」非末位态可拖——P4 副本演练覆盖，人工终判
+- [ ] 6.2 明暗主题 × 竖/宽屏真机拖拽观感（触摸长按 150ms、鼠标即拖）、保存后无跳变、toast 文案不变——**逻辑链已由 HTTP reorder（其他归末位、非家族保序）+ DOM（13 把手/1 占位/无 disabled）实证；真实指针拖拽手势 + 明暗/宽竖观感 + 截图留人工**（本会话 in-app browser 无视口，见终验 P4 登记）
+- [ ] 6.3 现场库副本实测「其他」非末位态可拖——副本迁移 + DOM 已确认渲染可拖（无 disabled）；**真实指针拖拽留人工**
 
 ### M2
-- [ ] 4.2 现场库**副本**演练一次：备份 → 执行 → 前端分类页三行变一行、历史账单归类正确、预算覆盖不变——P4 副本演练 + 归并观察覆盖，人工终判
+- [ ] 4.2 现场库**副本**演练一次：备份 → 执行 → 前端分类页三行变一行、历史账单归类正确、预算覆盖不变——副本发布窗口序演练 + 分类页 DOM「单其他置尾、无旧名」**已完成 + 已复核重定向/FK 新增 0**；截图与历史账单肉眼归类终判留人工
 - [ ] 4.3 发布备忘登记：执行序（先备份、dormant 脚本先于新代码启动、本脚本与其顺序可换可单独重跑）——已落本文件发布备忘段，人工复核
 
 ### M3
-- [ ] 9.2 人工·主链路：新增预算不选分类保存 → 卡片显示全部分类语义、花费=当月总支出；新建分类并记账 → 该预算数字自动跟上；删除该预算唯一关联分类 → 卡片置灰「分类已删除、预算保留」、月概览不含它；编辑重选分类 → 恢复计入——P4 浏览器实测覆盖该链路，人工终判观感
-- [ ] 9.3 人工·明暗主题 × 竖/宽屏自查（置灰一档可读、不引新色值）——人工
-- [ ] 9.4 不回退核验：v1.4.3 M12 预算两泳道互斥校验（scope_mode 切换多选行为）只放宽空集限制，泳道互斥本身不变——M3b 口头核验（`test_scope_mode_validation`/`test_nonexistent_category_rejected` 原样通过），真机人工终判
-- [ ] ⚠️（关注，非验收项）export_service budgets 导出不含 dormant 列，还原后休眠行回退动态全部——本期不扩围修，见遗留关注
+- [ ] 9.2 人工·主链路：新增预算不选分类保存 → 花费=当月总支出；新建分类并记账 → 数字自动跟上；删唯一关联分类 → 置灰「分类已删除、预算保留」、月概览不含；编辑重选 → 恢复计入——**后端链路已 HTTP 端到端实证（D5 100.0、7.1 100→150、dormant 保留+summary 777→0、PUT 唤醒）；前端置灰肉眼观感 + 截图留人工**
+- [ ] 9.3 人工·明暗主题 × 竖/宽屏自查（置灰一档可读、不引新色值）——人工（本会话无视口截图）
+- [ ] 9.4 不回退核验：v1.4.3 M12 预算两泳道互斥校验（scope_mode 切换多选行为）只放宽空集限制，泳道互斥本身不变——M3b/M3f 口头 + `test_scope_mode_validation` 绿灯核验，真机人工终判
 
 ## 阻塞清单
 
