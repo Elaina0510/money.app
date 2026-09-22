@@ -219,25 +219,28 @@ async def update_category(
 async def _set_sort_order(
     db: AsyncSession, row: Category, sort_order: int, user_id: int | None
 ) -> None:
-    """把新排序写入用户可见行：预设行走 Copy-on-Write，全局预设行永不被写脏。
+    """把新排序写入用户可见行：全局预设行 Copy-on-Write，用户自有行直接改位。
 
-    - 用户自有行（is_preset=0）：直接更新；
-    - 预设已有用户副本（同名）：更新副本；
-    - 预设无副本：按预设字段建副本（is_preset=0、新 sort_order）后写位。
+    - 无 current_user（全局维护态），或该行**已归属本用户**（``row.user_id`` 非空，
+      含历史「``is_preset=1`` 且 ``user_id`` 非空」的形制行）：直接更新 ``sort_order``；
+    - 仅当该行为**全局预设**（``row.user_id is None``）才走 CoW：
+      * 本用户已有同名行（UNIQUE(name,user_id) 保证至多一条）→ 更新它；
+      * 无同名行 → 按预设字段建副本（``is_preset=0``、新 ``sort_order``）后写位。
+
+    全局预设行（``user_id IS NULL``）永不被写脏。
     """
-    if row.is_preset == 0 or user_id is None:
+    if user_id is None or row.user_id is not None:
         row.sort_order = sort_order
         db.add(row)
         return
 
     if row.sort_order == sort_order:
-        # 预设行本就在目标位：无需建副本，避免无意义的 CoW 膨胀（全局预设行不被写）
+        # 全局预设本就在目标位：无需建副本，避免无意义的 CoW 膨胀（全局预设行不被写）
         return
 
     dup_stmt = select(Category).where(
         Category.name == row.name,
         Category.user_id == user_id,
-        Category.is_preset == 0,
     )
     existing = (await db.exec(dup_stmt)).first()
     if existing is None:

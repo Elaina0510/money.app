@@ -526,3 +526,46 @@ async def test_rename_legacy_family_rows_allowed_but_other_name_stays_locked(cli
     blocked = await client.put(f"/api/categories/{other_id}", json={"name": "杂项"})
     assert blocked.status_code == 400
     assert "其他" in blocked.json()["message"]
+
+
+@pytest.mark.asyncio
+async def test_reorder_owned_preset_flagged_row_updates_in_place(client, db_session):
+    """回归（现场拖拽「有时候保存失败」根因）：历史「is_preset=1 且 user_id 非空」的
+    用户自有形制行，重排时必须**就地改 sort_order**，不得走 CoW。
+
+    旧实现 ``_set_sort_order`` 以 ``is_preset == 0`` 判「用户自有行」，把这类行误当全局
+    预设 → 进 CoW 分支 → ``INSERT`` 一条同 ``(name, user_id)`` 的副本 → 撞
+    ``UNIQUE(name,user_id)`` → IntegrityError → 500（前端表现为「排序保存失败」，
+    因仅当该行被移动出原位才触发，故呈间歇性）。
+    """
+    from sqlalchemy import select
+
+    from app.models.category import Category
+    from app.models.user import User
+
+    # 列投影取 id（本仓 exec(select(Model)).one() 返回 Row，非实体——沿用既有手法）
+    uid = (await db_session.exec(select(User.id).where(User.username == "clientuser"))).one()[0]
+    db_session.add(
+        Category(
+            name="历史形制分类",
+            type="expense",
+            icon="mdi-bag-suitcase",
+            sort_order=999,
+            is_preset=1,  # 关键：is_preset=1 但归属该用户（现场/迁移遗留形制）
+            user_id=uid,
+        )
+    )
+    await db_session.commit()
+
+    visible = await _visible(client)
+    mine = next((c["id"] for c in visible if c["name"] == "历史形制分类"), None)
+    assert mine is not None, "owned is_preset=1 行应进入可见集"
+
+    rest = [c["id"] for c in visible if c["id"] != mine]
+    moved = [mine] + rest  # 从末位移到最前（改变 sort_order → 旧实现会触发 CoW 撞约束）
+    resp = await _reorder(client, moved)
+    assert resp.status_code == 200, f"重排自有 is_preset=1 行不应 500：{resp.status_code} {resp.text[:200]}"
+
+    after = await _visible(client)
+    assert sum(1 for c in after if c["name"] == "历史形制分类") == 1, "不得因 CoW 产生重复 (name,user_id) 行"
+    assert after[0]["name"] == "历史形制分类"  # 非家族 → 提到首位
