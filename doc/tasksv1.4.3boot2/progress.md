@@ -8,7 +8,7 @@
 
 ## 模块清单（3 个，与需求三节一对一）
 
-- [ ] [M1 - 分类拖拽排序永远可用](m1-category-drag-always-on.md) —— 需求一（前端去禁用 + 后端 reorder 家族置尾归一 + 根因复核）
+- [x] [M1 - 分类拖拽排序永远可用](m1-category-drag-always-on.md) —— 需求一（前端去禁用 + 后端 reorder 家族置尾归一 + 根因复核）✅ `045dc45`
 - [ ] [M2 - 「其他支出 / 其他收入」归并入「其他」](m2-merge-other-categories.md) —— 需求二（一次性迁移脚本，幂等，零运行期代码）
 - [ ] [M3 - 预算「不选=全部」+ 删光转休眠](m3-budget-dynamic-all-dormant.md) —— 需求三（Budget.dormant + 校验放开 + 级联改向 + 前端置灰）
 
@@ -88,13 +88,26 @@ M1 → M2 → M3
 
 | 模块 | 层 | 状态 | 完成 commit | 备注 |
 |------|----|------|-------------|------|
-| M1 | 前端 + 后端（category_service） | ⬜ 待开始 | | |
-| M2 | 后端（迁移脚本 + 测试） | ⬜ 待开始 | | |
-| M3 | 后端（模型/服务/路由/脚本）+ 前端（统计页） | ⬜ 待开始 | | |
+| M1 | 前端 + 后端（category_service） | ✅ 完成 | `045dc45` | 守门先行；pytest 252+1skip / vitest 390 / mypy 基线零新增 / ruff·eslint 绿；主 Agent 复跑核验通过 |
+| M2 | 后端（迁移脚本 + 测试） | ⬜ 待开始 | | 泳道1，与 M3 并行 |
+| M3 | 后端（模型/服务/路由/脚本）+ 前端（统计页） | ⬜ 待开始 | | 泳道2，M3b→M3f 半区接力 |
 
 ## 模块执行记录
 
-（执行阶段落盘）
+### M1（done · `045dc45` · fixed_rounds 0 · 32/35 勾选，余 3 项人工/发布窗口）
+- **P2 副本取证**：现场库 SHA256 复制前后一致（`f8e0c5de…`，原件未动、只读连接、未回写），副本形态与分支 A 逐条一致：「其他」id=34 sort=14，旧名「其他支出」id=9 /「其他收入」id=14 均 sort=99 压后 → 「其他」非末位 → 旧 `isOtherLocked` 恒真整列表禁用（user1/user3 可见集同形）。无需走 B/C 分支。
+- **改动**：前端删 `isOtherLocked` + `:disabled`，把手条件收口 `cat.name !== OTHER_CATEGORY_NAME`（D7），`onDragEnd`→`normalizeTail`（D6 与后端逐位一致）；后端家族常量定表 + `_is_other_category`/`_is_other_row` 判据放宽三名、`reorder` 删「缺其他→ValueError」（D8）改家族名次稳定置尾、`_next_sort_order` 钳家族最小 sort + 0 下钳、`update_category` 禁改名收窄「其他」本名；回滚链路与 store 零改动。
+- **附录 B 改写**：`test_categories_reorder.py`（含反转组、三名乱序尾段固定、三态钳制、旧名可改名/「其他」仍锁、M2 常量一致性占位）、`SettingsSubPages.test.js`（把手 ?raw 红线 + disabled undefined、isOtherFamily/isOther 真值表、normalizeTail、现场形态夹具）。全部替换断言新口径，零删除零放宽。
+- **主 Agent 核验增补**：本模块额外改 `backend/tests/test_categories.py`（5 例，任务涉及文件未点名）——经复核为 M1 `_next_sort_order` 家族钳制对夹具旧名行的**合法行为涟漪适配**（断言转严、加无家族态前置、仅调 sort 绝对值维度、注释同步），非放宽；沙盒仅内存库、未碰真实 money.db。
+- **5.4 占位手法**：M1 用「探测脚本文件存在即 skip、存在则按路径加载做双侧常量实断言」替代 importorskip（后者对含点号文件名抛 SyntaxError 不生效）；M2 落文件后**自动**转实断言，P3 闭环终验核验。
+- M9 flip 组（3 例含 :1763 零闪回）整组复跑通过；vuedraggable/sortablejs 参数一字未动。
+
+## 待人工抽检清单（子 Agent 不勾选，P4 已覆盖项标「已自动化实测」）
+
+### M1
+- [ ] 1.2 发布窗口二次确认：若服务器现场库与副本形态不同，按判定树 B/C 补查（属新信息则停，不猜）——**现场库实测**，发布窗口
+- [ ] 6.2 明暗主题 × 竖/宽屏真机拖拽观感（触摸长按 150ms、鼠标即拖）、保存后无跳变、toast 文案不变——P4 浏览器实测覆盖交互链（拖拽→保存→重进一致），观感留人工终判
+- [ ] 6.3 现场库副本实测「其他」非末位态可拖——P4 副本演练覆盖，人工终判
 
 ## 阻塞清单
 
