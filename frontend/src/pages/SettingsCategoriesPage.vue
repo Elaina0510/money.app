@@ -34,11 +34,12 @@
           <!-- M9：:animation="180" 为 sortablejs flip 让位动画时长（拖动中其余行连续平滑让位、
                落点无跳变）；150–200ms 区间取值，属 D10 独立口径，不引用展开类动画的 --expand-duration。
                其余拖拽参数（delay / delay-on-touch-only / touch-start-threshold / ghost-class / drag-class）
-               与保存回滚链路维持 v1.4.2 值不变 -->
+               与保存回滚链路维持 v1.4.2 值不变。
+               v1.4.3-boot2 M1（D1）：原「『其他』非末位即整列表禁用」的 disabled 绑定已删除——
+               「其他」家族由 onDragEnd 与后端 reorder 归一化强制置尾，任何数据态拖拽永远可用 -->
           <Draggable
             v-model="dragList"
             :handle="'.drag-handle'"
-            :disabled="isOtherLocked(dragList)"
             item-key="id"
             :delay="150"
             :delay-on-touch-only="true"
@@ -52,10 +53,18 @@
             <template #item="{ element: cat }">
               <v-list-item class="category-list-item" rounded="lg">
                 <template v-slot:prepend>
-                  <v-icon v-if="!isOther(cat)" class="drag-handle mr-1" size="20" color="grey">
+                  <!-- v1.4.3-boot2 M1（D7）：把手条件按「其他」本名收口，**不是** isOtherFamily——
+                       旧名「其他支出 / 其他收入」两行属 M2 迁移前过渡态，照常给把手、可拖
+                       （保存时被名次归一化推到尾部）；仅「其他」一行无把手、用同宽占位 -->
+                  <v-icon
+                    v-if="cat.name !== OTHER_CATEGORY_NAME"
+                    class="drag-handle mr-1"
+                    size="20"
+                    color="grey"
+                  >
                     mdi-drag-vertical
                   </v-icon>
-                  <span v-else class="drag-handle-placeholder mr-1" />
+                  <span v-else-if="isOther(cat)" class="drag-handle-placeholder mr-1" />
                   <!-- M8：行图标统一 .entry-avatar primary 10% 底 + primary 图标，
                        消除同页收支双色暗示（与设置页入口同款） -->
                   <v-avatar size="32" class="entry-avatar mr-2">
@@ -189,15 +198,22 @@ const restoring = ref(false)
 // 「其他」判定与后端 category_service 助手对齐：仅按 name（D11 唯一真源）；
 // 预设行与其 CoW 用户副本同名，一并命中
 const OTHER_CATEGORY_NAME = '其他'
+// v1.4.3-boot2（D2/D6）「其他家族」：M2 迁移脚本执行前现场库仍并存旧名行，
+// 判据放宽为三名集合。名次表必须与后端 category_service.OTHER_FAMILY_RANK
+// **同规则、同名次、同稳定排序语义**（前端提交序 = 后端落库序，杜绝「保存后二次跳变」）。
+const LEGACY_OTHER_NAMES = ['其他支出', '其他收入']
+// 置尾名次固定：其他支出(0) < 其他收入(1) < 其他(2)——「其他」恒最后
+const OTHER_FAMILY_RANK = Object.fromEntries(
+  [...LEGACY_OTHER_NAMES, OTHER_CATEGORY_NAME].map((name, rank) => [name, rank])
+)
 
 function isOther(cat) {
   return !!cat && cat.name === OTHER_CATEGORY_NAME
 }
 
-// 「其他」非末位（异常数据）→ 禁用拖动，避免拖出无法解释的顺序
-function isOtherLocked(list) {
-  const idx = list.findIndex(isOther)
-  return idx >= 0 && idx !== list.length - 1
+// 「其他家族」判定（置尾归一化用）：三名任一即命中
+function isOtherFamily(cat) {
+  return !!cat && Object.hasOwn(OTHER_FAMILY_RANK, cat.name)
 }
 
 // 单一渲染源：模板只读 dragList；store 的 categories 仅作派生源（预设 CoW 后 id 会变）
@@ -218,13 +234,19 @@ function onDragStart() {
   preDragSnapshot.value = [...dragList.value]
 }
 
+// 本地镜像后端 reorder 的置尾归一化（逐位一致）：非家族保序 + 家族按名次稳定排序置尾。
+// 过渡态观感（D7）：M2 迁移前拖动其它行松手后，家族行可能「跳回」尾部——
+// 这与后端落库序完全一致，保存后不再有第二次跳变；重进页面顺序即松手时的顺序。
+function normalizeTail(list) {
+  const normal = list.filter((c) => !isOtherFamily(c))
+  const family = list
+    .filter(isOtherFamily)
+    .sort((a, b) => OTHER_FAMILY_RANK[a.name] - OTHER_FAMILY_RANK[b.name])
+  return [...normal, ...family]
+}
+
 function onDragEnd() {
-  const list = dragList.value
-  const otherIdx = list.findIndex(isOther)
-  // 本地镜像后端「末尾占位」归一化：「其他」被拖到中间 → 移回末位再提交，避免保存后跳变
-  if (otherIdx >= 0 && otherIdx !== list.length - 1) {
-    dragList.value = [...list.filter((c) => !isOther(c)), list[otherIdx]]
-  }
+  dragList.value = normalizeTail(dragList.value)
   submitReorder(dragList.value)
 }
 
@@ -259,7 +281,7 @@ async function saveCategory() {
         icon: categoryForm.icon,
       })
     } else {
-      // sort_order 由服务端计算：追加到全列表末尾、「其他」之前
+      // sort_order 由服务端计算：追加到全列表末尾、「其他家族」之前
       await categoriesStore.addCategory({
         name: categoryForm.name,
         icon: categoryForm.icon,

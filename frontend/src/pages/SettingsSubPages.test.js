@@ -208,6 +208,27 @@ async function mountReorderPage() {
   return mountPage(SettingsCategoriesPage)
 }
 
+// ── v1.4.3-boot2 M1 现场形态夹具（money.db 副本实测同形）────────────────────
+// 三名家族并存、「其他」不在末位（sort 3），两个旧名行 sort 5/6 压其后：
+// 这正是旧实现里 `isOtherLocked` 把整个列表锁死、后端 reorder 直接 400 的数据态。
+// M1 后：把手照常渲染、拖拽永远可用，松手时家族按名次 其他支出 < 其他收入 < 其他 置尾。
+const FAMILY_CATEGORIES = [
+  { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 1, is_preset: 1 },
+  { id: 2, name: '出行', type: 'expense', icon: 'mdi-bus', sort_order: 2, is_preset: 1 },
+  { id: 8, name: '其他', type: 'expense', icon: 'mdi-cash-minus', sort_order: 3, is_preset: 1 },
+  { id: 3, name: '购物', type: 'expense', icon: 'mdi-cart', sort_order: 4, is_preset: 0 },
+  { id: 9, name: '其他支出', type: 'expense', icon: 'mdi-dots-horizontal', sort_order: 5, is_preset: 1 },
+  { id: 10, name: '其他收入', type: 'income', icon: 'mdi-cash-plus', sort_order: 6, is_preset: 1 },
+]
+
+const familyCopy = () => FAMILY_CATEGORIES.map((c) => ({ ...c }))
+
+async function mountFamilyPage() {
+  getCategories.mockResolvedValue(familyCopy())
+  reorderCategories.mockResolvedValue(familyCopy())
+  return mountPage(SettingsCategoriesPage)
+}
+
 // vuedraggable 把非声明属性按 kebab → camel 透传给 Sortable，这里同口径归一
 function sortableOptionsOf(node) {
   const out = {}
@@ -328,7 +349,17 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     expect(categoriesPageSource.match(/mdi-drag-vertical/g)).toHaveLength(1)
     expect(categoriesPageSource.match(/class="drag-handle mr-1"/g)).toHaveLength(1)
     expect(categoriesPageSource.match(/class="drag-handle-placeholder mr-1"/g)).toHaveLength(1)
-    expect(categoriesPageSource).toMatch(/v-if="!isOther\(cat\)"/)
+    // M1（任务 5.9 / D7 红线）：把手条件必须是「其他」**本名**比较——
+    // 写成 isOtherFamily 是错的（会连旧名两行也变成无把手）
+    expect(categoriesPageSource).toMatch(/v-if="cat\.name !== OTHER_CATEGORY_NAME"/)
+    expect(categoriesPageSource).not.toMatch(/v-if="[^"]*isOtherFamily\(cat\)"/)
+    expect(categoriesPageSource).toMatch(
+      /v-else-if="isOther\(cat\)" class="drag-handle-placeholder mr-1"/
+    )
+    // M1（任务 5.6 / D1）：整列表锁定已彻底移除（源码零残留，不靠数据干净换可用）
+    expect(categoriesPageSource).not.toMatch(/:disabled="isOtherLocked/)
+    expect(categoriesPageSource).not.toMatch(/\bisOtherLocked\b/)
+    expect(categoriesPageSource).not.toMatch(/:disabled=/)
     // 样式红线：touch-action: none 只加把手，未污染整行（加整行会杀死列表滚动）
     expect(categoriesPageSource).toMatch(/\.drag-handle \{[^}]*touch-action: none/)
     expect(categoriesPageSource).not.toMatch(/\.category-list-item \{[^}]*touch-action/)
@@ -344,7 +375,9 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     expect(options.touchStartThreshold).toBe(5)
     expect(options.ghostClass).toBe('drag-ghost')
     expect(options.dragClass).toBe('drag-float')
-    expect(options.disabled).toBe(false)
+    // M1（D1）：`:disabled` 绑定已整体移除 → Sortable 侧不再收到该键（恒 undefined，
+    // 即「任何数据态都可拖」；旧断言 toBe(false) 依赖的正是被删掉的锁定绑定）
+    expect(options.disabled).toBeUndefined()
     expect(draggables[0].props('itemKey')).toBe('id')
 
     // REORDER 夹具：6 行（含原收入类）全在一列；行渲染与 Sortable 命中集一一对应
@@ -376,7 +409,7 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     expect(mockShowToast).toHaveBeenCalledWith('排序已保存')
   })
 
-  it('用例2b-2:「其他」被拖到中间 → 本地与提交 ids 均归一化回末位；isOther/isOtherLocked 口径', async () => {
+  it('用例2b-2:「其他」被拖到中间 → normalizeTail 名次置尾回末位；isOther/isOtherFamily 真值表', async () => {
     const wrapper = await mountReorderPage()
     const list = wrapper.vm.dragList
     const [food, trip, shopping, salary, redpack, other] = list
@@ -384,7 +417,8 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     wrapper.vm.onDragStart()
     wrapper.vm.dragList = [food, other, trip, shopping, salary, redpack]
     wrapper.vm.onDragEnd()
-    // 本地镜像后端「末尾占位」归一化（同步生效，避免保存后跳变）——作用域为全列表
+    // M1（5.8）：本地镜像后端 reorder 的置尾归一化 normalizeTail（同步生效，避免保存后跳变）
+    // 单名态下与 v1.4.3「末尾占位」口径逐位等值——家族只有「其他」一行
     expect(wrapper.vm.dragList.map((c) => c.name)).toEqual([
       '餐饮',
       '出行',
@@ -396,21 +430,90 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     await flushPromises()
     expect(reorderCategories).toHaveBeenCalledWith({ ids: [1, 2, 3, 9, 10, 8] })
 
-    // M8/D11：isOther 仅按 name 判定（唯一真源「其他」）；
-    // v1.4.2 的「其他支出/其他收入」双别名迁移后已不存在，不再命中
+    // 5.7 口径反转（附录 B）：置尾判据自 M1 起为**「其他家族」**——旧名两行必须命中
+    // isOtherFamily（旧断言恰恰断言它们不命中）；isOther 仍只认「其他」本名（控把手，D7）
+    expect(wrapper.vm.isOtherFamily(other)).toBe(true)
+    expect(wrapper.vm.isOtherFamily({ name: '其他' })).toBe(true)
+    expect(wrapper.vm.isOtherFamily({ name: '其他支出', type: 'expense' })).toBe(true)
+    expect(wrapper.vm.isOtherFamily({ name: '其他收入', type: 'income' })).toBe(true)
+    expect(wrapper.vm.isOtherFamily({ name: '餐饮', type: 'expense' })).toBe(false)
+    expect(wrapper.vm.isOtherFamily({ name: '工资' })).toBe(false)
+    expect(wrapper.vm.isOtherFamily(null)).toBe(false)
+    // isOther：仅本名（旧名两行仍要有把手，故此处三名中只命中一个）
     expect(wrapper.vm.isOther(other)).toBe(true)
-    expect(wrapper.vm.isOther({ name: '其他' })).toBe(true)
     expect(wrapper.vm.isOther({ name: '其他', type: 'income' })).toBe(true)
     expect(wrapper.vm.isOther({ name: '其他支出', type: 'expense' })).toBe(false)
     expect(wrapper.vm.isOther({ name: '其他收入', type: 'income' })).toBe(false)
     expect(wrapper.vm.isOther({ name: '餐饮', type: 'expense' })).toBe(false)
     expect(wrapper.vm.isOther(null)).toBe(false)
 
-    // isOtherLocked: 非末位「其他」（异常数据）→ 禁用拖动
-    expect(wrapper.vm.isOtherLocked([other, food, trip])).toBe(true)
-    expect(wrapper.vm.isOtherLocked([food, trip, other])).toBe(false)
-    expect(wrapper.vm.isOtherLocked([])).toBe(false)
-    expect(sortableOptionsOf(wrapper.findAllComponents(Draggable)[0]).disabled).toBe(false)
+    // 5.8（D6 逐位一致）：家族乱序输入 → 名次置尾；非家族保持提交序
+    const legacyExpense = { id: 91, name: '其他支出' }
+    const legacyIncome = { id: 92, name: '其他收入' }
+    const plain = { id: 93, name: '宠物' }
+    expect(
+      wrapper.vm
+        .normalizeTail([other, plain, legacyIncome, food, legacyExpense])
+        .map((c) => c.name)
+    ).toEqual(['宠物', '餐饮', '其他支出', '其他收入', '其他'])
+    // 稳定序：名次不同的家族恒按名次，非家族相对次序 = 提交次序（与后端 sorted 语义同）
+    expect(wrapper.vm.normalizeTail(list).map((c) => c.id)).toEqual([1, 2, 3, 9, 10, 8])
+    expect(wrapper.vm.normalizeTail([])).toEqual([])
+
+    // 5.6：整列表锁定彻底退场——函数不存在 + Draggable 无 disabled 键
+    expect(wrapper.vm.isOtherLocked).toBeUndefined()
+    expect(sortableOptionsOf(wrapper.findAllComponents(Draggable)[0]).disabled).toBeUndefined()
+  })
+
+  it('用例2b-4: 现场形态（三名家族并存、「其他」非末位）→ 永远可拖 + 名次置尾无二次跳变', async () => {
+    // 5.9 镜像归一真源在场（与后端 category_service.OTHER_FAMILY_RANK 同表同名次）
+    expect(categoriesPageSource).toMatch(/const OTHER_FAMILY_RANK = /)
+    expect(categoriesPageSource).toMatch(/const LEGACY_OTHER_NAMES = /)
+    expect(categoriesPageSource).toMatch(/function normalizeTail\(list\) \{/)
+    expect(categoriesPageSource).toMatch(/function isOtherFamily\(cat\) \{/)
+    // 5.9 把手渲染（?raw 口径：本文件不装 Vuetify，v-list-item 具名 slot 不落 DOM）
+    // 旧名两行走 v-if 分支 → .drag-handle 在场可拖；「其他」行走 v-else-if 分支 → 仅占位
+    expect(categoriesPageSource).toMatch(
+      /v-if="cat\.name !== OTHER_CATEGORY_NAME"[\s\S]{0,120}class="drag-handle mr-1"/
+    )
+    expect(categoriesPageSource).toMatch(
+      /v-else-if="isOther\(cat\)" class="drag-handle-placeholder mr-1"/
+    )
+
+    const wrapper = await mountFamilyPage()
+    const options = sortableOptionsOf(wrapper.findAllComponents(Draggable)[0])
+    // D1：脏数据态下也不存在任何禁用态（旧实现此态整列表锁死、把手按压无反应）
+    expect(options.disabled).toBeUndefined()
+    expect(wrapper.findAll('.category-list-item')).toHaveLength(6)
+    expect(wrapper.findAll('[data-draggable]')).toHaveLength(6)
+    // 载入即后端真值：本地不做预归一化（「其他」此刻仍在第 3 位）
+    expect(wrapper.vm.dragList.map((c) => c.name)).toEqual([
+      '餐饮',
+      '出行',
+      '其他',
+      '购物',
+      '其他支出',
+      '其他收入',
+    ])
+
+    // 拖动普通行「购物」到首位 → 松手即家族整体按名次置尾，本地序 = 提交序（零二次跳变）
+    const list = wrapper.vm.dragList
+    wrapper.vm.onDragStart()
+    wrapper.vm.dragList = [list[3], list[0], list[1], list[2], list[4], list[5]]
+    wrapper.vm.onDragEnd()
+    expect(wrapper.vm.dragList.map((c) => c.name)).toEqual([
+      '购物',
+      '餐饮',
+      '出行',
+      '其他支出',
+      '其他收入',
+      '其他',
+    ])
+    await flushPromises()
+    expect(reorderCategories).toHaveBeenCalledTimes(1)
+    expect(reorderCategories).toHaveBeenCalledWith({ ids: [3, 1, 2, 9, 10, 8] })
+    expect(mockShowToast).toHaveBeenCalledTimes(1)
+    expect(mockShowToast).toHaveBeenCalledWith('排序已保存')
   })
 
   it('用例2b-3: 保存失败 → 回滚拖前快照 + 错误 toast，并静默重拉对齐后端真值', async () => {

@@ -15,16 +15,23 @@ from app.schemas.category import CategoryCreate, CategoryUpdate
 # v1.4.3 M8（D11）：判据从「类型对应且同名」改「同名即其他类」——
 # 预设行与其 Copy-on-Write 用户副本同名，一并命中
 OTHER_CATEGORY_NAME = "其他"
+# v1.4.3-boot2（D2/D6）「其他家族」：M2 迁移脚本执行前现场库仍并存旧名行
+# （副本实测「其他支出」「其他收入」两预设行 sort_order=99 压在「其他」之后），
+# 拖拽可用性不以数据干净为前提，故置尾判据放宽为三名集合。
+# OTHER_FAMILY_RANK 即置尾归一化的唯一名次口径，前端 SettingsCategoriesPage 的
+# 同名表与之逐位一致（否则出现「保存后二次跳变」）；与 M2 脚本常量以一致性断言钉住。
+LEGACY_OTHER_NAMES = ("其他支出", "其他收入")
+OTHER_FAMILY_RANK: dict[str, int] = {"其他支出": 0, "其他收入": 1, "其他": 2}
 
 
 def _is_other_category(cat: Category) -> bool:
-    """「其他」= 仅按名称判定（预设行与其 CoW 用户副本一并命中）。"""
-    return cat.name == OTHER_CATEGORY_NAME
+    """「其他家族」= 仅按名称判定（预设行与其 CoW 用户副本一并命中）。"""
+    return cat.name in OTHER_FAMILY_RANK
 
 
 def _is_other_row(name: str) -> bool:
-    """按名称判定是否「其他」分类行（尚未落库的行同样适用）。"""
-    return name == OTHER_CATEGORY_NAME
+    """按名称判定是否「其他家族」行（尚未落库的行同样适用）。"""
+    return name in OTHER_FAMILY_RANK
 
 
 async def _visible_categories(
@@ -76,20 +83,24 @@ async def get_categories(
 
 
 async def _next_sort_order(db: AsyncSession, current_user: User | None = None) -> int:
-    """新增分类的服务端排序：追加到全列表末尾、「其他」之前。
+    """新增分类的服务端排序：追加到全列表末尾、「其他家族」之前。
 
-    规则（设计 §8.2.3，v1.4.2 钳制算法作用域由组内改全列表）：
-    1. base = 可见集合中非「其他」行的最大 sort_order（空集合按 0）；
-    2. 全列表存在「其他」时结果钳制为严格小于其 sort——「其他」恒置尾是硬约束，
-       「其他」本身不在末位的异常数据同样自愈；
-    3. 全列表无「其他」时直接 max+1 追加末位。
+    规则（设计 §8.2.3 + v1.4.3-boot2 §1.2.1-2）：
+    1. base = 可见集合中非家族行的最大 sort_order（空集合按 0）；
+    2. 全列表存在家族行（「其他支出 / 其他收入 / 其他」任一）时结果钳制为严格小于
+       **家族中 sort 最小者**的 sort——新建行恒落在所有家族行之前，家族不在末位的
+       异常数据同样自愈；
+    3. 全列表无家族行时直接 max+1 追加末位；
+    4. 结果下钳 0：脏数据态（家族行 sort=0 或不在末位）下 `other.sort_order - 1`
+       可能 ≤0，SQLite 列无 CHECK，负值会破坏排序假设；钳 0 与导入建的 sort=0 行
+       同区，由下一次成功 reorder 归一化 1..n 自愈，不新增状态。
     """
     visible = await _visible_categories(db, current_user)
     base = max((c.sort_order for c in visible if not _is_other_category(c)), default=0)
-    other = next((c for c in visible if _is_other_category(c)), None)
-    if other is None:
+    family = [c.sort_order for c in visible if _is_other_category(c)]
+    if not family:
         return base + 1
-    return min(base + 1, other.sort_order - 1)
+    return max(min(base + 1, min(family) - 1), 0)
 
 
 async def create_category(
@@ -147,9 +158,12 @@ async def update_category(
         return None
 
     # 禁改「其他」名（决策 D11）：校验置于 CoW 与普通更新两条路径之前
-    if _is_other_row(category.name):
+    # v1.4.3-boot2（§1.2.1-3）判据**刻意不收家族**：旧名「其他支出 / 其他收入」两行属
+    # M2 迁移执行前的过渡态数据，允许改名（改出家族即成普通行，符合用户自助清理的直觉）；
+    # 仅「其他」本名维持不可改。故此处用本名比较而非 _is_other_row（家族口径）。
+    if category.name == OTHER_CATEGORY_NAME:
         new_name = data.name
-        if new_name and not _is_other_row(new_name):
+        if new_name and new_name != OTHER_CATEGORY_NAME:
             raise ValueError('"其他"分类名称不可修改')
 
     user_id = current_user.id if current_user else None
@@ -247,25 +261,34 @@ async def reorder_categories(
 ) -> list[Category]:
     """批量重排全量分类排序：单次原子提交、归一化为 1..n 连续。
 
-    规则（设计 §8.2.2，v1.4.2 算法作用域从「按类型分组」改「全列表」）：
-    1. ``ids`` 必须是该用户可见集合的全量有序 id（防漏位）；
-    2. 「其他」无论提交落点，强制归一化到末位 n（其余行保持相对次序）；
+    规则（设计 §8.2.2 + v1.4.3-boot2 §1.2.1-1）：
+    1. ``ids`` 必须是该用户可见集合的全量有序 id——**防漏位的唯一守门**；
+    2. 「其他家族」无论提交落点，整体归一化到末尾并按固定名次排尾
+       （``OTHER_FAMILY_RANK``：其他支出 < 其他收入 < 其他，「其他」恒最后），
+       非家族行保持提交相对次序；本口径与前端 ``normalizeTail`` **逐位一致**，
+       否则出现「前端提交序 ≠ 后端落库序」的保存后二次跳变；
     3. 预设行的改序落到用户副本上，全局预设行 sort_order 永不写脏。
 
+    v1.4.3-boot2（D8）：原「可见集合无『其他』行 → ValueError」硬校验已删除——
+    防漏位职责已由规则 1 完全覆盖，保留它反而在「用户可见集合无其他行」的极端态
+    （如导入产生）把 reorder 再次打死，违背 D1「拖拽永远可用」。
+
     Raises:
-        ValueError: 提交与当前可见分类不一致（缺项/多项/重复/本用户无「其他」行）。
+        ValueError: 提交与当前可见分类不一致（缺项/多项/重复）。
     """
     visible = await _visible_categories(db, current_user)
     visible_ids = {c.id for c in visible}
     if len(set(ids)) != len(ids) or set(ids) != visible_ids:
         raise ValueError("排序列表与当前分类不一致")
-    if not any(_is_other_category(c) for c in visible):
-        raise ValueError(f"排序列表与当前分类不一致：缺少「{OTHER_CATEGORY_NAME}」分类")
 
     by_id = {c.id: c for c in visible}
     submitted = [by_id[cid] for cid in ids]
-    others = [c for c in submitted if _is_other_category(c)]
-    ordered = [c for c in submitted if not _is_other_category(c)] + others
+    # 家族行按名次稳定排序后置尾（sorted 稳定性保证：同名次保持提交序）
+    family = sorted(
+        (c for c in submitted if _is_other_category(c)),
+        key=lambda c: OTHER_FAMILY_RANK[c.name],
+    )
+    ordered = [c for c in submitted if not _is_other_category(c)] + family
 
     user_id = current_user.id if current_user else None
     for position, row in enumerate(ordered, start=1):

@@ -3,14 +3,21 @@
 v1.4.3 M8：分类不再分收支两组，载荷由 `{type, ids}` 收敛为 `{ids}`（全量有序 id），
 「其他」强制归一化到末位的设计不变，作用域从「组内」改「全列表」。
 
+v1.4.3-boot2 M1（D2/D6）：置尾判据由「其他」单名放宽为**「其他家族」三名集合**，
+家族整体移末尾并按固定名次排（其他支出 < 其他收入 < 其他）；「可见集合无其他行 →
+ValueError」硬校验已删除（D8），防漏位由 ids 全量匹配唯一守门。
+
 测试库预设（`conftest.PRESET_CATEGORIES`，过期 7 条副本——见 9.3a 登记）：
   餐饮1 出行2 购物3 旅行4 账单与费用5 工资1 其他收入2
   → 按 (sort_order, id) 排序的可见单列表为
     [餐饮(1), 工资(1), 出行(2), 其他收入(2), 购物(3), 旅行(4), 账单与费用(5)]
-  注意两点，别把它们当成生产语义：
+  注意三点，别把它们当成生产语义：
     * 旧语义两组的 sort_order 现在同处一列，**天然带重号**（1,1,2,2），
       重排归一化为 1..n 时必然整体后移；
-    * 名为「其他」的行不存在（旧名「其他收入」按 D11 不再判为「其他」），用例内补建。
+    * 名为「其他」的行不存在，用例内补建（旧名「其他支出 / 其他收入」自 M1 起
+      **判为家族成员**，会被名次置尾——本文件的次序断言一律按此新口径写）；
+    * 夹具里的「其他收入」正处在中间位（sort 2），故它同时是「家族不在末位」的
+      脏数据载体，可用来核验 D1「任何数据态拖拽都可用」。
 """
 
 import pytest
@@ -50,7 +57,7 @@ async def test_reorder_route_order_returns_200_not_422(client):
 
 @pytest.mark.asyncio
 async def test_reorder_full_ids_normalizes_to_contiguous_1_n(client):
-    """9.2: 乱序全量 ids → 响应按提交序返回（「其他」除外），sort_order 归一化 1..n 连续。"""
+    """9.2: 乱序全量 ids → 响应按提交序返回（「其他家族」除外），sort_order 归一化 1..n 连续。"""
     before = await _seed_other(client)
     assert [c["sort_order"] for c in before] == [1, 1, 2, 2, 3, 4, 5, 99]
 
@@ -58,14 +65,15 @@ async def test_reorder_full_ids_normalizes_to_contiguous_1_n(client):
     resp = await _reorder(client, [c["id"] for c in submitted])
     assert resp.status_code == 200
     data = resp.json()["data"]
+    # M1（D6）：非家族行保持提交序；家族行（其他收入 rank1 / 其他 rank2）整体移末尾按名次排
     assert [c["name"] for c in data] == [
         "账单与费用",
         "旅行",
         "购物",
-        "其他收入",
         "出行",
         "工资",
         "餐饮",
+        "其他收入",
         "其他",
     ]
     assert [c["sort_order"] for c in data] == list(range(1, len(data) + 1))
@@ -78,7 +86,10 @@ async def test_reorder_full_ids_normalizes_to_contiguous_1_n(client):
 
 @pytest.mark.asyncio
 async def test_reorder_forces_other_category_to_tail(client):
-    """9.2「其他」强制置末：放在列表中间提交 → 响应与库中均被归一化到 n。"""
+    """9.2「其他」强制置末（单名态，家族判据覆盖）：放中间提交 → 归一化到 n。
+
+    M1（D6）：中间那行旧名家族「其他收入」同样被整体置尾，且名次恒在「其他」之前。
+    """
     before = await _seed_other(client)
     ids = [c["id"] for c in before]
     other_id = next(c["id"] for c in before if c["name"] == "其他")
@@ -95,10 +106,10 @@ async def test_reorder_forces_other_category_to_tail(client):
         "餐饮",
         "工资",
         "出行",
-        "其他收入",
         "购物",
         "旅行",
         "账单与费用",
+        "其他收入",
         "其他",
     ]
 
@@ -139,6 +150,8 @@ async def test_reorder_preset_rows_use_cow_and_keep_global_preset(
     food = next(c for c in before if c["name"] == "餐饮")
     assert food["is_preset"] == 1
     # 末两位互换：旅行(4) ↔ 账单与费用(5)；「餐饮」保持首位（目标位 = 原 1，不该建副本）
+    # M1（D6）：家族行「其他收入」不再停在提交序第 4 位，而是按名次置尾（第 7 位）——
+    # 它因此改位（落副本），而「账单与费用」这次恰好回到自身原位数（不建副本）
     ids = [c["id"] for c in before]
     swapped = ids[:5] + [ids[6], ids[5]] + ids[7:]
     resp = await _reorder(client, swapped)
@@ -149,21 +162,26 @@ async def test_reorder_preset_rows_use_cow_and_keep_global_preset(
         "餐饮",
         "工资",
         "出行",
-        "其他收入",
         "购物",
         "账单与费用",
         "旅行",
+        "其他收入",
         "其他",
     ]
 
     # 原位不动的预设行仍为预设原行（无谓的 CoW 膨胀被避免）
     assert by_name["餐饮"]["is_preset"] == 1
     assert by_name["餐饮"]["id"] == food["id"]
+    assert by_name["账单与费用"]["is_preset"] == 1  # 本次目标位 = 原 5，同样不建副本
+    assert by_name["账单与费用"]["id"] == next(
+        c["id"] for c in before if c["name"] == "账单与费用"
+    )
 
     # 改位的预设行落到用户副本上
-    assert by_name["账单与费用"]["is_preset"] == 0
-    assert by_name["账单与费用"]["id"] != next(c["id"] for c in before if c["name"] == "账单与费用")
     assert by_name["工资"]["is_preset"] == 0  # 1 → 2 亦属改位（旧语义重号被归一化）
+    # 家族行被名次置尾而改位（2 → 7），预设旧名行同样走 CoW、全局预设不被写脏
+    assert by_name["其他收入"]["is_preset"] == 0
+    assert by_name["其他收入"]["id"] != next(c["id"] for c in before if c["name"] == "其他收入")
     # 「其他」是用户自有行：直接改位，不建副本
     assert by_name["其他"]["is_preset"] == 0
     assert by_name["其他"]["id"] == ids[-1]
@@ -238,13 +256,56 @@ async def test_reorder_extra_or_duplicate_ids_rejected(client):
 
 
 @pytest.mark.asyncio
-async def test_reorder_requires_other_category_present(client):
-    """边界 8.5: 可见集合中无「其他」行 → 400（拒绝保存而非静默丢位）。"""
-    resp = await _reorder(client, [c["id"] for c in await _visible(client)])
-    assert resp.status_code == 400
-    body = resp.json()
-    assert body["code"] == 40001
-    assert "其他" in body["message"]
+async def test_reorder_without_other_name_row_saves_and_normalizes_family_tail(client):
+    """5.1 口径反转（附录 B / D8）：原 `test_reorder_requires_other_category_present`
+    断言「可见集合缺『其他』→ 400」；该硬校验已删除，本用例改断言**正常保存**。
+
+    夹具可见集合只有旧名家族行「其他收入」（无「其他」本名）——正是原实现死锁的形态。
+    现在：可拖可保存，家族按名次置尾（家族唯一行 rank=1 即落末位），
+    防漏位职责由 ids 全量匹配承接（另见 test_reorder_incomplete_ids_rejected）。
+    """
+    visible = await _visible(client)
+    assert "其他" not in [c["name"] for c in visible]  # 无「其他」本名，只有旧名家族行
+    ids = [c["id"] for c in visible]
+
+    resp = await _reorder(client, list(reversed(ids)))
+    assert resp.status_code == 200, "D8：缺「其他」本名不再被硬校验判失败"
+    data = resp.json()["data"]
+    names = [c["name"] for c in data]
+    # 非家族行保持提交序（倒序），家族行「其他收入」整体置尾
+    assert names == ["账单与费用", "旅行", "购物", "出行", "工资", "餐饮", "其他收入"]
+    assert [c["sort_order"] for c in data] == list(range(1, len(data) + 1))
+    assert (await _visible(client))[-1]["name"] == "其他收入"
+
+
+@pytest.mark.asyncio
+async def test_reorder_three_family_names_always_tail_in_fixed_rank(client):
+    """5.2（D6）：三名家族并存（现场形态）→ 任意乱序提交，尾段恒
+    ``[…, 其他支出, 其他收入, 其他]``，非家族行保持提交序。"""
+    await _seed_other(client)  # 补建「其他」(sort 99)
+    legacy_expense = await client.post(
+        "/api/categories",
+        json={"name": "其他支出", "icon": "mdi-cash-minus", "sort_order": 0},
+    )
+    assert legacy_expense.status_code == 200  # 4.3：显式建旧名 → 允许创建
+
+    before = await _visible(client)
+    by_name = {c["name"]: c["id"] for c in before}
+    assert {"其他", "其他支出", "其他收入"} <= set(by_name)  # 三名齐全
+    assert before[-1]["name"] == "其他"  # 「其他支出」(0) 与「其他收入」(2) 压在中间
+
+    # 家族行拆散到列表各处提交：名次必须压过提交序
+    shuffled = ["其他", "餐饮", "其他支出", "工资", "其他收入", "旅行", "出行", "购物", "账单与费用"]
+    resp = await _reorder(client, [by_name[name] for name in shuffled])
+    assert resp.status_code == 200
+    data = resp.json()["data"]
+    names = [c["name"] for c in data]
+    assert names[-3:] == ["其他支出", "其他收入", "其他"]
+    assert names[:-3] == ["餐饮", "工资", "旅行", "出行", "购物", "账单与费用"]
+    assert [c["sort_order"] for c in data] == list(range(1, len(data) + 1))
+
+    stored = await _visible(client)
+    assert [c["name"] for c in stored] == names  # 落库真值与响应逐位一致（无二次跳变）
 
 
 @pytest.mark.asyncio
@@ -300,3 +361,168 @@ async def test_reorder_unauthenticated_returns_401(anon_client):
     """未认证: 无 token → 401。"""
     resp = await anon_client.put("/api/categories/reorder", json={"ids": [1]})
     assert resp.status_code == 401
+
+
+# ── v1.4.3-boot2 M1：`_next_sort_order` 家族钳制 + 家族常量一致性 ──────────────
+
+
+async def _drop_family_rows(db_session) -> None:
+    """删掉夹具里的家族行（测试内存库，**不碰真实库**），构造「可见集合无家族行」态。"""
+    from sqlmodel import select
+
+    from app.models.category import Category
+    from app.services.category_service import LEGACY_OTHER_NAMES, OTHER_CATEGORY_NAME
+
+    family_names = [OTHER_CATEGORY_NAME, *LEGACY_OTHER_NAMES]
+    rows = (
+        await db_session.exec(select(Category).where(Category.name.in_(family_names)))
+    ).all()
+    for row in rows:
+        await db_session.delete(row)
+    await db_session.commit()
+
+
+@pytest.mark.asyncio
+async def test_next_sort_order_with_legacy_names_clamps_before_family(client):
+    """5.3 态①：有旧名家族行、无「其他」本名 → 新行钳到**家族最小 sort** 之前。
+
+    夹具态：非家族行最大 sort = 5、家族只有「其他收入」(2) → 结果取 min(6, 1) = 1；
+    原实现（单名判据）会直接 max+1 落末位，把新行甩到家族行之后。
+    """
+    visible = await _visible(client)
+    assert "其他收入" in [c["name"] for c in visible]
+    assert "其他" not in [c["name"] for c in visible]
+
+    resp = await client.post("/api/categories", json={"name": "宠物"})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["sort_order"] == 1
+
+    names = [c["name"] for c in await _visible(client)]
+    assert names.index("宠物") < names.index("其他收入")  # 恒落在所有家族行之前
+
+
+@pytest.mark.asyncio
+async def test_next_sort_order_with_full_family_appends_before_family_block(client):
+    """5.3 态②：三名齐全且家族已在尾（reorder 归一后）→ 新行追加到家族块之前。"""
+    await _seed_other(client)
+    legacy = await client.post(
+        "/api/categories",
+        json={"name": "其他支出", "icon": "mdi-cash-minus", "sort_order": 98},
+    )
+    assert legacy.status_code == 200
+    before = await _visible(client)
+    resp = await _reorder(client, [c["id"] for c in before])
+    assert resp.status_code == 200
+    tail = [c["name"] for c in resp.json()["data"]]
+    assert tail[-3:] == ["其他支出", "其他收入", "其他"]  # 家族块 7/8/9
+
+    created = await client.post("/api/categories", json={"name": "宠物"})
+    assert created.status_code == 200
+    # base = max(非家族) = 6，家族最小 sort = 7 → min(7, 6) = 6：与末位非家族行同值，
+    # 按 (sort_order, id) 自然排在其后、家族块之前
+    assert created.json()["data"]["sort_order"] == 6
+    names = [c["name"] for c in await _visible(client)]
+    assert names.index("宠物") < names.index("其他支出")
+
+
+@pytest.mark.asyncio
+async def test_next_sort_order_without_family_appends_at_tail(client, db_session):
+    """5.3 态③：可见集合无家族行 → 直接 max+1 追加末位（原行为保持）。"""
+    await _drop_family_rows(db_session)
+    resp = await client.post("/api/categories", json={"name": "宠物"})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["sort_order"] == 6
+    assert (await _visible(client))[-1]["name"] == "宠物"
+
+
+@pytest.mark.asyncio
+async def test_next_sort_order_negative_result_is_clamped_to_zero_and_self_heals(client):
+    """5.3 下钳：家族行 sort=0（导入建的散行）→ min-1 = -1 必须钳到 0，不落负值。
+
+    §1.2.1-2 已知边界的处置：钳 0 与导入建的 sort=0 行同区，由下一次成功 reorder
+    整体归一 1..n 自愈——本用例把「不残留 0 位」一并钉住。
+    """
+    other = await client.post(
+        "/api/categories", json={"name": "其他", "icon": "mdi-cash-minus", "sort_order": 0}
+    )
+    assert other.status_code == 200
+
+    resp = await client.post("/api/categories", json={"name": "宠物"})
+    assert resp.status_code == 200
+    assert resp.json()["data"]["sort_order"] == 0  # 未钳则得 -1
+
+    dirty = await _visible(client)
+    assert 0 in [c["sort_order"] for c in dirty]
+    done = await _reorder(client, [c["id"] for c in dirty])
+    assert done.status_code == 200
+    assert [c["sort_order"] for c in done.json()["data"]] == list(range(1, len(dirty) + 1))
+
+
+def test_other_family_rank_is_the_single_source_of_truth():
+    """5.4（D6）：服务侧名次表自洽——三名 = 本名 + 两旧名、名次固定 0/1/2、「其他」恒最大。"""
+    from app.services import category_service
+
+    assert set(category_service.OTHER_FAMILY_RANK) == {
+        category_service.OTHER_CATEGORY_NAME,
+        *category_service.LEGACY_OTHER_NAMES,
+    }
+    assert category_service.OTHER_FAMILY_RANK == {"其他支出": 0, "其他收入": 1, "其他": 2}
+    assert category_service.OTHER_FAMILY_RANK[category_service.OTHER_CATEGORY_NAME] == max(
+        category_service.OTHER_FAMILY_RANK.values()
+    )
+    # 家族判据（含旧名）与非家族名
+    assert category_service._is_other_row("其他") is True
+    assert category_service._is_other_row("其他支出") is True
+    assert category_service._is_other_row("其他收入") is True
+    assert category_service._is_other_row("餐饮") is False
+
+
+def test_other_family_rank_matches_m2_script_constants():
+    """5.4：家族常量与 M2 脚本侧一致性（防两侧漂移）。
+
+    任务指定的占位手法 `pytest.importorskip("migrate_to_v1.4.3boot2_categories")`
+    实测**不可用**：脚本文件名含点号，import 机制把 dots 当包分隔符 → 抛 SyntaxError
+    而非 ImportError，起不到 skip 作用。故按等价手法实现「文件不存在即 skip」的占位，
+    M2 落文件后本用例自动转实断言（加载方式沿 `test_migration_v143.py` 的按路径加载）。
+    """
+    import importlib.util
+    from pathlib import Path
+
+    from app.services import category_service
+
+    script_path = (
+        Path(__file__).resolve().parents[1] / "migrate_to_v1.4.3boot2_categories.py"
+    )
+    if not script_path.exists():
+        pytest.skip("M2 脚本 migrate_to_v1.4.3boot2_categories.py 尚未落文件（M1 先行占位）")
+
+    spec = importlib.util.spec_from_file_location("migrate_to_v1_4_3_boot2_categories", script_path)
+    assert spec and spec.loader
+    script = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(script)
+
+    assert set(category_service.OTHER_FAMILY_RANK) == {
+        script.OTHER_CATEGORY_NAME,
+        *script.LEGACY_OTHER_NAMES,
+    }
+    assert category_service.OTHER_CATEGORY_NAME == script.OTHER_CATEGORY_NAME
+
+
+@pytest.mark.asyncio
+async def test_rename_legacy_family_rows_allowed_but_other_name_stays_locked(client):
+    """2.5：禁改名判据**收窄回「其他」本名**——旧名两行允许改名（改出家族即普通行）。"""
+    await _seed_other(client)
+    legacy = await client.post(
+        "/api/categories", json={"name": "其他支出", "icon": "mdi-cash-minus"}
+    )
+    assert legacy.status_code == 200
+    legacy_id = legacy.json()["data"]["id"]
+
+    renamed = await client.put(f"/api/categories/{legacy_id}", json={"name": "备用金"})
+    assert renamed.status_code == 200
+    assert renamed.json()["data"]["name"] == "备用金"
+
+    other_id = next(c["id"] for c in await _visible(client) if c["name"] == "其他")
+    blocked = await client.put(f"/api/categories/{other_id}", json={"name": "杂项"})
+    assert blocked.status_code == 400
+    assert "其他" in blocked.json()["message"]

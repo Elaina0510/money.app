@@ -318,7 +318,29 @@ async def test_cascade_delete_removes_records_from_list(client):
 #
 # 测试库可见预设（conftest 过期副本，7 行）：
 #   餐饮1 出行2 购物3 旅行4 账单与费用5 工资1 其他收入2
-#   → 非「其他」行的最大 sort_order = 5；无名为「其他」的行（旧语义名不参与判定）。
+#   → 非家族行的最大 sort_order = 5；无名为「其他」的行。
+#
+# v1.4.3-boot2 M1（D2/D6）后新增的口径：旧名「其他支出 / 其他收入」自 M1 起**判为
+# 「其他家族」**——`_next_sort_order` 的钳制对象变成「家族中 sort 最小者」，故夹具态
+# （家族行「其他收入」在 sort 2）下新建分类不再追加末位，而被钳到家族之前。
+# 只关心「家族块之前追加」这条不变量的用例，先用 `_drop_family_rows` 清掉夹具家族行
+# 构造无家族态（测试内存库，**绝不碰真实 money.db**）。
+
+
+async def _drop_family_rows(db_session) -> None:
+    """删除夹具里的家族行（测试内存库），构造「可见集合无家族行」态。"""
+    from sqlmodel import select
+
+    from app.models.category import Category
+    from app.services.category_service import LEGACY_OTHER_NAMES, OTHER_CATEGORY_NAME
+
+    family_names = [OTHER_CATEGORY_NAME, *LEGACY_OTHER_NAMES]
+    rows = (
+        await db_session.exec(select(Category).where(Category.name.in_(family_names)))
+    ).all()
+    for row in rows:
+        await db_session.delete(row)
+    await db_session.commit()
 
 
 async def _visible(client) -> list[dict]:
@@ -330,7 +352,11 @@ async def _visible(client) -> list[dict]:
 
 @pytest.mark.asyncio
 async def test_create_without_sort_order_appends_before_other(client):
-    """不传 sort_order → 落位 = max(非「其他」)+1，连续创建依次后移且恒在「其他」之前。"""
+    """不传 sort_order → 落位 = min(max(非家族)+1, 家族最小 sort - 1)，恒在所有家族行之前。
+
+    M1（D6）口径变更：夹具含旧名家族行「其他收入」(sort 2)，故钳制基准是它而非
+    显式建出的「其他」(99)——两行都落在家族块之前（同值 1，按 id 先后排列）。
+    """
     other = await client.post("/api/categories", json={"name": "其他", "sort_order": 99})
     assert other.status_code == 200
 
@@ -342,11 +368,13 @@ async def test_create_without_sort_order_appends_before_other(client):
         created.append(data["sort_order"])
         assert data["is_preset"] == 0
         assert data["sort_order"] < 99  # 恒严格小于「其他」
-    assert created == [6, 7]  # max(非「其他」)=5（账单与费用）→ 6、7 依次后移
+        assert data["sort_order"] < 2  # 亦严格小于最靠前的家族行「其他收入」
+    assert created == [1, 1]  # 家族最小 sort=2 → 钳到 1（原单名口径下为 6、7）
 
     names = [c["name"] for c in await _visible(client)]
     assert names[-1] == "其他"
     assert names.index("宠物") < names.index("健身") < names.index("其他")
+    assert names.index("健身") < names.index("其他收入")  # 新行恒在家族之前
 
 
 @pytest.mark.asyncio
@@ -358,15 +386,25 @@ async def test_create_sort_order_self_heals_when_other_not_at_tail(client):
     resp = await client.post("/api/categories", json={"name": "宠物"})
     assert resp.status_code == 200
     new_sort = resp.json()["data"]["sort_order"]
-    assert new_sort < 6  # base=max(非其他)=5 与 other-1 取小
+    # M1 钳制基准 = **家族最小 sort**：夹具旧名行「其他收入」(2) 比 6 更靠前 → min(6, 1) = 1
+    assert new_sort < 6
 
     names = [c["name"] for c in await _visible(client)]
     assert names[-1] == "其他"
 
 
 @pytest.mark.asyncio
-async def test_no_other_category_appends_at_tail(client):
-    """边界 8.4：可见集合无「其他」行时不补建，新增直接 max+1 追加末位。"""
+async def test_no_other_category_appends_at_tail(client, db_session):
+    """边界 8.4：可见集合**无家族行**时不补建，新增直接 max+1 追加末位。
+
+    M1（D6）前置：夹具含旧名家族行「其他收入」，家族判据下它会触发钳制，
+    故先清掉家族行以隔离出本用例真正要钉的「无家族 → 直接追加末位」分支。
+    """
+    await _drop_family_rows(db_session)
+    assert not {"其他", "其他支出", "其他收入"} & {
+        c["name"] for c in await _visible(client)
+    }
+
     resp = await client.post("/api/categories", json={"name": "宠物"})
     assert resp.status_code == 200
     assert resp.json()["data"]["sort_order"] == 6
@@ -376,13 +414,18 @@ async def test_no_other_category_appends_at_tail(client):
 
 
 @pytest.mark.asyncio
-async def test_sort_order_single_list_no_longer_partitioned_by_legacy_group(client):
+async def test_sort_order_single_list_no_longer_partitioned_by_legacy_group(client, db_session):
     """原「收支分组独立计算」用例改写：统一列表后排序只有一个作用域。
 
     v1.4.2 用例 `test_m2_income_group_sort_calculated_independently` 断言收入/支出两组
     各自独立算 max——该语义随 M8 废弃，本用例改为断言**单一序列**：连续创建的两个分类
     拿到 6、7，且旧收入侧预设「工资」与旧支出侧预设「餐饮」同处一列。
+
+    M1 前置：先清掉夹具家族行（家族钳制会把两行都压到 sort 1，掩盖本用例要看的
+    「单一序列连续递增」维度）；家族钳制本身由 `test_categories_reorder.py` 的
+    `_next_sort_order` 三态用例负责。
     """
+    await _drop_family_rows(db_session)
     a = await client.post("/api/categories", json={"name": "奖金"})
     b = await client.post("/api/categories", json={"name": "稿费"})
     assert a.status_code == b.status_code == 200
@@ -616,14 +659,20 @@ async def test_d9_quick_template_type_fallback_expense(client, db_session):
 
 @pytest.mark.asyncio
 async def test_update_custom_category_renames_ok(client):
-    """非「其他」自定义分类改名不受禁改约束影响（回归保护）。"""
+    """非「其他」自定义分类改名不受禁改约束影响（回归保护）。
+
+    M1（§1.2.1-3）：禁改名判据收窄为「其他」本名，旧名两行亦可改名（另见
+    `test_categories_reorder.py::test_rename_legacy_family_rows_allowed_but_other_name_stays_locked`）。
+    sort 基准取创建返回值而非绝对数字——家族钳制下夹具态的落位是 1（非 6）。
+    """
     resp = await client.post("/api/categories", json={"name": "宠物", "icon": "mdi-paw"})
-    cat_id = resp.json()["data"]["id"]
+    created = resp.json()["data"]
+    cat_id = created["id"]
 
     resp = await client.put(f"/api/categories/{cat_id}", json={"name": "萌宠"})
     assert resp.status_code == 200
     assert resp.json()["data"]["name"] == "萌宠"
-    assert resp.json()["data"]["sort_order"] == 6
+    assert resp.json()["data"]["sort_order"] == created["sort_order"]  # 改名不改位
 
 
 @pytest.mark.asyncio
@@ -640,8 +689,13 @@ async def test_category_endpoints_require_auth(anon_client):
 
 
 @pytest.mark.asyncio
-async def test_sort_isolation_between_users(auth_client_a, auth_client_b):
-    """数据隔离：用户 A 的新增分类不参与用户 B 的 max 计算。"""
+async def test_sort_isolation_between_users(auth_client_a, auth_client_b, db_session):
+    """数据隔离：用户 A 的新增分类不参与用户 B 的 max 计算。
+
+    M1 前置：清掉夹具家族行——家族钳制会把两侧新行都压到同一 sort 上，
+    掩盖本用例要看的「各自集合独立算 max、且互不影响」维度。
+    """
+    await _drop_family_rows(db_session)
     for name in ("A1", "A2", "A3"):
         resp = await auth_client_a.post("/api/categories", json={"name": name})
         assert resp.status_code == 200
