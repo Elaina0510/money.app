@@ -298,20 +298,23 @@ async def reorder_categories(
     return await _visible_categories(db, current_user)
 
 
-async def _cascade_budgets_for_deleted_category(
+async def _dormant_budgets_for_deleted_category(
     db: AsyncSession, category_id: int
 ) -> int:
-    """分类删除的预算级联（设计 §12.2.4，任务 4.1–4.3）；返回被整体删掉的预算条数。
+    """分类删除的预算级联（v1.4.3-boot2 M3 §3.2.3，任务 3.1–3.3）；
+    返回**本次新置为休眠**的预算条数（原语义「返回被整体删掉的预算条数」已改向）。
 
     v1.4.3 M12 起预算不再挂 ``category_id`` 列，改由 ``budget_categories`` 关联：
 
     * 先显式删该分类的关联行——连接未启用 ``PRAGMA foreign_keys``，声明式的
       ``ondelete=CASCADE`` 运行时不生效，删除必须由服务层完成（任务 4.1）；
-    * **include** 预算若因此不再关联任何分类 → 预算一并删除，对齐旧「级联删预算」
-      语义（任务 4.2）；
-    * **exclude** 预算仅移出排除集，预算覆盖范围自动扩大，不删（任务 4.3）。
+    * **include** 预算若因此不再关联任何分类 → **``budget.dormant = 1`` 休眠保留**，
+      不再删除预算行（决策 D4：保留记录、置灰展示、编辑保存即唤醒）；
+      空集不再是「无效」而由 dormant 列区分「被删光」与「主动不选=动态全部」（D3）；
+    * **exclude** 预算行为不变：仅移出排除集，预算覆盖范围自动扩大，**无休眠概念**
+      （它永远有覆盖）——任务 3.2。
 
-    ``delete_category`` 与 ``restore_default_categories`` 共用本函数（任务 4.4），
+    ``delete_category`` 与 ``restore_default_categories`` 共用本函数（任务 3.3），
     全程两条查询（关联行 + 受影响预算的剩余关联），无逐预算 N+1。
     """
     link_stmt = select(BudgetCategory).where(BudgetCategory.category_id == category_id)
@@ -340,23 +343,26 @@ async def _cascade_budgets_for_deleted_category(
     )
     still_linked = {int(row[0]) for row in (await db.exec(remain_stmt)).all()}
 
-    deleted = 0
+    dormant = 0
     for budget_id in include_ids:
         if budget_id in still_linked:
             continue
         budget = next((b for b in budgets if b.id == budget_id), None)
         if budget is not None:
-            await db.delete(budget)
-            deleted += 1
-    return deleted
+            budget.dormant = 1  # D4：休眠保留，替代原 db.delete(budget)
+            db.add(budget)
+            dormant += 1
+    return dormant
 
 
 async def delete_category(
     db: AsyncSession, category_id: int, current_user: User | None = None
 ) -> dict[str, Any] | None:
-    """Delete a category with cascade (records + budgets).
+    """Delete a category with cascade (records + budget dormancy).
 
-    Returns None on error (not found), or a dict with deleted_records count on success.
+    Returns None on error (not found), or a dict with deleted_records /
+    dormant_budgets counts on success（v1.4.3-boot2 M3：include 预算不再被删除，
+    失去全部关联时置 ``dormant=1`` 休眠保留，决策 D4）。
     Raises PermissionError if the user is not authorized.
     """
     category = await db.get(Category, category_id)
@@ -381,8 +387,9 @@ async def delete_category(
     count_result = await db.exec(count_stmt)
     record_count: int = count_result.one() or 0
 
-    # Cascade delete: budgets（按 include/exclude 规则，见 §12.2.4）→ records → category
-    deleted_budgets = await _cascade_budgets_for_deleted_category(db, category_id)
+    # Cascade: budgets（include 失去全部关联 → 置休眠；exclude 仅移出排除集，见 §3.2.3）
+    # → records → category
+    dormant_budgets = await _dormant_budgets_for_deleted_category(db, category_id)
 
     record_stmt = select(Record).where(Record.category_id == category_id)
     record_result = await db.exec(record_stmt)
@@ -391,7 +398,7 @@ async def delete_category(
 
     await db.delete(category)
     await db.commit()
-    return {"deleted_records": record_count, "deleted_budgets": deleted_budgets}
+    return {"deleted_records": record_count, "dormant_budgets": dormant_budgets}
 
 
 async def restore_default_categories(
@@ -401,8 +408,9 @@ async def restore_default_categories(
 
     - Delete all is_preset=0 custom categories for the user
     - Associated records保留, category_id set to NULL
-    - Associated budgets 走 §12.2.4 同一级联（任务 4.4）：include 预算失去最后一个
-      关联分类才删，exclude 预算仅移出排除集
+    - Associated budgets 走 §3.2.3 同一休眠级联（任务 3.3/4.4）：include 预算失去最后
+      一个关联分类 → 置 ``dormant=1`` 休眠保留（不再删除，决策 D4）；
+      exclude 预算仅移出排除集
     - Reset preset categories' sort_order to defaults
 
     v1.4.3 M8：预设复位改按新预设集 **name** 匹配（原按 (name,type)）。
@@ -421,7 +429,7 @@ async def restore_default_categories(
 
     deleted_count = 0
     affected_records = 0
-    deleted_budgets = 0
+    dormant_budgets = 0
 
     for cat in custom_categories:
         cat_id = cat.id
@@ -440,8 +448,8 @@ async def restore_default_categories(
         for record in record_result.all():
             record.category_id = None
 
-        # Budget cascade（与 delete_category 同一函数，任务 4.4）
-        deleted_budgets += await _cascade_budgets_for_deleted_category(db, cat_id)
+        # Budget dormancy cascade（与 delete_category 同一函数，任务 3.3/4.4）
+        dormant_budgets += await _dormant_budgets_for_deleted_category(db, cat_id)
 
         # Delete the category
         await db.delete(cat)
@@ -463,5 +471,5 @@ async def restore_default_categories(
     return {
         "deleted_categories": deleted_count,
         "affected_records": affected_records,
-        "deleted_budgets": deleted_budgets,
+        "dormant_budgets": dormant_budgets,
     }

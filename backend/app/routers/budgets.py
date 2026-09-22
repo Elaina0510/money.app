@@ -8,6 +8,15 @@
   * ``POST /api/budgets/batch`` —— **已下线**（调用方仅统计页，随 M12 重写重接单条 PUT）。
 响应/错误口径未变：``success_response`` / ``error_response(Code.XXX)``、
 服务层 ``ValueError`` → PARAM_ERROR、``PermissionError`` → 403。
+
+v1.4.3-boot2 M3（决策 D3/D9/D10，任务 1.5）口径增补：
+  * **「include + 空 category_ids」不再报错**（原 PARAM_ERROR「包含模式至少需要选择
+    1 个分类」已删）——POST/PUT 一律 200，语义 = **动态全部分类**（后续新增分类自动计入）；
+  * BudgetDetail 增 ``dormant: bool``：1 = 关联分类被删光的休眠预算（花费 0、无明细）；
+  * ``GET /api/budgets`` **仍返回 dormant 行**（月视图卡片要置灰展示），
+    而 ``GET /api/budgets/year-summary`` 的逐月 total 剔除 dormant（D10）；
+  * 唤醒无独立接口：任何一次成功的 PUT 都把 dormant 清 0（D9）；
+    ``DELETE`` 对休眠预算照常可用（用户摆脱休眠态的另一出口）。
 """
 
 from fastapi import APIRouter, Depends, Query

@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from sqlalchemy import Column, Integer
 from sqlmodel import Field, SQLModel, UniqueConstraint
 
 # v1.4.3 M12（决策 D3）：预算由「每 (分类,月) 一条」改「某自然月下的具名预算」——
@@ -32,6 +33,16 @@ class Budget(SQLModel, table=True):
     month: str = Field(nullable=False)  # YYYY-MM format（PUT 不可改，任务 2.3）
     amount: float = Field(nullable=False)  # Budget amount
     scope_mode: str = Field(default=SCOPE_INCLUDE, nullable=False)  # include | exclude
+    # v1.4.3-boot2 M3（决策 D3/D4/D9/D11）：1 = 「关联分类被删光」的休眠预算——
+    # 保留记录、置灰展示、花费恒 0、不参与月/年汇总（D10），编辑成功保存即唤醒（D9）。
+    # 与「include 空集 = 动态全部分类（dormant=0）」区分开（D3）：两代空集语义不同。
+    # 存量库该列由 backend/migrate_to_v1.4.3boot2_dormant.py 以
+    # ALTER TABLE ... ADD COLUMN dormant INTEGER NOT NULL DEFAULT 0 补加，
+    # 且**必须先于新版后端启动**执行（D11），否则启动建表不会为已存在表加列。
+    dormant: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )
     created_at: str = Field(
         default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         nullable=False,

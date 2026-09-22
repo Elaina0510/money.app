@@ -177,6 +177,7 @@
           variant="tonal"
           rounded="lg"
           class="pa-3 mb-3 budget-card"
+          :class="{ 'budget-card--dormant': isDormant(budget) }"
         >
           <div class="d-flex justify-space-between align-center mb-1">
             <div class="d-flex align-center ga-2 budget-card-title">
@@ -187,7 +188,7 @@
                 :color="budget.scope_mode === 'exclude' ? 'warning' : 'primary'"
                 class="budget-scope-chip"
               >
-                {{ budget.scope_mode === 'exclude' ? '排除' : '包含' }}
+                {{ scopeChipText(budget) }}
               </v-chip>
             </div>
             <div class="d-flex align-center">
@@ -358,7 +359,7 @@
           :items="budgetCategoryOptions"
           item-title="name"
           item-value="id"
-          :label="budgetForm.scope_mode === 'exclude' ? '排除分类（可留空）' : '包含分类'"
+          :label="budgetForm.scope_mode === 'exclude' ? '排除分类（可留空）' : '包含分类（可留空）'"
           multiple
           chips
           closable-chips
@@ -369,9 +370,6 @@
           class="mb-2 budget-category-select"
         />
         <div class="text-caption text-grey mb-2 budget-dialog-hint">{{ budgetScopeTip }}</div>
-        <div v-if="budgetScopeError" class="text-caption text-error mb-2 budget-dialog-error">
-          {{ budgetScopeError }}
-        </div>
 
         <div class="d-flex justify-end ga-2">
           <v-btn variant="text" @click="showBudgetDialog = false">取消</v-btn>
@@ -610,8 +608,13 @@ const budgetYear = computed(() => dayjs().add(periodOffset.value, 'year').format
 const budgetMonthLabel = computed(() => dayjs(`${budgetMonth.value}-01`).format('YYYY年M月'))
 
 // 月度总览 = Σ 各预算（决策 D4：范围重叠时逐预算直加，属预期口径）
-const totalBudget = computed(() => budgets.value.reduce((sum, b) => sum + b.amount, 0))
-const totalSpent = computed(() => budgets.value.reduce((sum, b) => sum + b.spent, 0))
+// v1.4.3-boot2 M3（决策 D10 / 任务 6.4）：休眠预算只置灰展示、不进总览求和
+const totalBudget = computed(
+  () => budgets.value.filter((b) => !isDormant(b)).reduce((sum, b) => sum + b.amount, 0)
+)
+const totalSpent = computed(
+  () => budgets.value.filter((b) => !isDormant(b)).reduce((sum, b) => sum + b.spent, 0)
+)
 const budgetUsagePercent = computed(() => {
   if (totalBudget.value === 0) return 0
   return (totalSpent.value / totalBudget.value) * 100
@@ -628,22 +631,14 @@ const budgetFormMonthLabel = computed(() =>
 )
 const budgetNameMissing = computed(() => !budgetForm.value.name || !budgetForm.value.name.trim())
 const budgetAmountInvalid = computed(() => !(Number(budgetForm.value.amount) > 0))
-// 1.3 / 6.2 校验联动：include → 至少 1 类；exclude 允许 0 选（= 全部分类）
-const budgetIncludeEmpty = computed(
-  () =>
-    budgetForm.value.scope_mode === 'include' &&
-    (budgetForm.value.category_ids || []).length === 0
-)
-const budgetFormValid = computed(
-  () => !budgetNameMissing.value && !budgetAmountInvalid.value && !budgetIncludeEmpty.value
-)
+// v1.4.3-boot2 M3（任务 5.1，决策 D3）校验联动放开：include 与 exclude 都允许 0 选——
+// include 空选 = 动态全部分类（后续新增分类自动计入），不再是需红字拦截的非法态，
+// 故「包含模式至少选 1 类」的计算属性与错误提示行一并下线
+const budgetFormValid = computed(() => !budgetNameMissing.value && !budgetAmountInvalid.value)
 const budgetScopeTip = computed(() =>
   budgetForm.value.scope_mode === 'exclude'
     ? '选中分类不计入本预算；一个都不选即统计全部分类支出'
-    : '仅计入所选分类的支出'
-)
-const budgetScopeError = computed(() =>
-  budgetIncludeEmpty.value ? '包含模式至少需要选择 1 个分类' : ''
+    : '仅计入所选分类；一个都不选即统计全部分类支出'
 )
 
 // 年视图摘要（Σ yearMonths totals）
@@ -659,14 +654,23 @@ function getBudgetMonthLabel(month) {
   return dayjs(`${month}-01`).format('M月')
 }
 
+// 休眠判定单点（v1.4.3-boot2 M3 任务 6.1，决策 D4）：读后端 BudgetDetail 的 dormant 布尔键。
+// 前端不自行由「include 且空集」推导休眠——空集现在另有「动态全部」合法语义（D3），两者必须靠该键区分
+function isDormant(budget) {
+  return !!budget?.dormant
+}
+
 // 进度色档沿用现口径（三处同型 >80% error / >50% warning / 其余 primary），无 100% 独立档
+// 休眠预算（任务 6.3）：spent 后端已恒 0，这里再防御性钉死进度 0 / 灰档
 function budgetPercent(budget) {
+  if (isDormant(budget)) return 0
   const amt = Number(budget?.amount) || 0
   if (amt <= 0) return 0
   return ((Number(budget?.spent) || 0) / amt) * 100
 }
 
 function budgetBarColor(budget) {
+  if (isDormant(budget)) return 'grey'
   const pct = budgetPercent(budget)
   if (pct > 80) return 'error'
   if (pct > 50) return 'warning'
@@ -675,6 +679,12 @@ function budgetBarColor(budget) {
 
 function budgetPercentText(budget) {
   return `${budgetPercent(budget).toFixed(1)}%`
+}
+
+// 范围标签（任务 6.2）：休眠态既不叫「包含」也不叫「排除」——关联分类已删光、预算被保留
+function scopeChipText(budget) {
+  if (isDormant(budget)) return '保留'
+  return budget?.scope_mode === 'exclude' ? '排除' : '包含'
 }
 
 // 覆盖简述（需求 12.3 无歧义口径，纯函数）：
@@ -690,18 +700,26 @@ function resolveScopeNames(budget, categoryList) {
 }
 
 function scopeSummary(budget, categoryList) {
+  // 休眠态（任务 6.2）：覆盖行固定文案由前端自出（后端不返回该文案）
+  if (isDormant(budget)) return '分类已删除，预算保留'
   const names = resolveScopeNames(budget, categoryList)
   if (budget?.scope_mode === 'exclude') {
     return names.length ? `除 ${names.join('、')} 外全部支出` : '全部分类'
   }
-  if (!names.length) return UNKNOWN_CATEGORY_NAME
+  // include 空集（非休眠）= 动态全部分类（D3）：原「未知分类」只读态口径已反转
+  if (!names.length) return '全部分类'
   if (names.length <= 2) return names.join('、')
   return `${names.slice(0, 2).join('、')}等 ${names.length} 类`
 }
 
 // 语义提示：恒在卡片副行呈现一次
 function scopeHint(budget) {
-  return budget?.scope_mode === 'exclude' ? '选中分类不计入本预算' : '仅计入所选分类'
+  if (isDormant(budget)) return '编辑并保存此预算可重新启用'
+  if (budget?.scope_mode === 'exclude') return '选中分类不计入本预算'
+  const ids = Array.isArray(budget?.category_ids) ? budget.category_ids : []
+  return ids.length
+    ? '仅计入所选分类'
+    : '统计全部分类支出（含后续新增分类）'
 }
 
 function isBudgetExpanded(id) {
@@ -929,6 +947,12 @@ onMounted(async () => {
 /* v1.4.3 M12：预算卡片列表（每月多条命名预算，纵向堆叠） */
 .budget-card {
   border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* v1.4.3-boot2 M3（任务 6.2）：休眠预算（关联分类被删光、D4 保留不删）整卡置灰。
+   只压 opacity 一档、明暗主题通用，不引入任何新色值。 */
+.budget-card--dormant {
+  opacity: .55;
 }
 
 .budget-card-title {

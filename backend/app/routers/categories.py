@@ -107,25 +107,22 @@ async def delete_category(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_auth),
 ) -> JSONResponse:
-    """Delete a category and cascade-delete its records and budgets."""
+    """Delete a category and cascade-delete its records; budgets go dormant."""
     try:
         result = await category_service.delete_category(db, category_id, current_user)
         if result is None:
             return error_response(Code.NOT_FOUND, "分类不存在")
         record_count = result["deleted_records"]
-        # v1.4.3 M12（任务 4.2）：include 预算失去最后一个关联分类时随之删除，需提示
-        budget_count = result.get("deleted_budgets", 0)
-        if record_count > 0 or budget_count > 0:
-            removed: list[str] = []
-            if record_count > 0:
-                removed.append(f"{record_count} 条关联账单")
-            if budget_count > 0:
-                removed.append(f"{budget_count} 条不再覆盖任何分类的预算")
-            return success_response(
-                data=result,
-                message="分类删除成功，同时删除了 " + "与 ".join(removed),
-            )
-        return success_response(data=result, message="分类删除成功")
+        # v1.4.3-boot2 M3（任务 3.4 / 决策 D4）：include 预算失去最后一个关联分类
+        # 不再被删除，改置 dormant=1 休眠保留 → 提示语从「删除了 N 条预算」改向为
+        # 「保留为休眠」，且 M=0 时整句不提（计数键同改 dormant_budgets）
+        dormant_count = result.get("dormant_budgets", 0)
+        message = "分类删除成功"
+        if record_count > 0:
+            message += f"，同时删除了 {record_count} 条关联账单"
+        if dormant_count > 0:
+            message += f"，{dormant_count} 条预算因不再覆盖任何分类被保留为休眠"
+        return success_response(data=result, message=message)
     except PermissionError as e:
         return error_response(Code.FORBIDDEN, str(e), status_code=403)
 

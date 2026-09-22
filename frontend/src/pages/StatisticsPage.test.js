@@ -172,6 +172,19 @@ describe('StatisticsPage - M12 每月多条命名预算（预算卡列表）', (
         ],
       }),
       makeBudget({ id: 12, name: '学习', amount: 500, spent: 100, category_ids: [3], category_names: ['购物'] }),
+      // M3 任务 8.9：休眠预算（关联分类删光、D4 保留）——卡片照渲染，但 Σ 概览必须剔除（D10）
+      makeBudget({
+        id: 13,
+        name: '已休眠',
+        amount: 900,
+        spent: 0,
+        remaining: 900,
+        percentage: 0,
+        category_ids: [],
+        category_names: [],
+        details: [],
+        dormant: true,
+      }),
     ])
 
     const wrapper = await mountPage()
@@ -181,7 +194,7 @@ describe('StatisticsPage - M12 每月多条命名预算（预算卡列表）', (
     expect(wrapper.vm.budgetMonth).toBe('2026-01')
 
     const cards = wrapper.findAll('.budget-card')
-    expect(cards.length).toBe(2)
+    expect(cards.length).toBe(3)
 
     const first = cards[0]
     // 名称 / 范围标签 / 已用与预算金额 / 进度百分比 / 覆盖简述 / 语义提示各一
@@ -195,10 +208,17 @@ describe('StatisticsPage - M12 每月多条命名预算（预算卡列表）', (
     expect(cards[1].find('.budget-name').text()).toBe('学习')
     expect(cards[1].find('.budget-scope').text()).toContain('购物')
 
-    // 进度条：总览 + 每卡各一条；总览 1950/3500=55.7%、卡1 61.7%、卡2 20%
-    expect(barColors(wrapper)).toEqual(['warning', 'warning', 'primary'])
+    // 进度条：总览 + 每卡各一条；总览 1950/3500=55.7%、卡1 61.7%、卡2 20%、卡3 休眠恒灰档
+    expect(barColors(wrapper)).toEqual(['warning', 'warning', 'primary', 'grey'])
 
-    // 月度总览小卡保留（任务 5.2），金额 = Σ 各预算
+    // 休眠卡（M3 任务 6.2 / 8.9）：置灰一档 + chip「保留」+ 覆盖与提示固定文案，但不进 Σ
+    expect(cards[2].classes()).toContain('budget-card--dormant')
+    expect(cards[2].find('.budget-scope-chip').text()).toBe('保留')
+    expect(cards[2].find('.budget-scope').text()).toContain('覆盖：分类已删除，预算保留')
+    expect(cards[2].find('.budget-scope-hint').text()).toBe('编辑并保存此预算可重新启用')
+    expect(cards[2].find('.budget-percent').text()).toBe('0.0%')
+
+    // 月度总览小卡保留（任务 5.2），金额 = Σ 各**生效**预算（D10 剔除 dormant 的 900/0）
     const text = wrapper.text()
     expect(text).toContain('预算管理')
     expect(text).toContain('2026年1月 预算')
@@ -278,8 +298,10 @@ describe('StatisticsPage - M12 每月多条命名预算（预算卡列表）', (
     expect(reloadCount(getBudgets)).toBe(before + 1)
   })
 
-  // 任务 6.2：校验联动（include 0 选禁用保存；exclude 允许 0 选 = 全部分类）
-  it('用例2c: include 未选分类时保存禁用并提示，改 exclude 后允许 0 选并提交', async () => {
+  // 任务 6.2 → v1.4.3-boot2 M3 任务 8.7（口径反转改写）：include 0 选**即可保存**
+  // （不选 = 动态全部分类，D3）；原「保存禁用 + 红字提示」断言组随红字计算属性/渲染节点
+  // 一并下线，此处改为断言节点不存在 + 新提示文案（任务 5.1 / 5.2）
+  it('用例2c: include 空选可直接保存（M3 放开），exclude 空选同口径，红字错误节点已下线', async () => {
     const wrapper = await mountPage()
     wrapper.vm.openBudgetAddDialog()
     wrapper.vm.budgetForm = {
@@ -292,27 +314,38 @@ describe('StatisticsPage - M12 每月多条命名预算（预算卡列表）', (
     }
     await nextTick()
 
-    expect(wrapper.vm.budgetIncludeEmpty).toBe(true)
-    expect(wrapper.vm.budgetFormValid).toBe(false)
-    expect(wrapper.vm.budgetScopeError).toBe('包含模式至少需要选择 1 个分类')
-    expect(saveBtnDisabled(wrapper)).toBe(true)
-    expect(wrapper.find('.budget-dialog-error').text()).toContain('包含模式至少需要选择 1 个分类')
-
-    await wrapper.vm.saveBudget()
-    await flushPromises()
-    expect(createBudget).not.toHaveBeenCalled()
-
-    // exclude：0 选合法（= 全部分类），提示改为语义说明
-    wrapper.vm.budgetForm = { ...wrapper.vm.budgetForm, scope_mode: 'exclude' }
-    await nextTick()
     expect(wrapper.vm.budgetFormValid).toBe(true)
-    expect(wrapper.vm.budgetScopeError).toBe('')
-    expect(wrapper.find('.budget-dialog-error').exists()).toBe(false)
     expect(saveBtnDisabled(wrapper)).toBe(false)
+    // 红字渲染节点随校验放开删除（任务 5.1）
+    expect(wrapper.find('.budget-dialog-error').exists()).toBe(false)
+    // include 提示新文案（任务 5.2）
+    expect(wrapper.find('.budget-dialog-hint').text()).toBe(
+      '仅计入所选分类；一个都不选即统计全部分类支出'
+    )
 
     await wrapper.vm.saveBudget()
     await flushPromises()
     expect(createBudget).toHaveBeenCalledWith({
+      month: '2026-01',
+      name: '日常开销',
+      amount: 500,
+      scope_mode: 'include',
+      category_ids: [],
+    })
+
+    // exclude：0 选同样合法（= 全部分类），提示为其自身文案、无错误行
+    wrapper.vm.budgetForm = { ...wrapper.vm.budgetForm, scope_mode: 'exclude' }
+    await nextTick()
+    expect(wrapper.vm.budgetFormValid).toBe(true)
+    expect(wrapper.find('.budget-dialog-error').exists()).toBe(false)
+    expect(wrapper.find('.budget-dialog-hint').text()).toBe(
+      '选中分类不计入本预算；一个都不选即统计全部分类支出'
+    )
+    expect(saveBtnDisabled(wrapper)).toBe(false)
+
+    await wrapper.vm.saveBudget()
+    await flushPromises()
+    expect(createBudget).toHaveBeenLastCalledWith({
       month: '2026-01',
       name: '日常开销',
       amount: 500,
@@ -485,12 +518,23 @@ describe('StatisticsPage - M12 每月多条命名预算（预算卡列表）', (
     ).toBe('除 工资、购物 外全部支出')
     // category_names 缺失时按 id 从分类列表兜底解析
     expect(fn({ scope_mode: 'include', category_ids: [2, 3] }, CATEGORIES)).toBe('出行、购物')
-    // 迁移产出的「未知分类」只读态（include 空集）
-    expect(fn({ scope_mode: 'include', category_ids: [], category_names: [] }, CATEGORIES)).toBe('未知分类')
+    // v1.4.3-boot2 M3（任务 8.10）：include 空集**非休眠** = 动态全部分类（D3）——
+    // 原「迁移产出只读态 → 未知分类」断言随口径反转改写（对齐后端 8.12 同向改写）
+    expect(fn({ scope_mode: 'include', category_ids: [], category_names: [] }, CATEGORIES)).toBe('全部分类')
+    // 休眠优先于范围模式判定（后端 dormant 行的 category_ids 恒空，见任务 8.8）
+    expect(
+      fn({ scope_mode: 'include', category_ids: [], category_names: [], dormant: true }, CATEGORIES)
+    ).toBe('分类已删除，预算保留')
 
-    // 语义提示（任务 5.3）
-    expect(wrapper.vm.scopeHint({ scope_mode: 'include' })).toBe('仅计入所选分类')
+    // 语义提示（任务 5.3 + M3 任务 8.10 四分支）
+    expect(wrapper.vm.scopeHint({ scope_mode: 'include', category_ids: [1] })).toBe('仅计入所选分类')
+    expect(wrapper.vm.scopeHint({ scope_mode: 'include', category_ids: [] })).toBe(
+      '统计全部分类支出（含后续新增分类）'
+    )
     expect(wrapper.vm.scopeHint({ scope_mode: 'exclude' })).toBe('选中分类不计入本预算')
+    expect(wrapper.vm.scopeHint({ scope_mode: 'include', category_ids: [], dormant: true })).toBe(
+      '编辑并保存此预算可重新启用'
+    )
   })
 
   // 任务 5.1/5.3：排除模式卡片形态
@@ -542,42 +586,51 @@ describe('StatisticsPage - M12 每月多条命名预算（预算卡列表）', (
     expect(barColors(wrapper)).toEqual(['success', 'primary', 'primary'])
   })
 
-  // 任务 9.3（迁移产出只读态）：展示正常、可删、编辑须补选分类
-  it('用例11: 「未知分类」只读预算正常展示可删，编辑须补选分类才能保存', async () => {
+  // 任务 9.3（v1.4.3 迁移只读态）→ v1.4.3-boot2 M3（任务 5.3 / 8.7 口径反转改写）：
+  // include 空集**非休眠**不再是「只读、必须补选、只能删」的死角——
+  // 它就是「动态全部分类」合法态：正常展示、可直接保存（唤醒由后端 PUT 成功路径清 dormant）
+  it('用例11: include 空集（非休眠）= 动态全部正常展示，编辑不补选分类也可直接保存', async () => {
     getBudgets.mockResolvedValue([
       makeBudget({
         id: 91,
-        name: '未知分类',
+        name: '全开销上限',
         amount: 600,
-        spent: 0,
-        percentage: 0,
+        spent: 600,
+        percentage: 100,
         category_ids: [],
         category_names: [],
-        details: [],
+        details: [{ category_id: 1, category_name: '餐饮', icon: 'mdi-food', spent: 600 }],
       }),
     ])
     const wrapper = await mountPage()
     const card = wrapper.findAll('.budget-card')[0]
-    expect(card.find('.budget-name').text()).toBe('未知分类')
-    expect(card.find('.budget-scope').text()).toContain('覆盖：未知分类')
+    expect(card.classes()).not.toContain('budget-card--dormant')
+    expect(card.find('.budget-scope-chip').text()).toBe('包含')
+    expect(card.find('.budget-scope').text()).toContain('覆盖：全部分类')
+    expect(card.find('.budget-scope-hint').text()).toBe('统计全部分类支出（含后续新增分类）')
     expect(card.find('.budget-delete-btn').exists()).toBe(true)
-    expect(wrapper.findAll('.budget-detail-toggle').length).toBe(0)
 
     wrapper.vm.openBudgetEditDialog(wrapper.vm.budgets[0])
     expect(wrapper.vm.budgetForm.category_ids).toEqual([])
-    expect(wrapper.vm.budgetFormValid).toBe(false)
-    expect(wrapper.find('.budget-dialog-error').text()).toContain('包含模式至少需要选择 1 个分类')
+    expect(wrapper.vm.budgetFormValid).toBe(true)
+    expect(wrapper.find('.budget-dialog-error').exists()).toBe(false)
 
-    await wrapper.vm.saveBudget()
-    await flushPromises()
-    expect(updateBudget).not.toHaveBeenCalled()
-
-    // 补选分类后即可保存（后端 include ≥1 校验维持，不在此处绕过）
-    wrapper.vm.budgetForm.category_ids = [1]
+    // 一个都不选直接保存：PUT 放行（原「须补选分类」断言已随放开反转）
     await wrapper.vm.saveBudget()
     await flushPromises()
     expect(updateBudget).toHaveBeenCalledWith(91, {
-      name: '未知分类',
+      name: '全开销上限',
+      amount: 600,
+      scope_mode: 'include',
+      category_ids: [],
+    })
+
+    // 重选分类同样可保存（编辑态回填为普通 include，前端无 dormant 特殊分支）
+    wrapper.vm.budgetForm.category_ids = [1]
+    await wrapper.vm.saveBudget()
+    await flushPromises()
+    expect(updateBudget).toHaveBeenLastCalledWith(91, {
+      name: '全开销上限',
       amount: 600,
       scope_mode: 'include',
       category_ids: [1],
@@ -739,6 +792,225 @@ describe('StatisticsPage - M12 每月多条命名预算（预算卡列表）', (
     expect(settingsPageSource).not.toMatch(/budget/i)
     expect(settingsPageSource).not.toContain('预算')
     expect(settingsPageSource).not.toMatch(/BUDGET_COLORS|currentMonth|formatAmount/)
+  })
+})
+
+// ── v1.4.3-boot2 M3 前端半区（任务 8.8–8.11 + 设计 §3.2.5 / §3.4）──────────────
+// 需求三：① include 空选放开（不选 = 动态全部，D3）；② 分类删光的 include 预算转休眠
+// 置灰展示（D4）；③ 概览 Σ 剔除休眠（D10）。文案后端不返回，全部前端自出。
+function makeDormant(overrides) {
+  return makeBudget({
+    id: 501,
+    name: '旧日常预算',
+    amount: 2000,
+    spent: 0,
+    remaining: 2000,
+    percentage: 0,
+    scope_mode: 'include',
+    category_ids: [],
+    category_names: [],
+    details: [],
+    dormant: true,
+    ...overrides,
+  })
+}
+
+describe('StatisticsPage - v1.4.3-boot2 M3 表单放开 + 休眠卡片置灰 + 概览剔除', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    getBudgets.mockResolvedValue([])
+    getBudgetYearSummary.mockResolvedValue({ months: [] })
+    createBudget.mockResolvedValue({ id: 99 })
+    updateBudget.mockResolvedValue({ id: 1 })
+    deleteBudget.mockResolvedValue({})
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-01-15T12:00:00'))
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  // 任务 8.8 + 6.2：休眠卡形态（置灰一档 / chip 保留 / 覆盖与提示固定文案 / 进度 0 / 无明细钮）
+  it('用例M3-1: 休眠预算卡置灰挂 budget-card--dormant、chip「保留」、固定文案、进度恒 0 且无明细入口', async () => {
+    getBudgets.mockResolvedValue([makeDormant()])
+    const wrapper = await mountPage()
+
+    const card = wrapper.findAll('.budget-card')[0]
+    expect(card.classes()).toContain('budget-card--dormant')
+    expect(card.find('.budget-scope-chip').text()).toBe('保留')
+    expect(card.find('.budget-scope').text()).toBe('覆盖：分类已删除，预算保留')
+    expect(card.find('.budget-scope-hint').text()).toBe('编辑并保存此预算可重新启用')
+    expect(card.find('.budget-spent').text()).toContain('0.00')
+    expect(card.find('.budget-percent').text()).toBe('0.0%')
+    // 明细折叠钮：details 恒空数组 → 自然隐藏（任务 6.2，无额外分支）
+    expect(wrapper.findAll('.budget-detail-toggle').length).toBe(0)
+    // 进度条恒 0 + 灰档（防御性，任务 6.3）；降级渲染下 :model-value 落为 model-value 属性
+    const bar = card.find('v-progress-linear')
+    expect(bar.attributes('model-value')).toBe('0')
+    expect(bar.attributes('color')).toBe('grey')
+  })
+
+  // 任务 6.3：budgetPercent / budgetBarColor 对 dormant 直接 0 / grey（含脏数据防御）
+  it('用例M3-2: budgetPercent/budgetBarColor 对 dormant 恒 0/grey（即使 spent 脏值亦不越档）', async () => {
+    const wrapper = await mountPage()
+    expect(wrapper.vm.isDormant({ dormant: true })).toBe(true)
+    expect(wrapper.vm.isDormant({ dormant: false })).toBe(false)
+    expect(wrapper.vm.isDormant({})).toBe(false)
+    expect(wrapper.vm.isDormant(undefined)).toBe(false)
+
+    const dirty = makeDormant({ amount: 100, spent: 95 })
+    expect(wrapper.vm.budgetPercent(dirty)).toBe(0)
+    expect(wrapper.vm.budgetBarColor(dirty)).toBe('grey')
+    expect(wrapper.vm.budgetPercentText(dirty)).toBe('0.0%')
+    expect(wrapper.vm.scopeChipText(dirty)).toBe('保留')
+    // 非休眠原档位不放宽（回归锁）
+    expect(wrapper.vm.budgetBarColor(makeBudget({ amount: 100, spent: 95 }))).toBe('error')
+    expect(wrapper.vm.scopeChipText(makeBudget({ scope_mode: 'exclude' }))).toBe('排除')
+    expect(wrapper.vm.scopeChipText(makeBudget({ scope_mode: 'include' }))).toBe('包含')
+  })
+
+  // 任务 8.9：概览求和剔除 dormant（computed 用例）
+  it('用例M3-3: totalBudget/totalSpent 求和前剔除 dormant 行（D10），卡片列表仍返回', async () => {
+    getBudgets.mockResolvedValue([
+      makeBudget({ id: 601, amount: 1000, spent: 400 }),
+      makeDormant({ id: 602, amount: 5000, spent: 0 }),
+      makeBudget({ id: 603, name: '学习', amount: 500, spent: 100 }),
+    ])
+    const wrapper = await mountPage()
+
+    expect(wrapper.vm.budgets.length).toBe(3)
+    expect(wrapper.vm.totalBudget).toBe(1500)
+    expect(wrapper.vm.totalSpent).toBe(500)
+    expect(wrapper.vm.budgetUsagePercent).toBeCloseTo(33.333, 2)
+    // 月概览小卡数字不含休眠 5000（?raw 之外的运行时口径锁）
+    expect(wrapper.text()).toContain('1,500.00')
+    expect(wrapper.text()).not.toContain('6,500.00')
+    // 年视图摘要由后端剔除（前端原样透传，不二次过滤）
+    expect(wrapper.vm.yearTotalBudget).toBe(0)
+  })
+
+  // 任务 8.10：scopeSummary / scopeHint 的 dormant 与 include 空集两分支
+  it('用例M3-4: scopeSummary/scopeHint 两分支（dormant 固定文案 / include 空集 = 动态全部）', async () => {
+    const wrapper = await mountPage()
+    const summary = wrapper.vm.scopeSummary
+    const hint = wrapper.vm.scopeHint
+
+    // dormant：优先于 scope_mode 判定，include 与 exclude 两态都走固定文案
+    expect(summary({ dormant: true, scope_mode: 'include', category_ids: [] }, CATEGORIES)).toBe(
+      '分类已删除，预算保留'
+    )
+    expect(summary({ dormant: true, scope_mode: 'exclude', category_ids: [1] }, CATEGORIES)).toBe(
+      '分类已删除，预算保留'
+    )
+    expect(hint({ dormant: true, scope_mode: 'include' })).toBe('编辑并保存此预算可重新启用')
+    expect(hint({ dormant: true, scope_mode: 'exclude' })).toBe('编辑并保存此预算可重新启用')
+
+    // include 空集（非休眠）= 动态全部分类（D3 新口径，原「未知分类」已反转）
+    expect(summary({ scope_mode: 'include', category_ids: [], category_names: [] }, CATEGORIES)).toBe(
+      '全部分类'
+    )
+    expect(hint({ scope_mode: 'include', category_ids: [] })).toBe('统计全部分类支出（含后续新增分类）')
+    expect(hint({ scope_mode: 'include', category_ids: undefined })).toBe(
+      '统计全部分类支出（含后续新增分类）'
+    )
+    // 显式所选 include 与 exclude 现状不变
+    expect(summary({ scope_mode: 'include', category_ids: [1], category_names: ['餐饮'] }, CATEGORIES)).toBe(
+      '餐饮'
+    )
+    expect(hint({ scope_mode: 'include', category_ids: [1] })).toBe('仅计入所选分类')
+    expect(summary({ scope_mode: 'exclude', category_ids: [9], category_names: ['工资'] }, CATEGORIES)).toBe(
+      '除 工资 外全部支出'
+    )
+    expect(hint({ scope_mode: 'exclude', category_ids: [9] })).toBe('选中分类不计入本预算')
+  })
+
+  // 任务 8.11 + 5.2：多选框 label 与提示新文案（:raw 源码锁 + 运行时两态断言）
+  it('用例M3-5: label 与 budgetScopeTip 新文案——include 空选合法（可留空 / 一个都不选即统计全部分类支出）', async () => {
+    // 源码层：include 分支 label 与提示整串
+    expect(statisticsPageSource).toContain("'包含分类（可留空）'")
+    expect(statisticsPageSource).toContain("'排除分类（可留空）'")
+    expect(statisticsPageSource).toContain('仅计入所选分类；一个都不选即统计全部分类支出')
+    // 旧口径文案下线（include 提示原为「仅计入所选分类的支出」）
+    expect(statisticsPageSource).not.toContain('仅计入所选分类的支出')
+
+    const wrapper = await mountPage()
+    wrapper.vm.openBudgetAddDialog()
+    await nextTick()
+    expect(wrapper.vm.budgetForm.scope_mode).toBe('include')
+    expect(wrapper.vm.budgetScopeTip).toBe('仅计入所选分类；一个都不选即统计全部分类支出')
+
+    wrapper.vm.budgetForm = { ...wrapper.vm.budgetForm, scope_mode: 'exclude' }
+    await nextTick()
+    expect(wrapper.vm.budgetScopeTip).toBe('选中分类不计入本预算；一个都不选即统计全部分类支出')
+  })
+
+  // 任务 5.1 红线：include 空选校验链彻底删除（源码零命中）+ 置灰一档不引新色值
+  it('用例M3-6: 源码红线锁——零 budgetScopeError/budgetIncludeEmpty、置灰仅 opacity 一档无新色值', () => {
+    expect(statisticsPageSource).not.toContain('budgetScopeError')
+    expect(statisticsPageSource).not.toContain('budgetIncludeEmpty')
+    expect(statisticsPageSource).not.toContain('budget-dialog-error')
+    // 休眠类名单点出现于「模板绑定 + 样式规则」两处
+    expect((statisticsPageSource.match(/budget-card--dormant/g) || [])).toHaveLength(2)
+    expect(statisticsPageSource).toMatch(/:class="\{\s*'budget-card--dormant':\s*isDormant\(budget\)\s*\}"/)
+    const dormantRule = statisticsPageSource.match(/\.budget-card--dormant\s*\{[^}]*\}/s)
+    expect(dormantRule).not.toBeNull()
+    expect(dormantRule[0]).toMatch(/opacity:\s*\.55/)
+    // 一档置灰、明暗通用：不引入任何新色值（无 hex / rgba / theme 变量）
+    expect(dormantRule[0]).not.toMatch(/#[0-9a-fA-F]{3,8}|rgba?\(|var\(--v-theme/)
+    // 文案前端自出（后端不返回）：两个固定串字面量在脚本层单点定义
+    expect((statisticsPageSource.match(/分类已删除，预算保留/g) || [])).toHaveLength(1)
+    expect((statisticsPageSource.match(/编辑并保存此预算可重新启用/g) || [])).toHaveLength(1)
+    // 概览剔除单点判定：totalBudget/totalSpent 各一处 filter
+    expect((statisticsPageSource.match(/filter\(\(b\) => !isDormant\(b\)\)/g) || [])).toHaveLength(2)
+    // 红线·不回退（§9.4）：两泳道互斥本体未动——scope_mode 仍是 mandatory 单选 toggle、
+    // 载荷仍对 category_ids 去重（M3 只放宽 include 空集限制，不改多选行为）
+    expect(statisticsPageSource).toMatch(/<v-btn-toggle\s+v-model="budgetForm\.scope_mode"\s+mandatory/)
+    expect(statisticsPageSource).toContain('Array.from(new Set(form.category_ids || []))')
+  })
+
+  // 任务 5.3（核验）：休眠预算编辑回填 = 普通 include 空选，前端零特殊逻辑
+  it('用例M3-7: 休眠预算打开编辑即普通 include 空选，不选或重选皆可保存（无 dormant 回填分支）', async () => {
+    getBudgets.mockResolvedValue([makeDormant({ id: 701, amount: 2000 })])
+    const wrapper = await mountPage()
+
+    wrapper.vm.openBudgetEditDialog(wrapper.vm.budgets[0])
+    await nextTick()
+    expect(wrapper.vm.showBudgetDialog).toBe(true)
+    expect(wrapper.vm.budgetForm).toEqual({
+      id: 701,
+      month: '2026-01',
+      name: '旧日常预算',
+      amount: 2000,
+      scope_mode: 'include',
+      category_ids: [],
+    })
+    // 空选即可保存（唤醒 = 后端 PUT 成功路径清 dormant，任务 3.5 / D9）
+    expect(wrapper.vm.budgetFormValid).toBe(true)
+    expect(saveBtnDisabled(wrapper)).toBe(false)
+    await wrapper.vm.saveBudget()
+    await flushPromises()
+    expect(updateBudget).toHaveBeenCalledWith(701, {
+      name: '旧日常预算',
+      amount: 2000,
+      scope_mode: 'include',
+      category_ids: [],
+    })
+
+    // 重选分类亦可保存
+    wrapper.vm.budgetForm.category_ids = [1, 2]
+    await wrapper.vm.saveBudget()
+    await flushPromises()
+    expect(updateBudget).toHaveBeenLastCalledWith(701, {
+      name: '旧日常预算',
+      amount: 2000,
+      scope_mode: 'include',
+      category_ids: [1, 2],
+    })
+    // 回填函数内不出现 dormant 字样（前端零特殊回填逻辑）
+    const editFn = statisticsPageSource.match(/function openBudgetEditDialog\(budget\)[\s\S]*?\n\}/)
+    expect(editFn).not.toBeNull()
+    expect(editFn[0]).not.toMatch(/dormant/i)
   })
 })
 

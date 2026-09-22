@@ -29,17 +29,40 @@
     ``test_year_summary_spent_uses_own_month``；隔离/401/参数校验三件保留原口径。
   - 旧 ``income_category_id`` fixture（直改 Category.type 造 income 行）随
     ``budget_service`` 的 type 过滤一并移除——预算的收支口径改由 spent 聚合定义。
+
+⚠ **v1.4.3-boot2 M3 口径反转**（决策 D3/D4/D9/D10；逐条登记旧用例的去向）：
+  - 「include + 空分类集 → 400」的服务层校验**已删除** → 旧
+    ``test_include_needs_at_least_one_category`` 改写为
+    ``test_include_empty_category_is_dynamic_all``（200 + spent = 当月全额）；
+  - 空集从此承载两义：**主动不选 = 动态全部分类**（dormant=0）/
+    **关联被删光 = 休眠**（dormant=1，花费恒 0）→ BudgetDetail 增 ``dormant: bool``；
+  - 「include 预算失去最后关联 → 预算删除」改「置 dormant=1 保留」→ 旧
+    ``test_delete_last_include_category_deletes_budget`` 改写为
+    ``test_delete_last_include_category_dormants_budget``，计数响应键
+    ``deleted_budgets`` → ``dormant_budgets``（restore-defaults / 越权用例同键同改）；
+  - 旧 ``test_migrated_orphan_budget_is_read_only``（钉死「include 空集 = 只读态、
+    spent 恒 0、PUT 被 400 拦、删除是唯一出口」）与 M3 新语义逐条冲突 → 改写为
+    ``test_orphan_empty_include_budget_is_dynamic_all``（spent = 当月全额 + PUT 200）；
+  - 导入旧备份产出的「未知分类」空集预算：PUT 由 400 改 200（``dormant=0`` 时同样是
+    动态全部口径），见 ``test_import_pre_m12_budget_rows`` 末段；
+  - 新增：``_build_detail`` **四分支参数化**（分支顺序 = dormant → INCLUDE 空集 →
+    INCLUDE 显式 → exclude，D5 要求 INCLUDE 空集与 exclude 空排除集逐位同值）、
+    唤醒（PUT → dormant=0）、汇总剔除双向断言（overview/year 不计 dormant **且**
+    月列表仍返回 dormant 行）；``dormant`` 迁移脚本用例另见
+    ``test_migration_v143boot2_dormant.py``（任务 8.6）。
 """
 
 import pytest
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.models.budget import Budget, BudgetCategory
+from app.main import app as fastapi_app
+from app.models.budget import UNKNOWN_CATEGORY_NAME, Budget, BudgetCategory
+from app.services import budget_service
 
 MONTH = "2026-06"
 
-# BudgetDetail 契约（任务 2.7）——前端渲染所需字段清单，多给/少给都算回归
+# BudgetDetail 契约（任务 2.7 + M3 任务 2.4）——前端渲染所需字段清单，多给/少给都算回归
 BUDGET_DETAIL_KEYS = {
     "id",
     "month",
@@ -49,6 +72,7 @@ BUDGET_DETAIL_KEYS = {
     "remaining",
     "percentage",
     "scope_mode",
+    "dormant",
     "category_ids",
     "category_names",
     "details",
@@ -115,7 +139,7 @@ async def make_income(client, amount: float, category_id: int, day: int = 15) ->
 
 
 async def post_budget(client, **overrides):
-    """按新契约 POST 一条预算（默认 include，需显式给 category_ids 才合法）."""
+    """按新契约 POST 一条预算（M3 起 include 空集合法 = 动态全部分类，默认即空集）."""
     payload = {
         "month": MONTH,
         "name": "日常开销",
@@ -137,6 +161,48 @@ async def link_ids(db_session: AsyncSession, budget_id: int) -> list[int]:
         )
     ).all()
     return [int(r) for r in rows]
+
+
+async def list_budgets(client, month: str = MONTH) -> list[dict]:
+    """月视图卡片数据源：``GET /api/budgets?month=``（M3 起**含** dormant 行）."""
+    resp = await client.get("/api/budgets", params={"month": month})
+    assert resp.status_code == 200, resp.text
+    return resp.json()["data"]
+
+
+async def budget_row(client, budget_id: int, month: str = MONTH) -> dict:
+    """从月列表接口里按 id 取一条预算（不存在即失败）。"""
+    rows = [x for x in await list_budgets(client, month) if x["id"] == budget_id]
+    assert len(rows) == 1, f"预算 {budget_id} 不在列表里：{rows}"
+    return rows[0]
+
+
+async def db_dormant(db_session: AsyncSession, budget_id: int) -> int:
+    """直读 ``budgets.dormant`` 列（落库真值，不看响应）。
+
+    用**列投影**而非 ``db_session.get(Budget, id)``：接口写入走的是另一个会话
+    （``conftest.override_get_session``），``get()`` 会命中本会话身份映射里的过期对象、
+    读到陈旧 dormant；列查询绕过身份映射，取回的是库里当前那一列。
+    """
+    row = (
+        await db_session.exec(select(Budget.dormant).where(Budget.id == budget_id))
+    ).first()
+    assert row is not None, "M3 后休眠预算**不得**被删除"
+    return int(row)
+
+
+async def force_dormant(db_session: AsyncSession, budget_id: int, value: int = 1) -> None:
+    """直写 dormant 列：造出「级联产物」形态，无需绕道删分类（纯函数/汇总用例用）。
+
+    先 ``refresh``：接口写入走另一个会话且 ``expire_on_commit=False``，身份映射里的
+    过期对象会让「置 1」不产生脏字段 → UPDATE 不发、造形静默失败。
+    """
+    budget = await db_session.get(Budget, budget_id)
+    assert budget is not None
+    await db_session.refresh(budget)
+    budget.dormant = value
+    db_session.add(budget)
+    await db_session.commit()
 
 
 # ===========================================================================
@@ -287,12 +353,16 @@ async def test_exclude_without_category_is_full_amount(client):
 
 
 @pytest.mark.asyncio
-async def test_migrated_orphan_budget_is_read_only(client, db_session):
-    """①任务 9.3 迁移产出的只读态：名称「未知分类」+ include + 分类置空.
+async def test_orphan_empty_include_budget_is_dynamic_all(client, db_session):
+    """①任务 8.12（M3 改写）：空集 include **不再是只读态**——spent = 当月全额 + PUT 200.
 
-    口径登记：该形态**展示/删除正常、spent 恒 0**，仅 PUT 重保存被 include ≥1
-    校验拦截（引导补选分类）——这是设计裁定，不是缺陷。
-    造形方式：先 POST 真预算，再按阶段 B 的产出改写名称并清空关联行。
+    旧裁定（v1.4.3 任务 9.3）：「未知分类」= include 空集 → spent 恒 0、PUT 被
+    「include ≥1」400 拦下、删除是唯一出口。M3（决策 D3/D5/D9）逐条反判：
+      * 空集 + dormant=0 = **动态全部分类** → spent 与 exclude 空排除集同口径（全额）；
+      * PUT 空集 → 200（校验已删）；休眠只能由分类删除级联置 1，任何成功保存清 0；
+      * DELETE 仍可用，但**不再是**唯一出口（编辑保存即可自救）。
+    造形方式沿用旧用例：先 POST 真预算，再按阶段 B 的产出改写名称并清空关联行
+    （dormant 列保持默认 0 = 「非休眠的空集」）。
     """
     food = await make_category(client, "M12O餐饮")
     resp = await post_budget(client, name="M12O原", amount=500.0, category_ids=[food])
@@ -313,33 +383,42 @@ async def test_migrated_orphan_budget_is_read_only(client, db_session):
         await db_session.delete(link)
     await db_session.commit()
 
-    listed = (await client.get("/api/budgets", params={"month": MONTH})).json()["data"]
-    assert len(listed) == 1
-    orphan = listed[0]
+    await make_expense(client, 120.0, food)  # 分类还在，只是预算不再显式挂它
+
+    orphan = await budget_row(client, bid)
     assert orphan["name"] == "未知分类"
     assert orphan["scope_mode"] == "include"
     assert orphan["category_ids"] == []
     assert orphan["category_names"] == []
-    assert orphan["details"] == []
-    assert orphan["spent"] == 0, "只读态无分类可计，spent 恒 0"
-    assert orphan["remaining"] == 500.0
-    assert orphan["percentage"] == 0
+    assert orphan["dormant"] is False, "空集两义由 dormant 列区分，导入/迁移态默认 0"
+    assert orphan["spent"] == 120.0, "非休眠空集 = 动态全部 → 当月全额（D3/D5）"
+    assert [d["category_id"] for d in orphan["details"]] == [food], "明细列有花费的类目"
+    assert orphan["remaining"] == 380.0
+    assert orphan["percentage"] == 24.0
 
-    # 仅 PUT 被 include ≥1 拦下（400 + PARAM_ERROR），且不改数据
+    # 休眠态（dormant=1）才是「花费恒 0 + 无明细」，且**行仍在列表**（D4 不删）
+    await force_dormant(db_session, bid)
+    sleeping = await budget_row(client, bid)
+    assert sleeping["dormant"] is True
+    assert sleeping["spent"] == 0 and sleeping["details"] == []
+    assert sleeping["remaining"] == 500.0
+
+    # PUT 200 且**保存即唤醒**（旧断言：400 + PARAM_ERROR + 数据不变，已随校验删除作废）
     resp = await client.put(
         f"/api/budgets/{bid}",
         json={"name": "未知分类", "amount": 600.0, "scope_mode": "include", "category_ids": []},
     )
-    assert resp.status_code == 400
-    assert resp.json()["code"] == 40001
-    assert "包含模式" in resp.json()["message"]
-    still = (await client.get("/api/budgets", params={"month": MONTH})).json()["data"][0]
-    assert still["amount"] == 500.0
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["dormant"] is False
+    assert resp.json()["data"]["spent"] == 120.0, "唤醒后立刻恢复动态全部口径"
+    assert await db_dormant(db_session, bid) == 0
+    still = await budget_row(client, bid)
+    assert still["amount"] == 600.0 and still["dormant"] is False
 
-    # 可删（用户摆脱只读态的唯一出口）
+    # 删除接口零改动（7.4）：休眠/非休眠都能删，但它只是并列出口之一
     resp = await client.delete(f"/api/budgets/{bid}")
     assert resp.status_code == 200
-    assert (await client.get("/api/budgets", params={"month": MONTH})).json()["data"] == []
+    assert await list_budgets(client) == []
 
 
 @pytest.mark.asyncio
@@ -680,18 +759,50 @@ async def test_amount_validation(client):
 
 
 @pytest.mark.asyncio
-async def test_include_needs_at_least_one_category(client):
-    """②include + 空分类集 → PARAM_ERROR（任务 1.3 的服务层权威校验）."""
-    resp = await post_budget(client, category_ids=[])
-    assert resp.status_code == 400
-    body = resp.json()
-    assert body["code"] == 40001
-    assert "包含模式" in body["message"]
+async def test_include_empty_category_is_dynamic_all(client):
+    """②/① 任务 8.1（M3 改写旧「include 空集 → 400」）：空集 = 动态全部分类（D3）.
+
+    旧断言：``include`` + 空 ``category_ids`` → 400 + PARAM_ERROR「包含模式至少需要选择
+    1 个分类」（服务层 ``_validate_budget_fields``）。该校验已随 M3 删除，新口径：
+      * POST/PUT 一律 200、正常落库（空关联行），``dormant=0``；
+      * spent = 当月全部支出（与 exclude 空排除集**完全同口径**，D5 / 边界 7.2）；
+      * **后续新建的分类自动计入**（边界 7.1 的动态语义，不重写关联行）；
+      * 旧版前端缓存包不带 ``category_ids`` 字段 → 缺省即空集，同样 200（边界 7.7）。
+    """
+    resp = await post_budget(client, name="全开销", amount=1000.0, category_ids=[])
+    assert resp.status_code == 200, resp.text
+    b = resp.json()["data"]
+    assert b["scope_mode"] == "include" and b["category_ids"] == []
+    assert b["dormant"] is False, "主动不选 ≠ 休眠：两义由 dormant 列区分（D3）"
+    assert b["spent"] == 0 and b["details"] == []
 
     resp = await client.post(
         "/api/budgets", json={"month": MONTH, "name": "无范围", "amount": 100.0}
     )
-    assert resp.status_code == 400, "category_ids 缺省即空列表，include 仍须 ≥1"
+    assert resp.status_code == 200, "category_ids 缺省即空列表 = 动态全部（旧断言 400）"
+    legacy = resp.json()["data"]
+    assert legacy["scope_mode"] == "include" and legacy["category_ids"] == []
+
+    first = await make_category(client, "M12D动1")
+    await make_expense(client, 40.0, first)
+    assert (await budget_row(client, b["id"]))["spent"] == 40.0
+
+    # 7.1：事后新建分类并记账 → 该预算数字自动跟上（用户无需重选分类）
+    later = await make_category(client, "M12D动2")
+    await make_expense(client, 60.0, later)
+    grown = await budget_row(client, b["id"])
+    assert grown["spent"] == 100.0, "动态全部：新分类无需回填关联即计入"
+    assert grown["category_ids"] == [], "动态口径是求和规则，不改写关联行"
+    assert sorted(d["category_id"] for d in grown["details"]) == sorted([first, later])
+
+    # 7.2 / D5：同月的 exclude 空排除集与之花费逐位同值（仅标签/明细语义不同）
+    ex = (
+        await post_budget(client, name="除零外", amount=1000.0, scope_mode="exclude")
+    ).json()["data"]
+    assert ex["spent"] == grown["spent"] == 100.0
+    assert [d["category_id"] for d in ex["details"]] == [
+        d["category_id"] for d in grown["details"]
+    ]
 
 
 @pytest.mark.asyncio
@@ -823,15 +934,17 @@ async def test_endpoints_require_auth(anon_client):
 
 
 # ===========================================================================
-# 分类删除的预算级联（任务 4.1–4.4 / 边界 10.1；变更端点
-# ``DELETE /api/categories/{id}`` 与 ``POST /api/categories/restore-defaults``
-# 的四件套：①正常级联 ②提示口径 ③关联行不残留 ④见上文 401 段）
+# 分类删除的预算级联（v1.4.3 M12 任务 4.1–4.4 → **v1.4.3-boot2 M3 任务 3.1–3.3
+# 改向**：include 预算失去最后关联不再删除，改置 dormant=1 休眠保留，计数键
+# ``deleted_budgets`` → ``dormant_budgets``；边界 7.4/7.5 亦归本段）
+# 变更端点 ``DELETE /api/categories/{id}`` 与 ``POST /api/categories/restore-defaults``
+# 的四件套：①正常级联 ②提示口径 ③关联行不残留 ④见上文 401 段
 # ===========================================================================
 
 
 @pytest.mark.asyncio
 async def test_delete_category_removes_link_but_keeps_include_budget(client, db_session):
-    """①任务 4.1：include 预算还有别的分类 → 只移出该分类，预算行不删."""
+    """①任务 3.1：include 预算还有别的分类 → 只移出该分类，预算不删也**不休眠**."""
     a = await make_category(client, "M12级联A")
     b = await make_category(client, "M12级联B")
     await make_expense(client, 100.0, a)
@@ -843,31 +956,43 @@ async def test_delete_category_removes_link_but_keeps_include_budget(client, db_
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["code"] == 0
-    assert body["data"] == {"deleted_records": 1, "deleted_budgets": 0}
+    # 计数键随级联改向：deleted_budgets → dormant_budgets（任务 3.3）
+    assert body["data"] == {"deleted_records": 1, "dormant_budgets": 0}
     assert "同时删除了 1 条关联账单" in body["message"]
+    # 任务 3.4：M=0 时「…被保留为休眠」整句不提
+    assert "休眠" not in body["message"], body["message"]
 
-    listed = (await client.get("/api/budgets", params={"month": MONTH})).json()["data"]
+    listed = await list_budgets(client)
     assert [x["id"] for x in listed] == [bid]
     assert listed[0]["category_ids"] == [b]
     assert listed[0]["category_names"] == ["M12级联B"]
     assert listed[0]["spent"] == 50.0  # a 的 100 随分类级联删除，不再计入
+    assert listed[0]["dormant"] is False
+    assert await db_dormant(db_session, bid) == 0
     assert await link_ids(db_session, bid) == [b]
 
 
 @pytest.mark.asyncio
-async def test_delete_last_include_category_deletes_budget(client, db_session):
-    """①任务 4.2：include 预算失去最后一个分类 → 预算一并删除并在 message 提示."""
+async def test_delete_last_include_category_dormants_budget(client, db_session):
+    """①任务 3.1/3.3/3.4（M3 改写旧「预算随之删除」）：失去最后关联 → **休眠保留**."""
     a = await make_category(client, "M12唯一类")
     bid = (await post_budget(client, amount=600.0, category_ids=[a])).json()["data"]["id"]
 
     resp = await client.delete(f"/api/categories/{a}")
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["data"]["deleted_budgets"] == 1
-    assert "1 条不再覆盖任何分类的预算" in body["message"]
+    assert body["data"]["dormant_budgets"] == 1, "计数键改向（原 deleted_budgets）"
+    assert "1 条预算因不再覆盖任何分类被保留为休眠" in body["message"], body["message"]
 
-    assert (await client.get("/api/budgets", params={"month": MONTH})).json()["data"] == []
-    assert await db_session.get(Budget, bid) is None
+    # 预算**仍在列表**（月视图卡片要置灰展示，D10 的另一半）——旧断言是列表为空
+    listed = await list_budgets(client)
+    assert [x["id"] for x in listed] == [bid], "D4：不再删除预算行"
+    dormant = listed[0]
+    assert dormant["dormant"] is True
+    assert dormant["spent"] == 0 and dormant["details"] == []
+    assert dormant["remaining"] == 600.0 and dormant["percentage"] == 0
+    assert dormant["category_ids"] == [] and dormant["category_names"] == []
+    assert await db_dormant(db_session, bid) == 1
     # 关联行不得残留（连接未启用 foreign_keys，级联全靠服务层显式删）
     assert await link_ids(db_session, bid) == []
     leftover = (
@@ -877,8 +1002,30 @@ async def test_delete_last_include_category_deletes_budget(client, db_session):
 
 
 @pytest.mark.asyncio
+async def test_deleting_custom_other_category_dormants_budget(client, db_session):
+    """①边界 7.5：「其他」的 custom 副本被删 → 走**同一**休眠级联（不再连删预算）.
+
+    级联函数不区分被删分类的身份（预设/副本/家族名），故挂唯一 custom「其他」的
+    include 预算与 M2 合并后的 keeper 副本删除路径同形。
+    """
+    other = await make_category(client, "其他")  # 用户同名副本（可删）
+    bid = (
+        await post_budget(client, name="兜底预算", amount=300.0, category_ids=[other])
+    ).json()["data"]["id"]
+    await make_expense(client, 12.0, other)
+
+    resp = await client.delete(f"/api/categories/{other}")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"] == {"deleted_records": 1, "dormant_budgets": 1}
+
+    row = await budget_row(client, bid)
+    assert row["dormant"] is True and row["spent"] == 0 and row["details"] == []
+    assert await db_dormant(db_session, bid) == 1
+
+
+@pytest.mark.asyncio
 async def test_delete_category_only_widens_exclude_budget(client, db_session):
-    """①任务 4.3：exclude 预算仅移出排除集（语义自动扩大），任何情况下都不删."""
+    """①任务 3.2：exclude 预算仅移出排除集（语义自动扩大），**无休眠概念**、任何情况下不删."""
     inc = await make_category(client, "M12计入")
     ex1 = await make_category(client, "M12排除1")
     ex2 = await make_category(client, "M12排除2")
@@ -894,40 +1041,45 @@ async def test_delete_category_only_widens_exclude_budget(client, db_session):
         )
     ).json()["data"]
     assert bid["spent"] == 70.0, "100 全部支出 − ex2 的 30（ex1 零花费）"
+    assert bid["dormant"] is False
 
     resp = await client.delete(f"/api/categories/{ex1}")
-    assert resp.json()["data"]["deleted_budgets"] == 0
-    after = (await client.get("/api/budgets", params={"month": MONTH})).json()["data"]
+    assert resp.json()["data"]["dormant_budgets"] == 0
+    after = await list_budgets(client)
     assert [x["id"] for x in after] == [bid["id"]], "exclude 预算永不因删分类而消失"
     assert after[0]["category_ids"] == [ex2]
     assert after[0]["spent"] == 70.0
+    assert after[0]["dormant"] is False, "移出排除集 = 覆盖扩大，不进休眠（任务 3.2）"
+    assert await db_dormant(db_session, bid["id"]) == 0
     assert await link_ids(db_session, bid["id"]) == [ex2]
 
-    # 再删最后一个排除类 → 空排除集 = 全部分类（预算覆盖自动扩大，仍不删）
+    # 再删最后一个排除类 → 空排除集 = 全部分类（预算覆盖自动扩大，仍不删也不休眠）
     await client.delete(f"/api/categories/{ex2}")
-    widened = (await client.get("/api/budgets", params={"month": MONTH})).json()["data"]
+    widened = await list_budgets(client)
     assert [x["id"] for x in widened] == [bid["id"]]
     assert widened[0]["category_ids"] == []
     assert widened[0]["category_names"] == []
     assert widened[0]["spent"] == 70.0  # ex2 的 30 已随分类删除，仅剩 inc 的 70
+    assert widened[0]["dormant"] is False
     assert [d["category_id"] for d in widened[0]["details"]] == [inc]
     assert await link_ids(db_session, bid["id"]) == []
+    assert await db_dormant(db_session, bid["id"]) == 0
 
 
 @pytest.mark.asyncio
 async def test_restore_defaults_reuses_the_same_budget_cascade(client, db_session):
-    """①任务 4.4：restore-defaults 复用同一级联——include 删、exclude 留.
+    """①任务 3.3：restore-defaults 复用同一休眠级联——include 转休眠、exclude 留.
 
     造形刻意把支出记在**预设**分类上：`restore_default_categories` 对自定义分类的
     账单走「category_id 置 NULL」老逻辑，而 ``Record.category_id`` 自 v1.2.3 起即
-    NOT NULL（基线 8652bec 同形），该路径本模块未触碰、不属 M12 范围（已在完成
-    notes 上报）。预算级联与账单是否挂在自定义分类上无关，故此处仍完整覆盖 4.4。
+    NOT NULL（基线 8652bec 同形），该路径本模块未触碰、不属 M12/M3 范围（已在完成
+    notes 上报）。预算级联与账单是否挂在自定义分类上无关，故此处仍完整覆盖 3.3。
     """
     only = await make_category(client, "M12复位A")  # 某 include 预算的唯一分类
     excl = await make_category(client, "M12复位B")  # 某 exclude 预算的排除项
     preset_food = await preset_category_id(client, "餐饮")
     b_include = (
-        await post_budget(client, name="会被删", amount=100.0, category_ids=[only])
+        await post_budget(client, name="会休眠", amount=100.0, category_ids=[only])
     ).json()["data"]["id"]
     b_exclude = (
         await post_budget(
@@ -940,15 +1092,19 @@ async def test_restore_defaults_reuses_the_same_budget_cascade(client, db_sessio
     assert resp.status_code == 200, resp.text
     data = resp.json()["data"]
     assert data["deleted_categories"] == 2
-    assert data["deleted_budgets"] == 1
+    assert data["dormant_budgets"] == 1, "同一函数的返回键随级联改向（任务 3.3）"
 
-    assert await db_session.get(Budget, b_include) is None, "include 失去唯一分类 → 删"
+    # include 预算**不删**，转 dormant=1 保留（旧断言：行已消失）
+    assert await db_dormant(db_session, b_include) == 1
     assert await link_ids(db_session, b_include) == []
-    listed = (await client.get("/api/budgets", params={"month": MONTH})).json()["data"]
-    assert [x["id"] for x in listed] == [b_exclude], "exclude 预算不受级联删除影响"
-    assert listed[0]["category_ids"] == []
-    assert listed[0]["spent"] == 25.0
-    assert [d["category_id"] for d in listed[0]["details"]] == [preset_food]
+    listed = await list_budgets(client)
+    assert [x["id"] for x in listed] == [b_include, b_exclude]
+    assert listed[0]["dormant"] is True
+    assert listed[0]["spent"] == 0 and listed[0]["details"] == []
+    assert listed[1]["category_ids"] == [], "exclude 预算不受级联影响，仅移出排除集"
+    assert listed[1]["dormant"] is False
+    assert listed[1]["spent"] == 25.0
+    assert [d["category_id"] for d in listed[1]["details"]] == [preset_food]
 
 
 @pytest.mark.asyncio
@@ -981,11 +1137,14 @@ async def test_delete_category_cascade_is_owner_scoped(auth_client_a, auth_clien
 
     resp = await auth_client_b.delete(f"/api/categories/{cat_b}")
     assert resp.status_code == 200, resp.text
-    assert resp.json()["data"]["deleted_budgets"] == 1, "只有 B 自己的预算被级联"
+    assert resp.json()["data"]["dormant_budgets"] == 1, "只有 B 自己的预算被级联（置休眠）"
+    b_listed = await list_budgets(auth_client_b)
+    assert len(b_listed) == 1 and b_listed[0]["dormant"] is True, "B 的预算保留不删（D4）"
 
     mine = (await auth_client_a.get("/api/budgets", params={"month": MONTH})).json()["data"]
     assert [x["id"] for x in mine] == [budget_a]
     assert mine[0]["category_ids"] == [cat_a]
+    assert mine[0]["dormant"] is False, "A 的预算既没被删也没被休眠"
     assert await link_ids(db_session, budget_a) == [cat_a]
 
 
@@ -1111,10 +1270,262 @@ VALUES (1, 999999, '{MONTH}', 222.0, '2026-01-01 00:00:00', '2026-01-01 00:00:00
     assert legacy["category_ids"] == [preset]
 
     orphan = by_amount[222.0]
-    assert orphan["name"] == "未知分类", "与迁移阶段 B 同款的只读态（任务 9.3）"
+    assert orphan["name"] == "未知分类", "与迁移阶段 B 同款的 include 空集形态（任务 9.3）"
     assert orphan["category_ids"] == [] and orphan["spent"] == 0
+    assert orphan["dormant"] is False, "导入产物非休眠 → 空集即「动态全部分类」（M3/D3）"
+
+    # M3 改向：该形态不再只读——事后记账自动计入（动态），PUT 空集亦 200（旧断言 400）
+    await make_expense(client, 30.0, preset)
+    assert (await budget_row(client, orphan["id"]))["spent"] == 30.0
     resp = await client.put(
         f"/api/budgets/{orphan['id']}",
         json={"name": "未知分类", "amount": 222.0, "scope_mode": "include", "category_ids": []},
     )
-    assert resp.status_code == 400 and resp.json()["code"] == 40001
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["dormant"] is False
+
+
+# ===========================================================================
+# v1.4.3-boot2 M3：不选 = 动态全部 + 分类删光转休眠
+# （任务 8.2 `_build_detail` 四分支 / 8.4 唤醒 / 8.5 汇总剔除双向断言）
+# ===========================================================================
+
+# 分类展示信息 (name, icon, sort_order)——明细排序基准
+_M3_INFO: dict[int, tuple[str, str, int]] = {
+    1: ("餐饮", "mdi-food", 1),
+    2: ("购物", "mdi-cart", 2),
+    3: ("出行", "mdi-bus", 3),
+}
+# 当月「分类 → 支出」映射；**键 0 = 未分类桶**（category_id NULL / 失效的极端数据）
+# → month_total = 100 + 50 + 25 + 10 = 185.0
+_M3_SPENT: dict[int, float] = {1: 100.0, 2: 50.0, 3: 25.0, 0: 10.0}
+
+
+def _m3_detail(
+    scope_mode: str = "include",
+    category_ids: list[int] | None = None,
+    dormant: int = 0,
+    amount: float = 1000.0,
+) -> dict:
+    """直接调纯函数 `_build_detail`（无 IO、无会话）——M3 分支表的钉死入口."""
+    snap = budget_service._BudgetSnapshot(
+        id=1,
+        name="M3分支",
+        month=MONTH,
+        amount=amount,
+        scope_mode=scope_mode,
+        dormant=dormant,
+        created_at="2026-01-01 00:00:00",
+        updated_at="2026-01-01 00:00:00",
+    )
+    return budget_service._build_detail(
+        snap, list(category_ids or []), _M3_INFO, dict(_M3_SPENT)
+    )
+
+
+# (用例名, scope_mode, category_ids, dormant, 期望 spent, 期望明细类目)
+# **表序 = 分支判定序**（任务 2.3）：dormant → INCLUDE 空集 → INCLUDE 显式 → exclude
+_M3_BRANCH_CASES = [
+    ("branch1_dormant_include_empty", "include", [], 1, 0.0, []),
+    ("branch1_dormant_include_explicit", "include", [1, 2], 1, 0.0, []),
+    ("branch1_dormant_exclude", "exclude", [1], 1, 0.0, []),
+    ("branch2_include_empty_is_month_total", "include", [], 0, 185.0, [1, 2, 3]),
+    ("branch3_include_explicit", "include", [2, 3], 0, 75.0, [2, 3]),
+    ("branch4_exclude_one", "exclude", [1], 0, 85.0, [2, 3]),
+    ("branch4_exclude_empty_is_month_total", "exclude", [], 0, 185.0, [1, 2, 3]),
+]
+
+
+@pytest.mark.parametrize(
+    "name,scope_mode,ids,dormant,expected_spent,expected_details",
+    _M3_BRANCH_CASES,
+    ids=[c[0] for c in _M3_BRANCH_CASES],
+)
+def test_build_detail_branch_table(
+    name, scope_mode, ids, dormant, expected_spent, expected_details
+):
+    """任务 8.2：`_build_detail` 四分支表逐支钉死（表序即判定序）."""
+    assert name.startswith("branch")  # 表内每支按分支槽位命名 → 读表即见判定序
+    got = _m3_detail(scope_mode=scope_mode, category_ids=ids, dormant=dormant)
+    assert got["spent"] == expected_spent
+    assert [d["category_id"] for d in got["details"]] == expected_details
+    assert got["dormant"] is bool(dormant)
+    assert got["remaining"] == round(1000.0 - expected_spent, 2)
+    assert got["percentage"] == round(expected_spent / 1000.0 * 100, 1)
+
+
+def test_build_detail_dormant_precedes_every_branch():
+    """任务 2.3/8.2：**分支 1 抢占**——同一载荷 dormant=1 与 dormant=0 结果必须不同.
+
+    若把 dormant 判定挪到 include/exclude 之后，这些组合会退化成「全额 / Σ 所选」，
+    休眠预算便又参与统计（违 D4/D10）。休眠行仍照常带出 name/amount/category_ids，
+    供前端置灰卡片渲染（覆盖文案由前端按 dormant 出，后端不塞字符串）。
+    """
+    assert _m3_detail("include", [], dormant=1)["spent"] == 0.0
+    assert _m3_detail("include", [], dormant=0)["spent"] == 185.0
+    assert _m3_detail("exclude", [1], dormant=1)["spent"] == 0.0
+    assert _m3_detail("exclude", [1], dormant=0)["spent"] == 85.0
+    sleeping = _m3_detail("include", [1, 2], dormant=1)
+    assert sleeping["details"] == [] and sleeping["category_ids"] == [1, 2]
+    assert sleeping["remaining"] == 1000.0 and sleeping["percentage"] == 0
+    assert sleeping["dormant"] is True, "响应须带 dormant，供前端置灰（任务 2.4）"
+
+
+def test_build_detail_include_empty_equals_exclude_empty_bit_for_bit():
+    """任务 8.2 / D5：INCLUDE 空集 spent 与 exclude 空排除集**完全同值**（含未分类桶）.
+
+    D5 裁定「不另立第二口径」——两分支的 spent 与明细必须逐字段一致，仅 scope_mode
+    标签不同；未分类桶（键 0）计入 spent 但**无名可列**，故不出现在 details。
+    """
+    inc = _m3_detail("include", [], dormant=0)
+    exc = _m3_detail("exclude", [], dormant=0)
+    assert inc["spent"] == exc["spent"] == 185.0, "含未分类桶 10.0 → 全额（D5）"
+    assert sum(d["spent"] for d in inc["details"]) == 175.0, "明细合计不含未分类桶"
+    assert {d["category_id"] for d in inc["details"]} == {1, 2, 3}
+    assert {k: v for k, v in inc.items() if k != "scope_mode"} == {
+        k: v for k, v in exc.items() if k != "scope_mode"
+    }, "除标签外逐位同值（边界 7.2 的『非矛盾』）"
+
+
+def test_build_detail_dangling_category_same_on_both_empty_branches():
+    """任务 2.3 / D5：悬挂分类 id（不在 info 里，分类已被删）两支仍逐位同值.
+
+    两支共用「花费 > 0 且非未分类桶」的同一份过滤 + 同一个 `_detail_entry` 兜底，
+    故极端数据下也只可能长成同一个样（「未知分类」+ `mdi-cash`），不制造第二口径。
+    """
+    spent = {1: 60.0, 99: 40.0, 0: 5.0}  # 99 = 悬挂 id（分类不存在）
+    built = [
+        budget_service._build_detail(
+            budget_service._BudgetSnapshot(
+                id=7,
+                name="悬挂",
+                month=MONTH,
+                amount=100.0,
+                scope_mode=scope,
+                dormant=0,
+                created_at="2026-01-01 00:00:00",
+                updated_at="2026-01-01 00:00:00",
+            ),
+            ids,
+            _M3_INFO,
+            dict(spent),
+        )
+        for scope, ids in (("include", []), ("exclude", []))
+    ]
+    first, second = built
+    assert first["spent"] == second["spent"] == 105.0, "全额含悬挂桶与未分类桶"
+    assert [d["category_id"] for d in first["details"]] == [
+        d["category_id"] for d in second["details"]
+    ]
+    dangling = [d for d in first["details"] if d["category_id"] == 99][0]
+    assert dangling["category_name"] == UNKNOWN_CATEGORY_NAME
+    assert dangling["icon"] == "mdi-cash"
+
+
+@pytest.mark.asyncio
+async def test_dormant_budget_put_wakes_up(client, db_session):
+    """①任务 3.5 / 8.4 + 边界 7.6：任何成功 PUT 一律 dormant=0（D9），无独立唤醒接口.
+
+    三条唤醒路径逐一过：重选分类 / 一个都不选（= 动态全部）/ 改 scope_mode=exclude。
+    """
+    only = await make_category(client, "M12唤睡")
+    later = await make_category(client, "M12唤醒新")
+    await make_expense(client, 40.0, later)
+    bid = (
+        await post_budget(client, name="先睡后醒", amount=200.0, category_ids=[only])
+    ).json()["data"]["id"]
+
+    await client.delete(f"/api/categories/{only}")  # 级联 → 休眠
+    assert await db_dormant(db_session, bid) == 1
+    assert (await budget_row(client, bid))["spent"] == 0.0
+
+    # 路径①：重选分类唤醒 → spent 恢复按所选求和
+    resp = await client.put(
+        f"/api/budgets/{bid}",
+        json={"name": "醒着", "amount": 200.0, "scope_mode": "include", "category_ids": [later]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["dormant"] is False
+    assert resp.json()["data"]["spent"] == 40.0
+    assert await db_dormant(db_session, bid) == 0
+
+    # 路径②：再次休眠后**一个都不选**保存 → 唤醒即得动态全部（D3 + D9 的合力）
+    await force_dormant(db_session, bid)
+    assert (await budget_row(client, bid))["dormant"] is True
+    resp = await client.put(
+        f"/api/budgets/{bid}",
+        json={"name": "全开销", "amount": 200.0, "scope_mode": "include", "category_ids": []},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["dormant"] is False
+    assert resp.json()["data"]["spent"] == 40.0, "空集 = 当月全额（此处仅 later 的 40）"
+    assert await db_dormant(db_session, bid) == 0
+
+    # 路径③（边界 7.6）：休眠态 PUT 改 exclude → dormant 清 0，exclude 无休眠语义
+    await force_dormant(db_session, bid)
+    resp = await client.put(
+        f"/api/budgets/{bid}",
+        json={"name": "除己外", "amount": 200.0, "scope_mode": "exclude", "category_ids": [later]},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["data"]["dormant"] is False
+    assert resp.json()["data"]["scope_mode"] == "exclude"
+    assert resp.json()["data"]["spent"] == 0.0, "排除 later 后当月无剩余支出"
+    assert await db_dormant(db_session, bid) == 0
+
+    # 唤醒**只有**这一条路：路由表里不存在 dormant/wake 相关端点（任务 3.5 核验）
+    paths = [str(r.path) for r in fastapi_app.routes]
+    assert not [p for p in paths if "dormant" in p or "wake" in p], paths
+    assert (await client.post(f"/api/budgets/{bid}/wake")).status_code in (404, 405)
+
+
+@pytest.mark.asyncio
+async def test_dormant_excluded_from_summaries_but_still_listed(client, db_session):
+    """①任务 4.1/4.2/4.3 / 8.5：汇总剔除 dormant **且** 列表仍返回它（双向断言）."""
+    keep = await make_category(client, "M12计入月")
+    gone = await make_category(client, "M12将被删")
+    await make_expense(client, 100.0, keep)
+    await make_expense(client, 30.0, gone)
+    b_normal = (
+        await post_budget(client, name="正常", amount=1000.0, category_ids=[keep])
+    ).json()["data"]["id"]
+    b_dormant = (
+        await post_budget(client, name="将休眠", amount=500.0, category_ids=[gone])
+    ).json()["data"]["id"]
+
+    await client.delete(f"/api/categories/{gone}")  # → dormant=1（其 30 的账单随级联删除）
+    assert await db_dormant(db_session, b_dormant) == 1
+
+    # 方向 A：月列表接口（月视图卡片数据源）**不得**误过滤 dormant 行
+    listed = await list_budgets(client)
+    assert [x["id"] for x in listed] == [b_normal, b_dormant], "置灰展示需要它（任务 4.3）"
+    assert [x["dormant"] for x in listed] == [False, True]
+    assert listed[1]["amount"] == 500.0 and listed[1]["spent"] == 0.0
+
+    # 方向 B：月概览（get_budget_overview，原书误作 get_month_summary）不计 dormant
+    resp = await client.get("/api/statistics/budget-overview", params={"month": MONTH})
+    assert resp.status_code == 200, resp.text
+    data = resp.json()["data"]
+    assert data["total_budget"] == 1000.0, "500 的休眠预算不进 total（D10）"
+    assert data["total_spent"] == 100.0
+    assert [c["budget_id"] for c in data["categories"]] == [b_normal]
+
+    # 方向 B：年汇总同样剔除，但 budgets 数组保留 dormant 行
+    resp = await client.get("/api/budgets/year-summary", params={"year": 2026})
+    june = {m["month"]: m for m in resp.json()["data"]["months"]}["2026-06"]
+    assert june["total_amount"] == 1000.0
+    assert june["total_spent"] == 100.0
+    assert [b["id"] for b in june["budgets"]] == [b_normal, b_dormant]
+    assert [b["dormant"] for b in june["budgets"]] == [False, True]
+    assert june["total_amount"] == sum(
+        b["amount"] for b in june["budgets"] if not b["dormant"]
+    )
+    assert june["total_spent"] == sum(
+        b["spent"] for b in june["budgets"] if not b["dormant"]
+    )
+
+    # 边界 7.4：用户摆脱休眠态的另一出口——既有 DELETE 接口**零改动**可用
+    resp = await client.delete(f"/api/budgets/{b_dormant}")
+    assert resp.status_code == 200, resp.text
+    assert [x["id"] for x in await list_budgets(client)] == [b_normal]
+    assert await link_ids(db_session, b_dormant) == []

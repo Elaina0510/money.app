@@ -17,7 +17,6 @@ from sqlmodel import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.budget import (
-    SCOPE_EXCLUDE,
     SCOPE_INCLUDE,
     SCOPE_MODES,
     UNKNOWN_CATEGORY_NAME,
@@ -51,6 +50,7 @@ class _BudgetSnapshot:
     month: str
     amount: float
     scope_mode: str
+    dormant: int  # 1 = 关联分类被删光的休眠预算（v1.4.3-boot2 M3 / D4）
     created_at: str
     updated_at: str
 
@@ -62,6 +62,7 @@ class _BudgetSnapshot:
             month=budget.month,
             amount=budget.amount,
             scope_mode=budget.scope_mode,
+            dormant=budget.dormant,
             created_at=budget.created_at,
             updated_at=budget.updated_at,
         )
@@ -89,7 +90,12 @@ def _validate_budget_fields(
 
     ``name``/``amount``/``scope_mode``/``month`` 的**类型级**约束已在 pydantic
     （非法即 422），此处是设计明列的服务层权威校验：
-    去空、**include → 去重后 ≥1**（exclude 允许空列表 = 全部分类）、id 为正整数。
+    去空、id 为正整数。
+
+    v1.4.3-boot2 M3（任务 2.1 / 决策 D3）：原「include 且空集 → ValueError」
+    **已删除**——「一个都不选」现在是合法语义 = **动态全部分类**（dormant=0 时，
+    后续新增分类自动计入）；两种空集由 ``budgets.dormant`` 列区分（D3）。
+    exclude 的空排除集本就等于全部分类，口径不变。
 
     Raises:
         ValueError: 路由层据此回 Code.PARAM_ERROR。
@@ -107,8 +113,6 @@ def _validate_budget_fields(
     ids = list(dict.fromkeys(category_ids))  # 去重且保序
     if any(not isinstance(cid, int) or cid <= 0 for cid in ids):
         raise ValueError("分类 id 非法")
-    if scope_mode == SCOPE_INCLUDE and not ids:
-        raise ValueError("包含模式至少需要选择 1 个分类")
     return ids
 
 
@@ -262,11 +266,38 @@ def _build_detail(
     info: dict[int, tuple[str, str, int]],
     spent_by_cat: dict[int, float],
 ) -> dict[str, Any]:
-    """按 include/exclude 规则算出 spent / details（任务 3.2–3.6，纯计算无 IO）。"""
-    amt = round_money(snap.amount)
-    month_total = sum(spent_by_cat.values())  # 含未分类桶（键 0），exclude 全额口径用
+    """按 include/exclude 规则算出 spent / details（任务 3.2–3.6，纯计算无 IO）。
 
-    if snap.scope_mode == SCOPE_EXCLUDE:
+    v1.4.3-boot2 M3（任务 2.3）分支表——**分支顺序即口径，勿重排**：
+
+    1. ``dormant``：关联分类已被删光的休眠预算 → spent 恒 0、无明细（D4）；
+    2. ``INCLUDE`` 且**空集**（非休眠）：「一个都不选」= **动态全部分类**（D3），
+       spent 与 exclude 的空排除集**完全同口径**（D5，含未分类桶），
+       明细列「花费 > 0 且非未分类桶」的全部类目；
+    3. ``INCLUDE`` 显式所选：仅 Σ 所选分类（现状不变）；
+    4. ``exclude``：当月全部支出 − Σ 排除类（现状不变，空排除集即全额）。
+    """
+    amt = round_money(snap.amount)
+    month_total = sum(spent_by_cat.values())  # 含未分类桶（键 0），全额口径用
+
+    if snap.dormant:
+        # 分支 1：休眠预算保留记录但不再覆盖任何分类 → 花费恒 0、明细空
+        spent_raw, detail_pairs = 0.0, []
+    elif snap.scope_mode == SCOPE_INCLUDE and not category_ids:
+        # 分支 2：不选 = 动态全部分类（含 category_id NULL / 失效分类的极端数据，D5）
+        spent_raw = month_total
+        # 明细与 exclude 空排除集同款过滤（excluded = ∅）；未分类桶计入 spent 但无名可列
+        detail_pairs = [
+            (cid, val)
+            for cid, val in spent_by_cat.items()
+            if cid != _UNCATEGORIZED_KEY and val > 0
+        ]
+    elif snap.scope_mode == SCOPE_INCLUDE:
+        # 分支 3：显式所选 → 仅 Σ 所选分类；选中类逐一列出，0 花费显示 0（任务 3.3）
+        spent_raw = sum(spent_by_cat.get(cid, 0.0) for cid in category_ids)
+        detail_pairs = [(cid, spent_by_cat.get(cid, 0.0)) for cid in category_ids]
+    else:
+        # 分支 4：exclude
         excluded = set(category_ids)
         # 空排除集 = 全部分类 = 全额（任务 1.3 / 3.2）
         spent_raw = month_total - sum(spent_by_cat.get(cid, 0.0) for cid in excluded)
@@ -276,10 +307,6 @@ def _build_detail(
             for cid, val in spent_by_cat.items()
             if cid not in excluded and cid != _UNCATEGORIZED_KEY and val > 0
         ]
-    else:
-        spent_raw = sum(spent_by_cat.get(cid, 0.0) for cid in category_ids)
-        # include：选中类逐一列出，0 花费显示 0（任务 3.3）
-        detail_pairs = [(cid, spent_by_cat.get(cid, 0.0)) for cid in category_ids]
 
     spent = round_money(spent_raw)
     remaining = round_money(max(amt - spent, 0))
@@ -295,6 +322,8 @@ def _build_detail(
         "remaining": remaining,
         "percentage": percentage,
         "scope_mode": snap.scope_mode,
+        # 1 → 前端置灰「分类已删除，预算保留」；汇总侧已按 D10 剔除
+        "dormant": bool(snap.dormant),
         "category_ids": ordered_ids,
         "category_names": [
             info[cid][0] if cid in info else UNKNOWN_CATEGORY_NAME for cid in ordered_ids
@@ -365,6 +394,8 @@ async def get_year_summary(
 
     逐月 total_amount / total_spent = **Σ 各预算**（决策 D4）：范围重叠时
     Σ spent 可大于当月实际支出，属已裁定的预期口径（设计 §12.3）。
+    v1.4.3-boot2 M3（决策 D10）：求和**剔除 dormant 预算**，``budgets`` 数组仍
+    原样返回 dormant 行（月卡片置灰展示需要它）。
 
     Args:
         db: 异步数据库会话。
@@ -401,11 +432,14 @@ async def get_year_summary(
     for m in range(1, 13):
         month = f"{year}-{m:02d}"
         items = by_month.get(month, [])
+        # D10（任务 4.2）：休眠预算不进年汇总 total；但 budgets 明细**保留返回**，
+        # 供前端逐月卡片置灰展示（勿误过滤）
+        counted = [i for i in items if not i["dormant"]]
         months.append(
             {
                 "month": month,
-                "total_amount": round_money(sum(i["amount"] for i in items)),
-                "total_spent": round_money(sum(i["spent"] for i in items)),
+                "total_amount": round_money(sum(i["amount"] for i in counted)),
+                "total_spent": round_money(sum(i["spent"] for i in counted)),
                 "budgets": items,
             }
         )
@@ -436,8 +470,12 @@ async def create_budget(
 ) -> dict[str, Any]:
     """纯创建一条命名预算（任务 2.2：同月同名多条允许，不再是 upsert）。
 
+    口径（v1.4.3-boot2 M3 / 决策 D3）：``scope_mode='include'`` 且 ``category_ids``
+    为空 = **动态全部分类**（后续新增分类自动计入），不报错、正常落库；
+    新建预算恒 ``dormant=0``（D9：休眠只由分类删除级联置 1）。
+
     Raises:
-        ValueError: 服务层校验不通过（含 include 空分类集）→ 路由层 PARAM_ERROR。
+        ValueError: 服务层校验不通过（名称/金额/月份/分类 id）→ 路由层 PARAM_ERROR。
     """
     user_id = current_user.id if current_user else None
     name = (data.name or "").strip()
@@ -453,6 +491,7 @@ async def create_budget(
         month=data.month,
         amount=round_money(data.amount),
         scope_mode=data.scope_mode,
+        dormant=0,  # 新建永不休眠（D9）
         created_at=now,
         updated_at=now,
     )
@@ -487,6 +526,11 @@ async def update_budget(
 ) -> dict[str, Any] | None:
     """全字段编辑（任务 2.3）：``month`` 不在载荷契约内、传入即忽略。
 
+    唤醒（v1.4.3-boot2 M3 任务 3.5 / 决策 D9）：**任何一次成功保存一律落
+    ``dormant=0``**——用户编辑休眠预算重新保存（重选分类，或一个都不选=动态全部）
+    即恢复计入统计；无独立唤醒接口。休眠置 1 只由分类删除级联完成。
+    同一 D3 口径：include 空集合法 = 动态全部分类；改 scope_mode=exclude 同样清休眠。
+
     Returns:
         更新后的 BudgetDetail；预算不存在时返回 None。
     Raises:
@@ -508,6 +552,7 @@ async def update_budget(
     budget.name = name
     budget.amount = round_money(data.amount)
     budget.scope_mode = data.scope_mode
+    budget.dormant = 0  # D9：成功保存即唤醒（含 include 空集 → 动态全部）
     budget.updated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     db.add(budget)
     await _replace_budget_categories(db, int(budget_id), ids)
@@ -545,12 +590,20 @@ async def get_budget_overview(
     v1.4.3 M12 适配：预算不再「每分类一条」，故 ``categories`` 明细改为
     **按 (预算 × 计入分类)** 逐条归属——旧数据（每分类一条 include 预算）下
     输出与 v1.4.2 完全一致；``total_*`` 恒按预算本体求和（与 D4 同一口径）。
+
+    v1.4.3-boot2 M3（决策 D10，任务 4.1）：概览口径**剔除 dormant 预算**——
+    快照构建阶段即跳过，故 total 与 categories 明细都不含休眠行。
+    月度预算列表（``get_budgets``）**不**过滤 dormant，前端置灰需要它。
     """
     user_id = current_user.id if current_user else None
     stmt = _apply_budget_owner_filter(
         select(Budget).where(Budget.month == month).order_by(cast("Any", Budget.id)), user_id
     )
-    snapshots = [_BudgetSnapshot.from_budget(b) for b in (await db.exec(stmt)).all()]
+    snapshots = [
+        _BudgetSnapshot.from_budget(b)
+        for b in (await db.exec(stmt)).all()
+        if not b.dormant  # D10：休眠预算不进月概览
+    ]
     details = await _details_for(db, snapshots, {}, user_id)
 
     total_budget = 0.0
