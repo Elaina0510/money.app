@@ -725,3 +725,52 @@ async def test_same_name_custom_rows_are_per_user(auth_client_a, auth_client_b):
     # 但同一用户内仍只能有一份
     dup = await auth_client_a.post("/api/categories", json={"name": "宠物"})
     assert dup.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_restore_defaults_reassigns_custom_records_to_other(client, db_session):
+    """回归（现场「恢复默认」报 500 根因）：恢复默认删除自定义分类时，其下账单必须
+    改挂「其他」预设，**不能置 NULL**——`records.category_id` 自 v1.4.3 起 NOT NULL，
+    旧实现置 NULL 触发 IntegrityError → 500。
+
+    既有 restore 用例刻意把支出记在预设分类上（避开本路径），故从未暴露此缺陷。
+    conftest 无「其他」预设，按本文件惯例在测试内补建全局「其他」。
+    """
+    from app.models.category import Category
+
+    db_session.add(
+        Category(
+            name="其他",
+            type="expense",
+            icon="mdi-cash-minus",
+            sort_order=999,
+            is_preset=1,
+            user_id=None,
+        )
+    )
+    await db_session.commit()
+
+    # 建一个自定义分类 + 其下一条账单
+    cat = await client.post("/api/categories", json={"name": "会被恢复删除", "icon": "mdi-x"})
+    assert cat.status_code == 200
+    cat_id = cat.json()["data"]["id"]
+    rec = await client.post(
+        "/api/records",
+        json={"amount": 66.0, "type": "expense", "category_id": cat_id, "consume_time": "2026-02-02 10:00"},
+    )
+    assert rec.status_code == 200
+    rec_id = rec.json()["data"]["id"]
+
+    resp = await client.post("/api/categories/restore-defaults")
+    assert resp.status_code == 200, f"恢复默认不应 500：{resp.status_code} {resp.text[:200]}"
+
+    cats = await _visible(client)
+    ids = [c["id"] for c in cats]
+    assert cat_id not in ids, "自定义分类应被恢复默认移除"
+    other_id = next(c["id"] for c in cats if c["name"] == "其他")
+
+    data = (await client.get("/api/records", params={"month": "2026-02"})).json()["data"]
+    items = data.get("items") if isinstance(data, dict) else data
+    moved = next((r for r in items if r["id"] == rec_id), None)
+    assert moved is not None, "账单必须保留（不得被恢复默认删除）"
+    assert moved["category_id"] == other_id, "自定义分类的账单应改挂「其他」而非置 NULL"

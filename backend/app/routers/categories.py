@@ -137,5 +137,5 @@ async def restore_defaults(
     return success_response(
         data=result,
         message=f"已恢复默认分类，删除 {result['deleted_categories']} 个自定义分类，"
-                f"{result['affected_records']} 条记录已解除分类关联",
+                f"{result['affected_records']} 条记录已归入「其他」",
     )

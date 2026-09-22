@@ -410,7 +410,8 @@ async def restore_default_categories(
     """Restore default categories: delete custom ones, reset preset sort_order.
 
     - Delete all is_preset=0 custom categories for the user
-    - Associated records保留, category_id set to NULL
+    - Associated records 改挂「其他」预设保留（``records.category_id`` 自 v1.4.3 起
+      NOT NULL，**不能置 NULL**——旧实现置 NULL 触发 IntegrityError → 500）；
     - Associated budgets 走 §3.2.3 同一休眠级联（任务 3.3/4.4）：include 预算失去最后
       一个关联分类 → 置 ``dormant=1`` 休眠保留（不再删除，决策 D4）；
       exclude 预算仅移出排除集
@@ -421,6 +422,18 @@ async def restore_default_categories(
     from app.main import PRESET_CATEGORIES
 
     user_id = current_user.id if current_user else None
+
+    # 回退分类「其他」预设（全局，user_id IS NULL）：删除自定义分类时其下账单改挂到它。
+    # v1.4.3 起 records.category_id NOT NULL，置 NULL 会 IntegrityError → 500。
+    other_row = (
+        await db.exec(
+            select(Category).where(
+                Category.name == OTHER_CATEGORY_NAME,
+                cast("Any", Category.user_id).is_(None),
+            )
+        )
+    ).first()
+    fallback_id: int | None = other_row.id if other_row is not None else None
 
     # Step 1: Delete custom categories (is_preset=0)
     custom_query = select(Category).where(
@@ -445,11 +458,14 @@ async def restore_default_categories(
         record_count = count_result.one() or 0
         affected_records += record_count
 
-        # Set associated records' category_id to NULL (preserve records)
+        # 关联账单改挂「其他」预设（NOT NULL 约束下不可置 NULL）
         record_stmt = select(Record).where(Record.category_id == cat_id)
         record_result = await db.exec(record_stmt)
         for record in record_result.all():
-            record.category_id = None
+            if fallback_id is not None:
+                record.category_id = fallback_id
+            else:
+                await db.delete(record)  # 极端兜底：无「其他」预设时按删除处理，绝不留违规
 
         # Budget dormancy cascade（与 delete_category 同一函数，任务 3.3/4.4）
         dormant_budgets += await _dormant_budgets_for_deleted_category(db, cat_id)
