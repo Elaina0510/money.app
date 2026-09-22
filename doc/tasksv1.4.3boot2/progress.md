@@ -74,7 +74,33 @@ M1 → M2 → M3
 - [ ] 2. 停服 → 执行 `migrate_to_v1.4.3boot2_dormant.py`（**必须先于新代码启动**，D11）→ 执行 `migrate_to_v1.4.3boot2_categories.py`（两者顺序可换、可单独重跑）
 - [ ] 3. 部署新前后端（`frontend/dist` 终验统一重建，D12）
 - [ ] 4. 冒烟：分类拖一次排序、看「其他」单行末位；建一条不选分类的预算
-- [ ] 5. 登记遗留：`migrate_to_v1.4.3.py` 仍未执行（UNIQUE 换形/重排阶段与本期脚本互不冲突，§2.2.3），继续留原发布备忘跟踪
+- [ ] 5. 登记遗留：`migrate_to_v1.4.3.py` **是新版后端上线的硬前置**（budgets 需 `scope_mode` 列，否则预算接口 500）——且它在现场库上会因**既有 FK 孤儿**回滚，须先做下方清理。UNIQUE 换形/重排阶段与本期两脚本互不冲突（§2.2.3）
+
+### 发布窗口完整操作序（2026-09-22 在 money.db 副本上端到端预演通过，全程只读原库）
+
+> 预演结论：清理 70 条既有 FK 孤儿（66 `tags.category_id`→已删分类 {33,35,36,37,38} + 4 `records.tag_id`→已删标签 {5,7,11}，均属 user_id=3）→ `foreign_key_check` 70→0 → `migrate_to_v1.4.3.py` 由回滚转为成功 → boot2 两脚本 → 新后端连升级库冒烟：预算接口 **200**（迁移前 500）、动态全部预算算出现场六月支出 ¥1600.03、删分类→预算休眠保留。清理仅置空失效链接（列声明 `ON DELETE SET NULL`），不删账单/标签/分类行、金额零影响。
+
+```bash
+# 0) 备份（唯一回退保障）
+cp money.db money.db.bak-$(date +%Y%m%d)
+
+# 1) 清理既有 FK 孤儿（v1.4.3 迁移前置）
+sqlite3 money.db <<'SQL'
+UPDATE tags    SET category_id=NULL WHERE category_id IS NOT NULL AND category_id NOT IN (SELECT id FROM categories);
+UPDATE records SET tag_id=NULL      WHERE tag_id        IS NOT NULL AND tag_id        NOT IN (SELECT id FROM tags);
+SQL
+sqlite3 money.db "PRAGMA foreign_key_check;"          # 期望无输出
+
+# 2) 升 v1.4.3 schema（清理后不再回滚）
+python migrate_to_v1.4.3.py money.db
+
+# 3) boot2 两脚本（D11：dormant 必须先于新版后端启动；两者顺序可换、可单独重跑）
+python migrate_to_v1.4.3boot2_dormant.py money.db
+python migrate_to_v1.4.3boot2_categories.py money.db
+sqlite3 money.db "PRAGMA integrity_check; PRAGMA foreign_key_check;"   # ok / 无输出
+
+# 4) 部署新前后端（dist 已终验重建）→ 冒烟：拖一次排序看「其他」末位；建一条不选分类的预算
+```
 
 ## 终验清单（质量门，设计附录 A）
 

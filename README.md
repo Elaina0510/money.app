@@ -102,12 +102,19 @@ docker run -d --name money-app -p 8000:8000 \
 | `DATABASE_URL` | SQLite 路径，容器内用 `/data/db/money.db`                                         |
 | `UPLOAD_DIR`   | 附件存储目录，容器内用 `/data/uploads`                                            |
 
-存量库升级：
+存量库升级（**先备份 `money.db` 再逐条执行**，脚本均幂等可重跑）：
 
 ```bash
 cd backend
 python migrate_to_v1.4.py       # v1.4 引入附件 user_id 等字段
-python migrate_to_v1.4.2.py     # v1.4.2 引入 quick_templates.kind 列（幂等，可重跑）
+python migrate_to_v1.4.2.py     # v1.4.2 引入 quick_templates.kind 列
+python migrate_to_v1.4.3.py     # v1.4.3 分类收支共用重构 + 预算命名/范围模型
+# ↑ 若现场库存在既有外键孤儿（tags.category_id / records.tag_id 指向已删行），
+#   v1.4.3 迁移的收尾 foreign_key_check 会主动回滚；先执行下方清理再重跑：
+#   UPDATE tags SET category_id=NULL WHERE category_id IS NOT NULL AND category_id NOT IN (SELECT id FROM categories);
+#   UPDATE records SET tag_id=NULL WHERE tag_id IS NOT NULL AND tag_id NOT IN (SELECT id FROM tags);
+python migrate_to_v1.4.3boot2_dormant.py    # v1.4.3-boot2 budgets.dormant 列 —— 必须先于新版后端启动
+python migrate_to_v1.4.3boot2_categories.py # v1.4.3-boot2「其他支出/收入」归并为单一「其他」（与上者顺序可换）
 ```
 
 ## Project Structure
