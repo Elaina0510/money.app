@@ -484,3 +484,67 @@ class TestSqlEdgeCases:
         files = {"file": ("test.sql", b"", "application/sql")}
         resp = await auth_client.post("/api/import/sql/preview", files=files)
         assert resp.json()["code"] != 0
+
+
+# ── v1.4.3-boot2 M3 回归：dormant 随 budgets 导出/导入往返 ───────────
+
+
+class TestSqlBudgetDormantRoundTrip:
+    """休眠标志必须进 SQL 备份并在还原后保真（补齐 export/import 的 dormant 列）。"""
+
+    async def test_dormant_survives_export_then_import(self, db_session, auth_user):
+        from sqlalchemy import select
+
+        from app.models.budget import Budget
+        from app.services.export_service import export_sql
+        from app.services.import_service import _create_budget_from_values, _extract_values
+
+        b = Budget(
+            user_id=auth_user.id,
+            name="休眠预算",
+            month="2024-05",
+            amount=123.0,
+            scope_mode="include",
+            dormant=1,
+            created_at="2024-05-01 00:00:00",
+            updated_at="2024-05-01 00:00:00",
+        )
+        db_session.add(b)
+        await db_session.commit()
+
+        sql_bytes, _ = await export_sql(db_session, auth_user.id)
+        text = sql_bytes.decode("utf-8")
+        budget_lines = [ln for ln in text.splitlines() if ln.startswith("INSERT INTO budgets")]
+        assert budget_lines, "导出的 SQL 应含 budgets INSERT"
+        assert "dormant" in budget_lines[0], "budgets INSERT 列清单应含 dormant"
+
+        values = _extract_values(budget_lines[0])
+        assert values.get("dormant") == "1"
+        new_id = await _create_budget_from_values(db_session, auth_user.id, values)
+        await db_session.commit()
+        assert new_id is not None
+        dormant_val = (
+            await db_session.exec(select(Budget.dormant).where(Budget.id == new_id))
+        ).one()[0]
+        assert dormant_val == 1, "往返后休眠标志必须仍为 1"
+
+    async def test_old_backup_without_dormant_column_defaults_to_zero(self, db_session, auth_user):
+        """旧备份缺 dormant 列 → 落 0（动态全部/未知分类态），不得报错、不得误置休眠。"""
+        from sqlalchemy import select
+
+        from app.models.budget import Budget
+        from app.services.import_service import _create_budget_from_values, _extract_values
+
+        stmt = (
+            "INSERT INTO budgets (id, user_id, name, month, amount, scope_mode, "
+            "created_at, updated_at) VALUES (9, 1, '旧备份', '2024-06', 50.0, 'include', "
+            "'2024-06-01 00:00:00', '2024-06-01 00:00:00');"
+        )
+        values = _extract_values(stmt)
+        assert "dormant" not in values
+        new_id = await _create_budget_from_values(db_session, auth_user.id, values)
+        await db_session.commit()
+        dormant_val = (
+            await db_session.exec(select(Budget.dormant).where(Budget.id == new_id))
+        ).one()[0]
+        assert dormant_val == 0

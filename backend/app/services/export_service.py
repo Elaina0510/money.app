@@ -186,6 +186,7 @@ async def export_sql(
         lines.append("    month TEXT NOT NULL,")
         lines.append("    amount REAL NOT NULL,")
         lines.append("    scope_mode TEXT NOT NULL,")
+        lines.append("    dormant INTEGER NOT NULL DEFAULT 0,")
         lines.append("    created_at TEXT,")
         lines.append("    updated_at TEXT")
         lines.append(");")
@@ -195,9 +196,10 @@ async def export_sql(
             updated = f"'{b.updated_at}'" if b.updated_at else "NULL"
             lines.append(
                 "INSERT INTO budgets (id, user_id, name, month, amount, scope_mode, "
-                "created_at, updated_at) "
+                "dormant, created_at, updated_at) "
                 f"VALUES ({b.id}, {b.user_id}, '{_sql_escape(b.name)}', '{b.month}', "
-                f"{round_money(b.amount)}, '{b.scope_mode}', {created}, {updated});"
+                f"{round_money(b.amount)}, '{b.scope_mode}', {int(b.dormant)}, "
+                f"{created}, {updated});"
             )
         lines.append("")
 

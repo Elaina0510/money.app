@@ -888,6 +888,8 @@ async def _create_budget_from_values(
 
     scope_raw = _unquote(values.get("scope_mode", SCOPE_INCLUDE)) or SCOPE_INCLUDE
     scope_mode = scope_raw if scope_raw in SCOPE_MODES else SCOPE_INCLUDE
+    # v1.4.3-boot2 M3：休眠标志随 budgets 导出列往返；旧备份无该列 → 0（动态全部/未知分类态）
+    dormant = 1 if _parse_int(values.get("dormant")) == 1 else 0
     name = _unquote(values.get("name", "")).strip()
 
     legacy_category_id: int | None = None
@@ -908,6 +910,7 @@ async def _create_budget_from_values(
         month=month,
         amount=round_money(amount),
         scope_mode=scope_mode,
+        dormant=dormant,
         created_at=now,
         updated_at=now,
     )
