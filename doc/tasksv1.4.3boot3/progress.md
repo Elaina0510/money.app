@@ -14,7 +14,7 @@
 | M2 | 后端清洗层：金额/日期/收支三态纯函数 | C | `m2-csv-value-normalization.md` | **done** | `7c3c87f` |
 | **M6** | 后端 **Excel(.xlsx) 容器层**：magic 判定 + stdlib 读表 → 行矩阵（日期序列号在容器层换算为文本） | **E** | `m6-xlsx-container.md` | pending | — |
 | M3 | 后端落库层：统一列角色解析 + 契约扩展 | A、C、D | `m3-backend-import-writer.md` | pending | — |
-| M4 | 前端列映射向导（+ `accept` 扩 `.xlsx` 与 Excel 标识） | A、**E** | `m4-frontend-column-mapping.md` | pending | — |
+| M4 | 前端列映射向导（+ `accept` 扩 `.xlsx` 与 Excel 标识） | A、**E** | `m4-frontend-column-mapping.md` | **done** | `158726c`（归属注记见执行记录） |
 | M5 | 端到端真实样例回归 + 文档收口 | 全部总验 | `m5-e2e-and-docs.md` | pending | — |
 
 ## 开发顺序（设计附录 A）
@@ -113,9 +113,9 @@
 
 | 项 | 数值 |
 |----|------|
-| 模块 done | 1 / 6（M2） |
-| checklist 勾选 | 22（M2）+ 在途模块待计 |
-| 待人工抽检 | 0 新增（M2 无人工项） |
+| 模块 done | 2 / 6（M2、M4） |
+| checklist 勾选 | 63（M2 22 + M4 41）+ 在途模块待计 |
+| 待人工抽检 | M4 抄录 5 条（观感截图 / 浏览器整链 / 微信 .xlsx 对照 / 支付宝账单 / .xls 中文透出），与上方既有条目部分同源 |
 | 阻塞 | 0 |
 
 ## 模块执行记录
@@ -132,7 +132,13 @@
 - 待人工抽检：M2 无新增人工项（其手工口径已被 §4.1–4.8 自动化覆盖）
 ### M6（pending）
 ### M3（pending）
-### M4（pending）
+### M4（done，内容全量落在 `158726c`，主 Agent 2026-09-24 核验通过）
+- **提交归属注记（并行事故，内容无损）**：M4 子 Agent 按 pathspec `git add` 后其 3 次 `git commit` 均被权限层拦下（未产生独立 feat 提交）；主 Agent 提交 progress.md 时 git 默认提交整个索引，把 M4 四文件（`CsvMappingDialog.vue`/`SettingsImportExportPage.vue`/`SettingsSubPages.test.js`/其任务文件）**一并带入 `158726c`**（标题仍为 M2 落盘）。核验 `git show --name-only 158726c` = 该四文件 + progress.md，**不含 M1 在途文件**；工作树与 HEAD 对这 4 文件零差异；不 rewrite 历史（禁 amend/reset），特此登记。此后主 Agent 提交 progress.md 一律 `git commit -- <path>` 只提指定路径。
+- 任务文件 41/42 勾选（唯一未勾 = §7.3 明暗×竖/宽屏观感，人工终判类，正确留人工）
+- 主 Agent 复跑：**vitest 408/408**（基线 397 + 新增 11）、eslint 0 errors/2 warnings（基线同值）；`git diff 7ae57da..HEAD` 无 `package.json`/lock/requirements 命中（**零新增依赖**）；`CsvMappingDialog.vue` 零命中 `v-stepper` 且零新增 Vuetify import；`accept=".csv,.xlsx"` 在 `SettingsImportExportPage.vue:72`、SQL 侧 `accept=".sql,.db"`:79 未动
+- **P3 契约核对结论（子 Agent notes，主 Agent 认可）**：§1.2.5 八字段与 §3.2 三字段**逐位一致、零差异**；`container` 双态已测（xlsx 显示「Excel 工作表」/ 缺席不渲染，§6.4.9）；`encoding=="xlsx"` 哨兵不当编码展示；SQL 复用路径三字段整体不写入 + 键集断言锁定（请求体一字不变）；同角色两列取靠前列（与 D3 同序）；存在 category 角色时不发 `fallback_category`
+- 子 Agent 登记项（主 Agent 复核）：① `v-radio-group`/`v-radio` 为任务 §3.1 明定组件且弹窗 Vuetify 标签集合已被 §6.4.8 `?raw` 钉成封闭集——不判「新增组件」违规；② M5-3 成功 toast 期望改「成功导入 3 条」系任务 §5.2/设计 §4.2.3 明定文案、同测试净增 9 断言未删未放宽——合法口径修正，记入附录 B 台账（M3 落地后若后端 message 文案与此不符按 P3 以后端为准派修正轮）；③ §5.5 格式说明文案「附近无该文案 → 不新增不扩写」——符合 U3 精神；④ 分类候选异步晚到时序缺陷 = 设计 §4.3 已登记遗留，未扩围，沿设计跟踪
+- 待人工抽检（抄录进下方清单区）：7.3 观感截图 / 真实浏览器文件选择整链 / 真实微信 .xlsx 对照 / 真实支付宝账单 / .xls 失败中文透出确认
 ### M5（pending）
 
 ## 终验记录（待主 Agent 执行）
@@ -148,6 +154,11 @@
 - [ ] **用户自助路径**：在 Excel 里把该 `.xlsx` 另存为 CSV 再导一次，登记实际日期形态（文本/序列号）与编码，确认 D14/D15 不误收脏日期
 - [ ] 真实浏览器：文件选择（含 `.xlsx`）→ 向导三区块 → 记录出现在账单页与月统计
 - [ ] 明暗 × 竖屏/宽屏观感截图（列角色表 + 样例行表格）
+- [ ] **M4/7.3**：明暗主题 × 竖屏(<960px)/宽屏(≥960px) 观感自测一次并截图，主观观感留人工终判（样例行表格已挂 overflow-x 横向滚动，窄弹窗实测待人工）
+- [ ] **M4**：真实浏览器文件选择（含 `.xlsx`）→ 向导三区块交互 → 记录出现在账单页与月统计（jsdom 不覆盖整链，由主 Agent P4 亲执）
+- [ ] **M4**：真实微信 `.xlsx` 本机对照导入——预览判「微信账单」+ `container=xlsx` 出「Excel 工作表」+ 必选「账单归入」+ 中性交易（`/`）不入库（主 Agent P4 亲执，素材 `example/` 只读）
+- [ ] **M4**：真实支付宝账单导入一次（含尾随空列「第 N 列（空列名）」与 GBK 系编码，合成夹具不可替代，不得声称已验证）
+- [ ] **M4**：`.xls` / 超限 / 非法 Excel 的中文 message 原样透出确认（前端未新拼错误文案、未据扩展名预判）
 - [ ] 在 Cashew App 内用官方模板实际导出一次（官方仓库模板文件已 404，模板可选列未能一手核对）；**主 Agent P4 终验时另可用本机 `example/cashew-import-template1790219274617.csv` 做一次真实文件对照导入**（只读素材，结论须标注「本机对照」，不进 CI、不作夹具）
 
 ## 开工登记（2026-09-24 主 Agent 实测）
