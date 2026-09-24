@@ -10,7 +10,7 @@
 
 | 模块 | 名称 | 需求 | 任务文件 | 状态 | 提交 |
 |------|------|------|----------|------|------|
-| M1 | 后端识别层：解码 + 表头定位（**交付行矩阵契约**）+ 方言与列角色 | A、B、D | `m1-backend-detect-layer.md` | pending | — |
+| M1 | 后端识别层：解码 + 表头定位（**交付行矩阵契约**）+ 方言与列角色 | A、B、D | `m1-backend-detect-layer.md` | **done** | `449ff6e` |
 | M2 | 后端清洗层：金额/日期/收支三态纯函数 | C | `m2-csv-value-normalization.md` | **done** | `7c3c87f` |
 | **M6** | 后端 **Excel(.xlsx) 容器层**：magic 判定 + stdlib 读表 → 行矩阵（日期序列号在容器层换算为文本） | **E** | `m6-xlsx-container.md` | pending | — |
 | M3 | 后端落库层：统一列角色解析 + 契约扩展 | A、C、D | `m3-backend-import-writer.md` | pending | — |
@@ -113,14 +113,22 @@
 
 | 项 | 数值 |
 |----|------|
-| 模块 done | 2 / 6（M2、M4） |
-| checklist 勾选 | 63（M2 22 + M4 41）+ 在途模块待计 |
+| 模块 done | 3 / 6（M1、M2、M4） |
+| checklist 勾选 | 113（M1 50 + M2 22 + M4 41）+ 在途模块待计；M1 未勾 9.1/9.2 待 M3 反转后由主 Agent 复核补勾 |
 | 待人工抽检 | M4 抄录 5 条（观感截图 / 浏览器整链 / 微信 .xlsx 对照 / 支付宝账单 / .xls 中文透出），与上方既有条目部分同源 |
 | 阻塞 | 0 |
 
 ## 模块执行记录
 
-### M1（pending）
+### M1（done，`449ff6e`，主 Agent 2026-09-24 核验通过）
+- 提交 pathspec 精确（4 文件：`csv_dialects.py` 新建 + `test_csv_dialects.py` 新建 + `import_service.py` 识别区 143+/54- + 任务文件）；`money.db` SHA256 逐字未变；SQL/落库区零改动（`git diff` 该区零命中）
+- 主 Agent 复跑：全量 pytest **545 passed / 1 failed / 0 skipped**（唯一红灯 = `test_preview_unknown_format`，E3 归属 = M1 §7.6 合法扩展 unknown→custom，反转授权归 M3 §5.1，**非缺陷**）；`test_csv_dialects.py` 89 passed；mypy 工作区 **88 errors/14 files**（≤ 开工基线 89 且 -1，零新增；`csv_dialects.py` 自身 strict 零报错）；ruff **All checks passed**（M2 期间登记的 3 项 UP012 已由 M1 清零）
+- 行矩阵契约**四函数唯一定义在 `csv_dialects.py`**（D25 grep 实证：`normalize_header`/`locate_header_rows`/`match_dialect`/`resolve_columns` 单命中）；`preview_csv` 入口已走 `csv_rows`；**CSV 通道残留裸 `csv.reader` = `import_csv_data` 内 :270（M1 仅按 §3.4 适配解包；行矩阵化归 M6 分派器 + M3 落库改造，终验闭环点 9-① 按此追踪）**；:473/:1450 属 SQL 区禁触不计
+- **§9.1/§9.2 未勾 = 唯一红灯未清属预期**（子 Agent 不越界改 M3 测试），原因已在任务文件内引用块登记，符合简报「既有测试不得反向放宽」纪律；主 Agent 认可，M3 §5.1 反转后自动转绿
+- **交 M6 的行矩阵契约**（M6 §2.5 据此对接，**禁止另写表头逻辑**）：`csv_rows(text)->list[list[str]]`（csv.Error→中文 ValueError）、`detect_and_decode(bytes)->(text,encoding)`（utf-8-sig→utf-8→chardet→gb18030-replace + `lstrip("\ufeff")`）、`locate_header_rows(rows, max_scan=50)->(header_idx, normalized_headers, data_rows)`（入参行矩阵，不等长/空行/空串均可直喂；空/无合格行→`ValueError("CSV 文件为空")`，xlsx 侧对应文案 `Excel 文件为空`）
+- 主 Agent 复核认可的子模块内偏离（记档不判违规）：(b) 删 `CASHEW_COLUMN_MAP`/`CASHEW_IGNORED_COLUMNS` 两死常量（按任务 1.4/D16/M3 §3.5 优先于简报，全仓零引用实证；`_parse_native_row`/`_parse_cashew_row`/`convert_cashew_*` **一字未删**，D16 落库半区仍归 M3）；(c) warnings 第 4 类「多列同角色冲突」追加在 §6.4 三类之后（不违背三类逐字，主 Agent 认可保留）；(d) `resolve_columns` 可选 `data_rows` 参 + `ColumnHint.conflict` 不进响应契约（columns 项仍恰好 4 键）；(e) `match_dialect` 可选 `order` 参供 §8.4 D5 陷阱取证；(f) normalize 步骤 4 收紧为只剥括号单位白名单以保幂等；(g) encoding 标签不谎报（无 BOM 报 utf-8）
+- **契约实现核对（对 M4 P3）**：§1.2.5 **7 字段**（headers/header_row_index/columns/suggested_type_source/encoding/sample_rows/warnings）逐字落地、既有 5 字段保留；**`container` 字段 M1 未预留**（显式 `"container" not in result`，属 M6）；`无法识别的 CSV 格式` 消失、`CSV 文件为空` 保留
+- **⚠ 勘误（M5 须改，不判 M1 偏离）**：M1 notes(i) 发现设计 §0.4-10 **未逐字登记 Cashew 全量 17 列表头原文**（D21 声称已登记，实为 §0.4-13 只登记 xlsx 11 列结构）→ M1 改用「6 角色列 + 4 丢弃列 = 10 列」合成夹具。M5 §2 建真实 17 列 e2e 时**若无法从设计一手取得 17 列原文，沿用 M1 的 10 列合成并注明「17 列原文未一手登记」**，不得凭记忆编列名（D6 精神）、不得引用 `example/` 真实文件抄值
 ### M2（done，`7c3c87f`，主 Agent 2026-09-24 核验通过）
 - 提交 pathspec 精确（3 文件，`import_service.py` 零命中 = 「未接线」自证成立）；任务文件 22/22 勾选
 - 主 Agent 复跑：`test_csv_values.py` **159 passed**；mypy 工作区 88 errors/14 files（≤ 基线 89，零新增；其中 M1 在途贡献待 M1 复测）；ruff 工作区 3 项 UP012 **全部位于 M1 在途 `test_csv_dialects.py`**（E3 归属 M1，M1 提交前须清零）
