@@ -103,9 +103,11 @@
 
 ## 9. 验收门槛
 
-- [ ] 9.1 新测试文件全绿 + `test_csv_import_export.py` 既有用例**零改动零删除**全绿（本模块不得碰该文件；`test_preview_unknown_format` 的反转属 **M3 §5.1**，若因本模块提前变红，**必须回退本模块改动而非改测试**）
+- [x] 9.1 新测试文件全绿 + `test_csv_import_export.py` 既有用例**零改动零删除**全绿（本模块不得碰该文件；`test_preview_unknown_format` 的反转属 **M3 §5.1**，若因本模块提前变红，**必须回退本模块改动而非改测试**）
+  > **主 Agent 补勾（2026-09-24，M3 `a46b0f2` 后）**：M3 §5.1 已按唯一授权落点反转该用例，全量 pytest **603 passed / 0 failed / 0 skipped**；M1 期间「零改动零删除全绿」的唯一红灯归属闭合，M1 未越界改他人测试的处置正确。
   > **M1 红灯归属登记（未勾原因）**：`test_csv_dialects.py` 87 passed 全绿；`test_csv_import_export.py` 17 passed / **1 failed**，唯一红灯 = `TestCsvImportPreview::test_preview_unknown_format`（`col1,col2,col3` 断言 `code != 0`）。该用例的失败**不是缺陷**，而是需求 A 的落地证据：本模块 §7.6 与设计 §1.3 明确要求该输入「退化取表头 → `format == custom` → 全列 `role=None`」并照常返回预览，M1 验收标准亦为「任意 CSV 都能进预览」。断言反转**唯一授权落点是 M3 §5.1**（设计附录 B、红线 4 的唯一例外），且 M3 §5.1 的新断言（`code == 0` + `format == custom` + `headers == ["col1","col2","col3"]`）需要 M1 这套服务侧行为已就位——**M1 无法同时满足本条与本模块 §7.6/§8.4/验收标准**，故选择保留设计口径、不静默勾选、不越界改他人测试文件。
-- [ ] 9.2 `pytest` 全量绿；`mypy backend/app --strict` 基线零新增（新增两文件自身应零报错）；`ruff check` clean
+- [x] 9.2 `pytest` 全量绿；`mypy backend/app --strict` 基线零新增（新增两文件自身应零报错）；`ruff check` clean
+  > **主 Agent 补勾（同上）**：M3 合入后全量 603 绿、mypy 85（≤ 基线 89）、ruff clean。
   > **M1 门槛实测**：`mypy app` = **88 errors / 14 files**（开工登记基线 89 → 零新增且 -1，因 chardet 标签已收型；`csv_dialects.py` 自身 strict **零报错**）；`ruff check app tests` = **All checks passed**；`pytest tests/` = **545 passed / 1 failed**（唯一红灯归属同上条），0 skipped。
 - [x] 9.3 `notes` 登记：`preview_csv` 的 `db` 形参未使用、GB18030 replace 生僻字不抛、逐行 flush 性能不在本模块处理；**并显式写明「`locate_header_rows` 已改为行矩阵入参 + `csv_rows()` 已交付」给 M6 复用**（D25 的契约交接，M6 据此不得另写表头逻辑）
 - [x] 9.4 pathspec 精确提交（禁 `-A`/`.`）：`backend/app/services/csv_dialects.py`、`backend/app/services/import_service.py`、`backend/tests/test_csv_dialects.py`

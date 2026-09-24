@@ -61,7 +61,8 @@
 
 ## 5. 验收门槛
 
-- [ ] 5.1 新测试全绿 + 全量 `pytest` 绿（基线取 progress.md 开工登记值）；`mypy` 基线零新增（`xlsx_reader.py` 自身应 `--strict` 零报错）；`ruff check` clean
+- [x] 5.1 新测试全绿 + 全量 `pytest` 绿（基线取 progress.md 开工登记值）；`mypy` 基线零新增（`xlsx_reader.py` 自身应 `--strict` 零报错）；`ruff check` clean
+  > **主 Agent 补勾（2026-09-24）**：红灯② 已按 M6 登记的方案由主 Agent 一行改写（`2107429`，改断言不改后端，P3 口径）；红灯① 由 M3 §5.1（`a46b0f2`）反转闭合。现全量 **603 passed / 0 failed**、mypy 85 ≤ 基线、ruff clean。M6「不越界改他人测试、不静默勾选」处置正确。
   > **未勾原因（唯一新增红灯的归属登记，沿 M1 §9.1 同款口径）**：`test_xlsx_reader.py` **43 passed 全绿**、`mypy` 工作区 **88 errors / 14 files（零新增，checked 54 source files）**、`xlsx_reader.py` 自身 strict 零报错、`ruff check app tests` **All checks passed**；全量 `pytest tests/` = **587 passed / 2 failed**，其中
   > ① `test_csv_import_export.py::TestCsvImportPreview::test_preview_unknown_format` = 主 Agent 开工登记的**唯一已知红灯**（M3 §5.1 预留反转，非 M6）；
   > ② `test_csv_dialects.py::Test88PreviewContract::test_8_8_seven_new_fields_shape` 末行 `assert "container" not in result  # 第 8 个契约字段由 M6 落地`——**M6 落地 `container` 的必然结果**（该断言锁定的是「M1 交付时字段缺席」状态，M1 任务 §6.2 原文即「缺席即合法」，§8.8 把它写成了永久断言）。派单简报「你落地 `container` 不会撞红 M1 测试」的前提与 M1 落盘实况不符（progress.md M1 记录第 130 行原文即「显式 `"container" not in result`」）。
