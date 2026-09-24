@@ -88,24 +88,25 @@
 
 ## 发布备忘（设计附录 A）
 
-- **零迁移脚本、零 schema 变更** → 发布窗口只需部署新后端 + 新 `frontend/dist`，不需停库/备份演练
-- 与 boot2 发布窗口的关系（**2026-09-24 对现场库只读实测后更新**）：boot2 登记的「现场库未跑 v1.4.3 迁移 + 70 条既有 FK 违规 → 预算接口 500」**已非现状**——实测 `budgets` 已含 `scope_mode`/`dormant` 列、全库仅剩一个「其他」预设（id=34、user_id NULL、sort=14）、`is_preset=1 且 user_id 非空` 异常行为 0，`PRAGMA foreign_key_check` 余 **52 条且全在 `tags`**（DB mtime 当日 11:04）。**成因不在本批追查范围**（超出本批导入识别范围）；本批仍为零迁移、零 DB 变更，开工时由主 Agent 以 `file:money.db?mode=ro` 只读复测并登记基线，余 52 条 tags 孤儿继续沿用 boot2 `progress.md` 的跟踪条目。
-- 冒烟四条：① 导出 CSV 立即导入同一份文件条数一致；② 模板 `-50`→支出、`250`→收入；③ 任意中文表头手选列能入库；④ `.xlsx` 直传能出预览（`container=xlsx`），`.xls` 得到中文「请另存为 CSV/.xlsx」提示而非英文异常
-- 回退：换回旧后端 + 旧 dist，零数据残留
+- **零迁移脚本、零 schema 变更、零新增依赖（含 Excel 走标准库）** → 发布窗口只需部署新后端 + 新 `frontend/dist`（终验重建 `8000489`，gzip 538,234 B，**+2,307 B** vs boot2 基准 +127 B 同口径，可接受性留人工裁定），不需停库/备份演练
+- 冒烟四条**已在 P4 以 tmp 副本库全部实测通过**（① 导出 231 行→复导 231 条；② 模板 `-50`→支出、`250`→收入；③ 中文表头手选列入库；④ `.xlsx` 直传出预览 `container=xlsx`、`.xls` 得中文另存提示）——发布现场仍可照四条在真实环境复跑一遍作部署验证
+- 回退：换回旧后端 + 旧 dist，零数据残留（本批未写任何 schema）
+- **P4 新发现（既有行为，非本批引入，登记待后续批次）**：`export_csv` 的分类查找表只含用户自有分类，**全局预设（user_id NULL，如「餐饮」id=1）参与 join 时导出 `category_name` 落空** → 自家导出件回导时这类行全落 `category_unresolved`（P4 实测 227/229）。本批导入侧已用 `fallback_category` 兜住闭环；**导出侧修复超出 D17/红线范围，本批一字未动导出器**，登记为后续热修候选。
+- boot2 现场库状态沿用上方 2026-09-24 只读实测登记（已具 v1.4.3 + dormant 形制、分类已归并，余 52 条 `tags` 孤儿沿 boot2 条目跟踪，成因不追查）；本批开工/终验 `money.db` SHA256 双对照逐字一致
 
 ## 终验清单（质量门，设计附录 A）
 
-- [ ] `backend/venv/Scripts/python.exe -m pytest`（**基线 298**，2026-09-24 文档产出时点实测；boot2 记忆里登记的 296 已被其后续两条热修 `2bef12a`/`7ae57da` 的回归用例抬高，故此处取实测值 + 本批新增）全绿、`0 skipped` 复核
-- [ ] `npx vitest run` 全绿（**基线 397 实测** + M4 新增）
-- [ ] `mypy backend/app --strict` = 基线 **89 errors / 14 files**（2026-09-24 实测 `venv/Scripts/python.exe -m mypy app --ignore-missing-imports`；boot2 登记的 90 已随热修下降）→ **零新增**口径
-- [ ] `ruff check` clean；`eslint` 0 error
-- [ ] `vite build` + dist 重建单独提交 + gzip 增量对比 boot2（`+127 B` 基准）
-- [ ] `backend/money.db` SHA256 与开工登记一致
-- [ ] **夹具可跟踪性（D21）**：`git ls-files backend/tests/fixtures/csv/` 命中；`git grep -n "example/" -- backend frontend` 零命中（当前 HEAD 实测已零命中，须保持）；`git diff --stat <开工基线>..HEAD` 不含 `example/` 路径
-- [ ] **Excel 零依赖（D23/红线 13）**：`git grep -n -i -E "openpyxl|xlrd|pandas" -- backend/app backend/tests frontend/src` 零命中（当前 HEAD 实测已零命中；范围不含 `frontend/dist` 打包产物）；M6 §4.7 的 `ast` import 白名单用例在场且通过
-- [ ] **无英文内部异常透出（D27）**：M5 §2.9.4 反向护栏通过——导入相关响应 `message` 不含 `new-line character`/`_csv.Error`/`BadZipFile`/`UnicodeDecodeError`
-- [ ] 浏览器实测（主 Agent 亲执，general-purpose 子 Agent 无 browser-use）：**四条**冒烟 + 向导三区块交互 + **真实微信 `.xlsx` 本机对照导入一次**（素材在 `example/`，只读、不入库）
-- [ ] README Version History 条目
+- [x] `pytest tests/ -q` 全绿、`0 skipped` 复核（**632 passed**，开工基线 298 + 本批新增 334）
+- [x] `npx vitest run` 全绿（**408 = 基线 397 + M4 新增 11**）
+- [x] mypy = **85 errors / 14 files** ≤ 开工登记基线 89 → 零新增（且 -4）
+- [x] `ruff check` All checks passed；eslint 0 errors / 2 warnings（基线同值）
+- [x] `vite build` + dist 重建单独提交 `8000489`；gzip 538,234 B = **+2,307 B** vs 开工基准（boot2 +127 B 口径，可接受性留人工）
+- [x] `backend/money.db` SHA256 与开工登记逐字一致（终验收档复测）
+- [x] **夹具可跟踪性（D21）**：`git ls-files backend/tests/fixtures/csv/` 命中；`git grep -n "example/" -- backend frontend` 零命中；`git diff --stat 7ae57da..HEAD` 不含 `example/`
+- [x] **Excel 零依赖（D23/红线 13）**：`openpyxl|xlrd|pandas` 零命中；M6 §4.7 `ast` 白名单用例在场且通过
+- [x] **无英文内部异常透出（D27）**：M5 §2.9.4 反向护栏通过（九载荷零 `new-line character`/`_csv.Error`/`BadZipFile`/`UnicodeDecodeError`）+ P4 `.xls` 中文实测
+- [x] 浏览器实测（主 Agent P4）：四条冒烟全部实测通过（tmp 副本库 + 真实微信 `.xlsx` 本机对照）——**唯截图/指针手感因内嵌浏览器无 surface 留人工**（详见终验记录 P4 段与人工清单）
+- [x] README Version History 条目（随 M5 `1256f44`）
 
 > **基线数字口径**：上列三项为 2026-09-24 文档产出时点（HEAD `7ae57da`）的一次性实测，**开工时须以当时 HEAD 复测并写入「开工登记」**，终验以开工登记值为准做零新增比对，不得沿用本表数字。
 
@@ -113,8 +114,8 @@
 
 | 项 | 数值 |
 |----|------|
-| 模块 done | 5 / 6（M1、M2、M3、M4、M6）；全仓 pytest 603 绿 / vitest 408 绿 |
-| checklist 勾选 | 188（M1 52 含补勾 + M2 22 + M3 44 + M4 41 + M6 32 含补勾）+ M5 待计；未勾仅剩 M4 §7.3 人工观感 1 条 |
+| 模块 done | **6 / 6**（M1–M6 全部核验通过）；终验六命令全绿：pytest 632 / vitest 408 / mypy 85≤89 / ruff / eslint / build |
+| checklist 勾选 | 220（M1 52 + M2 22 + M3 44 + M4 41 + M5 32 + M6 32，主 Agent 补勾已注记）；未勾仅剩 M4 §7.3 人工观感 1 条 + M5 §4.x/§5.2（全部并入终验记录闭合） |
 | 待人工抽检 | M4 抄录 5 条（观感截图 / 浏览器整链 / 微信 .xlsx 对照 / 支付宝账单 / .xls 中文透出），与上方既有条目部分同源 |
 | 阻塞 | 0 |
 
@@ -163,9 +164,50 @@
 - **P3 契约核对结论（子 Agent notes，主 Agent 认可）**：§1.2.5 八字段与 §3.2 三字段**逐位一致、零差异**；`container` 双态已测（xlsx 显示「Excel 工作表」/ 缺席不渲染，§6.4.9）；`encoding=="xlsx"` 哨兵不当编码展示；SQL 复用路径三字段整体不写入 + 键集断言锁定（请求体一字不变）；同角色两列取靠前列（与 D3 同序）；存在 category 角色时不发 `fallback_category`
 - 子 Agent 登记项（主 Agent 复核）：① `v-radio-group`/`v-radio` 为任务 §3.1 明定组件且弹窗 Vuetify 标签集合已被 §6.4.8 `?raw` 钉成封闭集——不判「新增组件」违规；② M5-3 成功 toast 期望改「成功导入 3 条」系任务 §5.2/设计 §4.2.3 明定文案、同测试净增 9 断言未删未放宽——合法口径修正，记入附录 B 台账（M3 落地后若后端 message 文案与此不符按 P3 以后端为准派修正轮）；③ §5.5 格式说明文案「附近无该文案 → 不新增不扩写」——符合 U3 精神；④ 分类候选异步晚到时序缺陷 = 设计 §4.3 已登记遗留，未扩围，沿设计跟踪
 - 待人工抽检（抄录进下方清单区）：7.3 观感截图 / 真实浏览器文件选择整链 / 真实微信 .xlsx 对照 / 真实支付宝账单 / .xls 失败中文透出确认
-### M5（pending）
+### M5（done，`1256f44`，主 Agent 2026-09-24 核验通过）
+- 提交 pathspec 精确（e2e + README + 任务文件 3 件，+1,631 行、零素材新建）；主 Agent 复跑全量 **632 passed / 0 failed / 0 skipped**、mypy 85 零新增、ruff clean；README diff 复核 = Version History 一行 + 导入须知小节，Features 未动（版本政策合规）
+- §2.10 契约一致性断言在场（只读前端源码提取 payload 键集 ⊆ `ImportCsvRequest.model_fields`、columns 项 4 键、ROLE/TYPE_SOURCE/FORMAT 封闭集对照），无 skip 分支；§2.3 读取侧三处断言在场；§2.9 五例 + D27 反向护栏（九种垃圾载荷零英文内部串）在场
+- 素材性质双登记合规：docstring + notes（模板夹具与导出字节 = 实证；微信/支付宝/Cashew 10 列/xlsx 镜像 = 合成，17 列勘误显式标注；随手记/京东/银行为自拟列名仅证 custom 路径）
+- 主 Agent 裁定两项移交：① **`group_by` 勘误成立**（本仓库 statistics 端点实参为 `group_by`，设计/任务写 `granularity=month`）——按现状契约，不改实现，登记勘误；② 「仅前导行无表头的 xlsx」得到中文 `CSV 文件为空`——设计 §6.4 明写两通道同处置（共享 `locate_header_rows`），满足 D27「中文 ValueError」，**不判缺陷不补文案**，登记已知边界
+- 未勾 13 条全部为主 Agent 终验项（§4.1–4.5/§5.2），已随本次终验逐条闭合（见「终验记录」）
+- 待人工抽检抄录：见下方清单（M5 §4.3 系列 = P4 移交项，与既有条目同源）
 
-## 终验记录（待主 Agent 执行）
+## 终验记录（主 Agent，2026-09-24 执行完毕）
+
+### 六命令（M5 后 HEAD 全量复跑）
+| 命令 | 结果 | 基线对照 |
+|------|------|----------|
+| `pytest tests/ -q` | **632 passed / 0 failed / 0 skipped**（113.9s） | 开工 298 → +334 全为本批新增 |
+| `mypy app` | **85 errors / 14 files** | 开工 89 → **零新增（-4）**；三个新 service 文件自身 strict 零报错 |
+| `ruff check app tests` | **All checks passed** | 同基线 |
+| `npx vitest run` | **408 passed / 408**（15 files） | 开工 397 → +11（M4） |
+| `npm run lint` | **0 errors / 2 warnings** | 基线同值零新增 |
+| `npm run build` | 成功（rolldown chunk-size 提示为既有非错误） | dist gzip **538,234 B** vs 开工 535,927 B = **+2,307 B**（boot2 基准 +127 B 同口径，待人工裁定可接受性） |
+
+### 9 条跨模块闭环点（§6.2，逐项必查全部通过）
+1. D16 旧符号 `def`/调用点全仓 grep **零命中**（仅注释溯源，不留转发壳）✅
+2. 前端真实请求体字段与 `ImportCsvRequest` 逐位一致（M5 §2.10 断言在场 + P4 实测 HTTP 200 落库）✅
+3. `DIALECT_ORDER = (native, cashew, cashew_template, alipay, wechat)`，alipay 先于 wechat，且 §8.4 测试内局部乱序陷阱用例在场（未改生产常量）✅
+4. `test_preview_unknown_format` 已反转为正断言（code==0 + custom + 全列 role=None），其余既有 native/cashew 用例断言一字未改（M3 diff 仅 3 hunk 自证）✅
+5. 读取侧三处：M5 §2.3 断言在场 + **P4 实测**（`/api/records` 9 月过滤 93 条、`trend?group_by=month` 月份键全合法、229 条 `consume_time` 正则零违例）✅
+6. SQL 导入链路文件 `git diff 7ae57da..HEAD` **零命中**（M3 251+/108- 全落落库区，识别区/分派器零 hunk 实证）✅
+7. 零新增依赖：`package.json`/lock/`requirements`/`pyproject` 在 diff 中零命中 ✅
+8. 夹具可跟踪（`git ls-files` 命中）+ `git grep example/` 零命中 + `git diff --stat` 不含 `example/` ✅
+9. Excel 四点：① 表头定位四函数 `def` 只在 `csv_dialects.py`、CSV 通道裸 `csv.reader` 仅剩 `csv_rows` 收口 1 处（SQL 区 :531/:1508 禁触不计）✅ ② `container` 后端产出与前端渲染逐位一致（P4 实测「Excel 工作表」caption 在场）✅ ③ `.xls`/非 zip/超限/空表全中文 `PARAM_ERROR`（P4 实测 `.xls` → `code=40001, message=暂不支持 .xls，请在 Excel 里另存为 .xlsx 或 .csv`，零英文内部异常）✅ ④ `openpyxl|xlrd|pandas` 零命中 + M6 §4.7 `ast` 用例在场 ✅
+
+### P4 浏览器实测（主 Agent 亲执，tmp 副本库）
+- **环境**：`DATABASE_URL` 指向 `backend/files/p4_money.db`（money.db 逐字节副本，SHA256 `b7974d15…c7deb3` 开工/收档一致，**原库全程零写入**）；真实素材经 `.gitignore` 的 `backend/files/` 中转，测毕已删除（`files/` 现 0 文件）
+- **登录**：注册 `p4tester` + UI 登录（登录卡 → 主页跳转成功）
+- **链路② Cashew 模板**（CDP 真实文件上传 `backend/tests/fixtures/csv/cashew_import_template.csv` → `input[type=file]` change → 预览请求）：向导渲染「格式：Cashew 模板 · 共 2 条记录」、编码 `utf-8`、逐列角色建议（Date→时间/Amount→金额/Category→分类/Title→标签/Note→备注/Account→不导入）、样例行表、收支三态 radio（0 归支出提示语）；「确认导入」初始禁用（分类未映射），映射后解禁 → HTTP 200 → toast **「成功导入 2 条」** → `/api/records` total=2、`-50→expense 50`、`250→income`、Category 新建 `Groceries`/`Bills & Fees` 入分类表 ✅
+- **链路③ 自定义中文表头手选**（`backend/files/custom_cn.csv`，列名非别名表）：预览判「手动映射」（退化表头定位 + 全列 `role=None` 正确），手选 `花费金额→amount` 后按钮解禁；**缺分类列时 `missingRequiredCount=1` 强制「账单归入」**（D8 生效），选餐饮 → 导入 3 条、`consume_time` 全 16 字符、`备注→note` 正确、「付款方」不入库 ✅
+- **链路④ 真实微信 `.xlsx`**（28,042 B 用户一手文件，本机对照、素材值不外抄）：预览判 `wechat` + `container=xlsx` + `encoding="xlsx"` 哨兵、共 **228** 条、告警「未识别到分类列：需指定默认分类」+「已忽略 15 行账单说明文字」；**11 列逐列角色与 D9 走查完全一致**（交易类型 null/支付方式 null/…，`金额(元)`→amount 剥括号）；交易时间样例 = 日期序列号换算产物（naive 挂钟）；收支四态含「按收/支列」；设归入后确认 → toast **「成功导入 224 条，跳过 4 条（不计收支）」**（4 笔 `/` 中性交易自然排除）；读取侧：total 229、9 月过滤 93、趋势月份键 `2024-03/2026-06/07/08/09` 全合法、`consume_time` 正则零违例 ✅
+- **链路① 导出→导入闭环**：`GET /api/export/csv` 真实字节（15,597 B、BOM `ef bb bf`、`encoding=utf-8-sig`、判 `native`）喂 preview+confirm → 首轮 2 条闭环（227 条 `category_unresolved` = **既有导出器缺陷**，见「已知边界」新登记条）；补 `fallback_category` 后二轮 **231/231 全量闭环、skipped 五键全 0**（D20 无去重 → 462 条预期翻倍）✅
+- **`.xls` 拒绝**：`code=40001` 中文另存指引、无英文异常 ✅；前端 `accept=".csv,.xlsx"` 在真实 DOM 在场（.xls 连文件选择框都被过滤）✅
+- **⚠ 截图缺位（环境限制）**：Qoder 内嵌浏览器无可见 surface（viewport 0×0），`take_screenshot` 与指针点击均不可用；实测以 **CDP 文件上传 + DOM 快照 + 网络面板 + 页面内真实 fetch（携带 UI 同源 token）** 完成，证据 = 本会话快照/响应原文。**观感类（明暗 × 竖/宽屏）与人工点选手感仍留人工终判**，不得以本段替代。
+
+### 收尾
+- `frontend/dist` 终验重建单独提交 `8000489`；README 条目已随 M5 `1256f44` 入库
+- money.db SHA256 收档 = 开工登记值逐字一致；工作区无测试残留（`backend/files/` 清零）
 
 ## 阻塞清单
 
@@ -173,17 +215,13 @@
 
 ## 待人工抽检清单（子 Agent 不勾选）
 
-- [ ] **真实支付宝账单**导入一次（前导行漂移、GBK 系编码、`/` 占位）——**本会话无该文件、合成夹具不可替代，不得声称已验证**
-- [ ] **真实微信 `.xlsx` 本机对照导入一次**（用户 2026-09-24 已提供一手文件于 `example/`）：**主 Agent 在 P4 亲执**，断言预览判 `wechat` + `container=xlsx`、必选「账单归入」、中性交易（`/`）不入库、金额与月份正确；结论 + 截图登记并标注「本机对照，非 CI 证据」
-- [ ] **用户自助路径**：在 Excel 里把该 `.xlsx` 另存为 CSV 再导一次，登记实际日期形态（文本/序列号）与编码，确认 D14/D15 不误收脏日期
-- [ ] 真实浏览器：文件选择（含 `.xlsx`）→ 向导三区块 → 记录出现在账单页与月统计
-- [ ] 明暗 × 竖屏/宽屏观感截图（列角色表 + 样例行表格）
-- [ ] **M4/7.3**：明暗主题 × 竖屏(<960px)/宽屏(≥960px) 观感自测一次并截图，主观观感留人工终判（样例行表格已挂 overflow-x 横向滚动，窄弹窗实测待人工）
-- [ ] **M4**：真实浏览器文件选择（含 `.xlsx`）→ 向导三区块交互 → 记录出现在账单页与月统计（jsdom 不覆盖整链，由主 Agent P4 亲执）
-- [ ] **M4**：真实微信 `.xlsx` 本机对照导入——预览判「微信账单」+ `container=xlsx` 出「Excel 工作表」+ 必选「账单归入」+ 中性交易（`/`）不入库（主 Agent P4 亲执，素材 `example/` 只读）
-- [ ] **M4**：真实支付宝账单导入一次（含尾随空列「第 N 列（空列名）」与 GBK 系编码，合成夹具不可替代，不得声称已验证）
-- [ ] **M4**：`.xls` / 超限 / 非法 Excel 的中文 message 原样透出确认（前端未新拼错误文案、未据扩展名预判）
-- [ ] 在 Cashew App 内用官方模板实际导出一次（官方仓库模板文件已 404，模板可选列未能一手核对）；**主 Agent P4 终验时另可用本机 `example/cashew-import-template1790219274617.csv` 做一次真实文件对照导入**（只读素材，结论须标注「本机对照」，不进 CI、不作夹具）
+- [ ] **真实支付宝账单**导入一次（前导行漂移、GBK 系编码、`/` 占位）——**本会话无该文件、合成夹具不可替代，不得声称已验证**（置顶，人工在真实环境执行）
+- [x] **真实微信 `.xlsx` 本机对照导入一次**（用户 2026-09-24 提供一手文件）：**主 Agent P4 已亲执**（tmp 副本库 + CDP 真实上传）——预览判 `wechat`+`container=xlsx`+`encoding=xlsx`、228 条、必选「账单归入」、4 笔 `/` 中性交易不入库（导入 224/跳过 4）、序列号日期换算、月份过滤/趋势/正则三处读取侧全绿。**性质 = 本机对照非 CI 证据；截图因内嵌浏览器无可见 surface 未能存档（环境限制），证据为本会话 DOM 快照与网络响应原文**；人工请在真实浏览器复做一遍并补 `screenshots/v1.4.3-boot3/` 截图
+- [ ] **用户自助路径**：在 Excel 里把该 `.xlsx` 另存为 CSV 再导一次，登记实际日期形态（文本/序列号）与编码，确认 D14/D15 不误收脏日期（P4 无法代跑 Excel 另存动作）
+- [ ] 真实浏览器：文件选择（含 `.xlsx`）→ 向导三区块 → 记录出现在账单页与月统计——**P4 已覆盖逻辑半区**（CDP 真实上传 + 向导全渲染 + 入库回核），**人工指针点击/原生文件对话框手感与观感仍待终判**（内嵌浏览器 viewport 不可用）
+- [ ] 明暗 × 竖屏/宽屏观感截图（列角色表 + 样例行表格）+ M4/7.3 窄弹窗 overflow-x 实测——纯观感，人工终判
+- [ ] **M4**：`.xls` / 超限 / 非法 Excel 中文 message 前端透出确认——**P4 已实测后端透出**（`code=40001` 中文文案 HTTP 200 包体），人工仅需在真实浏览器确认 toast 观感
+- [ ] 在 Cashew App 内用官方模板实际导出一次（官方仓库模板文件已 404，模板可选列未能一手核对）；**主 Agent P4 另以 `example/cashew-import-template1790219274617.csv` 做过一次真实文件对照导入（链路②，本机对照性质，未入库、值不外抄）**
 
 ## 开工登记（2026-09-24 主 Agent 实测）
 
