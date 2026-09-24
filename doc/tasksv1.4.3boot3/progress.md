@@ -11,7 +11,7 @@
 | 模块 | 名称 | 需求 | 任务文件 | 状态 | 提交 |
 |------|------|------|----------|------|------|
 | M1 | 后端识别层：解码 + 表头定位（**交付行矩阵契约**）+ 方言与列角色 | A、B、D | `m1-backend-detect-layer.md` | pending | — |
-| M2 | 后端清洗层：金额/日期/收支三态纯函数 | C | `m2-csv-value-normalization.md` | pending | — |
+| M2 | 后端清洗层：金额/日期/收支三态纯函数 | C | `m2-csv-value-normalization.md` | **done** | `7c3c87f` |
 | **M6** | 后端 **Excel(.xlsx) 容器层**：magic 判定 + stdlib 读表 → 行矩阵（日期序列号在容器层换算为文本） | **E** | `m6-xlsx-container.md` | pending | — |
 | M3 | 后端落库层：统一列角色解析 + 契约扩展 | A、C、D | `m3-backend-import-writer.md` | pending | — |
 | M4 | 前端列映射向导（+ `accept` 扩 `.xlsx` 与 Excel 标识） | A、**E** | `m4-frontend-column-mapping.md` | pending | — |
@@ -113,15 +113,23 @@
 
 | 项 | 数值 |
 |----|------|
-| 模块 done | 0 / 6 |
-| checklist 勾选 | 0 / — |
-| 待人工抽检 | — |
+| 模块 done | 1 / 6（M2） |
+| checklist 勾选 | 22（M2）+ 在途模块待计 |
+| 待人工抽检 | 0 新增（M2 无人工项） |
 | 阻塞 | 0 |
 
 ## 模块执行记录
 
 ### M1（pending）
-### M2（pending）
+### M2（done，`7c3c87f`，主 Agent 2026-09-24 核验通过）
+- 提交 pathspec 精确（3 文件，`import_service.py` 零命中 = 「未接线」自证成立）；任务文件 22/22 勾选
+- 主 Agent 复跑：`test_csv_values.py` **159 passed**；mypy 工作区 88 errors/14 files（≤ 基线 89，零新增；其中 M1 在途贡献待 M1 复测）；ruff 工作区 3 项 UP012 **全部位于 M1 在途 `test_csv_dialects.py`**（E3 归属 M1，M1 提交前须清零）
+- 子 Agent 全量复跑 2 次：456/457，唯一红灯 `test_preview_unknown_format` 归属 M1 在途语义扩展（unknown→custom），其口径反转按附录 B 归 M3 —— 与简报预期一致，非缺陷
+- M3 交接（三函数签名）：`parse_amount(raw: str|None)->float|None`（**带符号**，不 abs 不 round，失败→None）；`parse_time(raw: str|None)->str|None`（16 字符 `YYYY-MM-DD HH:MM`，已过 `schemas/record.py` 正则交叉断言）；`resolve_type(raw, amount, source)->(type|None, skip_reason|None)`，skip_reason ∈ {type_ignored, type_unresolved, invalid_amount}（与 D12 五键同名），column 不可判不回落 sign，sign 下 0/负→expense
+- 白名单落定：`TIME_FORMATS` 13 项逐字零增删；EXPENSE/INCOME/IGNORE 三集合 9/9/6（含 `/`，D31）；`OUTPUT_FORMAT="%Y-%m-%d %H:%M"`
+- 子 Agent 登记的偏离/收口（主 Agent 复核认可，不判偏离）：`math.isfinite` 兜底 inf/nan→None（验收标准「绝不静默产脏值」必要收口，有专门用例）；`元` 首尾皆剥；`(-12.00)`→+12.0（括号取负语义）；`parse_time` 不做 NFKC（全角日期不猜）；任务文件 §1.3 line25 内部矛盾按 D10+边界表实现为 `>0`→income、`<=0`→expense
+- 已知边界（§5.3 登记）：歧义日期序不支持、CSV 侧无 Unix 时间戳换算、Excel 改「常规」另存的裸序列号 `46289.48…` 判 None
+- 待人工抽检：M2 无新增人工项（其手工口径已被 §4.1–4.8 自动化覆盖）
 ### M6（pending）
 ### M3（pending）
 ### M4（pending）

@@ -61,11 +61,15 @@
       </v-list>
     </div>
 
-    <!-- Hidden file inputs（原样平移，reset 逻辑未动） -->
+    <!--
+      Hidden file inputs（原样平移，reset 逻辑未动）。
+      v1.4.3-boot3 需求 E（设计 §4.2.4 / D29）：CSV 选择器 accept 扩为 ".csv,.xlsx"，
+      上传链路与状态名零改动；真实容器由后端按 magic bytes 判定（D22），扩展名只供选择器过滤、不作判据。
+    -->
     <input
       type="file"
       ref="csvFileInput"
-      accept=".csv"
+      accept=".csv,.xlsx"
       style="display: none"
       @change="handleCsvFileSelect"
     />
@@ -210,6 +214,28 @@ function triggerCsvImport() {
   csvFileInput.value?.click()
 }
 
+// 设计 §3.3/D12：确认响应 skipped_reasons 五键 → 中文短标签（键序即取用优先级，取首个非零）
+const SKIPPED_REASON_LABELS = {
+  invalid_amount: '金额无法识别',
+  invalid_date: '日期无法识别',
+  type_ignored: '不计收支',
+  type_unresolved: '收支无法判定',
+  category_unresolved: '分类未指定',
+}
+
+// 任务 §5.2：`成功导入 N 条` +（skipped_count > 0 时）`，跳过 M 条` + 首个非零原因中文
+function importResultMessage(result) {
+  let message = `成功导入 ${result?.imported_count ?? 0} 条`
+  const skipped = result?.skipped_count ?? 0
+  if (skipped > 0) {
+    message += `，跳过 ${skipped} 条`
+    const reasons = result?.skipped_reasons || {}
+    const hit = Object.keys(SKIPPED_REASON_LABELS).find((key) => (reasons[key] || 0) > 0)
+    if (hit) message += `（${SKIPPED_REASON_LABELS[hit]}）`
+  }
+  return message
+}
+
 async function handleCsvFileSelect(event) {
   const file = event.target.files?.[0]
   if (!file) return
@@ -227,13 +253,22 @@ async function handleCsvImport(mapping) {
   showCsvMapping.value = false
   importing.value = true
   try {
-    const result = await importCsv({
+    const payload = {
       cache_id: csvPreviewData.value.cache_id,
       format: csvPreviewData.value.format,
       category_mapping: mapping.category_mapping,
       tag_mapping: mapping.tag_mapping,
+      // v1.4.3-boot3 §5.1：向导里用户手选的列角色 / 收支口径 / 无分类列时的默认分类
+      columns: mapping.columns,
+      type_source: mapping.type_source,
+      fallback_category: mapping.fallback_category,
+    }
+    // 区块隐藏（旧预览 / SQL 复用同组件）时三字段为 undefined → 剔除，请求体一字不变
+    Object.keys(payload).forEach((key) => {
+      if (payload[key] === undefined) delete payload[key]
     })
-    appStore.showToast(`成功导入 ${result.imported_count} 条记录`)
+    const result = await importCsv(payload)
+    appStore.showToast(importResultMessage(result))
   } catch (e) {
     appStore.showToast(e.message || '导入失败', 'error')
   } finally {

@@ -1984,14 +1984,14 @@ describe('v1.4.3 M5 导入导出二级页', () => {
   it('用例M5-3: 导入 CSV 触发隐藏 input、change 走预览并打开映射弹窗，confirm 提交 importCsv', async () => {
     const wrapper = await mountPage(SettingsImportExportPage)
 
-    // 两个隐藏 file input（accept 与迁移前一致），初始不显示
+    // 两个隐藏 file input：CSV 侧 v1.4.3-boot3 需求 E 扩围为 .csv,.xlsx（任务 §5.5），SQL 侧不变
     const inputs = wrapper.findAll('input[type="file"]')
     expect(inputs).toHaveLength(2)
-    expect(inputs[0].attributes('accept')).toBe('.csv')
+    expect(inputs[0].attributes('accept')).toBe('.csv,.xlsx')
     expect(inputs[1].attributes('accept')).toBe('.sql,.db')
 
     await rowByTitle(wrapper, '导入 CSV').trigger('click')
-    expect(inputClicks).toEqual(['.csv'])
+    expect(inputClicks).toEqual(['.csv,.xlsx'])
 
     previewCsvImport.mockResolvedValueOnce(csvPreviewFixture())
     const file = new window.File(['a,b\n1,2'], 'records.csv', { type: 'text/csv' })
@@ -2027,10 +2027,75 @@ describe('v1.4.3 M5 导入导出二级页', () => {
       category_mapping: { 未知类: { action: 'map', target_id: 3 } },
       tag_mapping: {},
     })
-    expect(mockShowToast).toHaveBeenCalledWith('成功导入 3 条记录')
+    expect(mockShowToast).toHaveBeenCalledWith('成功导入 3 条')
     expect(wrapper.vm.showCsvMapping).toBe(false)
     expect(wrapper.vm.csvPreviewData).toBe(null)
     expect(wrapper.vm.importing).toBe(false)
+
+    // ── v1.4.3-boot3 任务 §6.2 追加断言 ─────────────────────────────────────
+    // §4.4 页面侧剔除：上面那次 emit 是旧版两字段载荷 → 请求体键集必须一字不变
+    expect(Object.keys(importCsv.mock.calls[0][0]).sort()).toEqual([
+      'cache_id',
+      'category_mapping',
+      'format',
+      'tag_mapping',
+    ])
+
+    // 重新走一次预览（上一轮 finally 已把 csvPreviewData 复位为 null）
+    previewCsvImport.mockResolvedValueOnce({
+      cache_id: 'csv-boot3-1',
+      format: 'cashew_template',
+      row_count: 2,
+      categories_in_file: [],
+      tags_in_file: [],
+      headers: ['Date', 'Amount', 'Category', 'Title', 'Note', 'Account'],
+      header_row_index: 0,
+      columns: [
+        { index: 0, header: 'Date', role: 'consume_time', sample: '2026-09-24 11:07:54.617083' },
+        { index: 1, header: 'Amount', role: 'amount', sample: '-50' },
+      ],
+      suggested_type_source: 'sign',
+      encoding: 'utf-8-sig',
+      sample_rows: [['2026-09-24 11:07:54.617083', '-50']],
+      warnings: [],
+    })
+    await wrapper.vm.handleCsvFileSelect({
+      target: { files: [new window.File(['Date,Amount'], 't.csv')], value: 'C:\\fakepath\\t.csv' },
+    })
+    await flushPromises()
+    expect(wrapper.vm.csvPreviewData.cache_id).toBe('csv-boot3-1')
+
+    importCsv.mockResolvedValueOnce({
+      imported_count: 3,
+      skipped_count: 2,
+      skipped_reasons: {
+        invalid_amount: 2,
+        invalid_date: 0,
+        type_ignored: 0,
+        type_unresolved: 0,
+        category_unresolved: 0,
+      },
+    })
+    wrapper.findAllComponents(CsvMappingDialog)[0].vm.$emit('confirm', {
+      category_mapping: { 未知类: { action: 'map', target_id: 3 } },
+      tag_mapping: {},
+      columns: { consume_time: 0, amount: 1 },
+      type_source: 'sign',
+      fallback_category: { action: 'map', target_id: 8 },
+    })
+    await flushPromises()
+
+    const boot3Body = importCsv.mock.calls[1][0]
+    expect(importCsv).toHaveBeenCalledTimes(2)
+    expect(boot3Body.cache_id).toBe('csv-boot3-1')
+    expect(boot3Body.format).toBe('cashew_template')
+    // §5.1 三字段逐字段进请求体，形状取设计 §3.2（columns = 角色 → 列索引；fallback_category = CategoryMappingItem）
+    expect(boot3Body.columns).toEqual({ consume_time: 0, amount: 1 })
+    expect(boot3Body.type_source).toBe('sign')
+    expect(boot3Body.fallback_category).toEqual({ action: 'map', target_id: 8 })
+    expect(boot3Body.fallback_category).not.toHaveProperty('type')
+    // §5.2：skipped_count > 0 → 「跳过 N 条」+ 首个非零 skipped_reasons 的中文短标签
+    expect(mockShowToast).toHaveBeenLastCalledWith('成功导入 3 条，跳过 2 条（金额无法识别）')
   })
 
   // CSV 预览失败：错误 toast 且不弹映射框（行为与迁移前一致）
@@ -2228,6 +2293,45 @@ describe('v1.4.3 M5 导入导出二级页', () => {
     expect(importExportPageSource).toContain('appStore.showToast')
     // 四行文案的唯一副本：新页有、设置页无（防双份状态残留）
     moved.forEach((id) => expect(settingsPageSource, `SettingsPage 残留「${id}」`).not.toContain(id))
+
+    // ── v1.4.3-boot3 任务 §6.3 追加：新字段/新 computed 字面量（既有清单只增不减）──
+    const boot3PageLiterals = [
+      'columns: mapping.columns',
+      'type_source: mapping.type_source',
+      'fallback_category: mapping.fallback_category',
+      'skipped_reasons',
+      'skipped_count',
+      'invalid_amount',
+      'type_ignored',
+      'category_unresolved',
+      'accept=".csv,.xlsx"',
+    ]
+    boot3PageLiterals.forEach((id) => expect(importExportPageSource, `新页缺「${id}」`).toContain(id))
+    boot3PageLiterals.forEach(
+      (id) => expect(settingsPageSource, `SettingsPage 残留「${id}」`).not.toContain(id)
+    )
+    const boot3DialogLiterals = [
+      // 新增 computed
+      'missingRequiredCount',
+      'missingRequired',
+      'roleColumns',
+      'showFallbackCategory',
+      'fallbackCategoryOptions',
+      'typeSourceOptions',
+      // §1.2.5 预览契约八字段名逐字在场
+      'headers',
+      'header_row_index',
+      'columns',
+      'suggested_type_source',
+      'encoding',
+      'sample_rows',
+      'warnings',
+      'container',
+      // §3.2 确认请求三字段名逐字在场
+      'type_source',
+      'fallback_category',
+    ]
+    boot3DialogLiterals.forEach((id) => expect(csvMappingSource, `弹窗缺「${id}」`).toContain(id))
     // 任务 §5.2 三条 ?raw 断言
     expect(settingsPageSource).not.toContain('CsvMappingDialog')
     expect(settingsPageSource).not.toMatch(/<input[^>]*type="file"/)
@@ -2687,5 +2791,452 @@ describe('v1.4.3 M14 全站展开动画统一（全站锁）', () => {
     expect(recordList).not.toMatch(/slideDown/)
     expect(recordList).toMatch(/<Transition name="batch-bar">/)
     expect(recordList).toMatch(/\.batch-bar-enter-active,\s*\.batch-bar-leave-active/)
+  })
+})
+
+// ── v1.4.3-boot3 M4 CSV 列映射向导（需求 A、E / 设计 §四）───────────────────────
+// 手法（P3 契约冻结）：M1/M3 后端尚未合入 → 本组一律用**逐字取设计 §1.2.5 的 mock previewData**
+// 驱动渲染/禁用/载荷断言；文件选择 → 入库的整链属浏览器实测项（progress.md 待人工抽检清单），
+// jsdom 绿不等于「导入流程已验证」。
+describe('v1.4.3-boot3 CSV 列映射向导', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+  })
+
+  // Cashew 导入模板形态（表头/样例值取设计 §1.2.5 与 §0.3-D21 登记的通用示例，非现场数据）
+  const templatePreview = (overrides = {}) => ({
+    cache_id: 'csv-boot3-1',
+    format: 'cashew_template',
+    row_count: 2,
+    categories_in_file: [],
+    tags_in_file: ['Fruits and Vegetables'],
+    headers: ['Date', 'Amount', 'Category', 'Title', 'Note', 'Account'],
+    header_row_index: 0,
+    columns: [
+      { index: 0, header: 'Date', role: 'consume_time', sample: '2026-09-24 11:07:54.617083' },
+      { index: 1, header: 'Amount', role: 'amount', sample: '-50' },
+      { index: 2, header: 'Category', role: 'category', sample: 'Groceries' },
+      { index: 3, header: 'Title', role: 'tag', sample: 'Fruits and Vegetables' },
+      { index: 4, header: 'Note', role: 'note', sample: 'Paid with cash' },
+      { index: 5, header: 'Account', role: null, sample: '' },
+    ],
+    suggested_type_source: 'sign',
+    encoding: 'utf-8-sig',
+    sample_rows: [
+      ['2026-09-24 11:07:54.617083', '-50', 'Groceries', 'Fruits and Vegetables', 'Paid with cash', ''],
+      ['2026-09-24 11:07:54.617085', '250', 'Bills & Fees', 'Monthly Income', '', ''],
+    ],
+    warnings: [],
+    container: 'csv',
+    ...overrides,
+  })
+
+  // 微信账单形态（11 列表头逐字取设计 §0.4-10；角色预设按 D9；**无分类列** → D8 必选默认分类；
+  // 数据行全合成，container=xlsx 对应 M6 落地后的真实形态）
+  const wechatPreview = (overrides = {}) =>
+    templatePreview({
+      cache_id: 'csv-boot3-2',
+      format: 'wechat',
+      row_count: 3,
+      categories_in_file: [],
+      tags_in_file: [],
+      headers: [
+        '交易时间',
+        '交易类型',
+        '交易对方',
+        '商品',
+        '收/支',
+        '金额(元)',
+        '支付方式',
+        '当前状态',
+        '交易单号',
+        '商户单号',
+        '备注',
+      ],
+      header_row_index: 17,
+      columns: [
+        { index: 0, header: '交易时间', role: 'consume_time', sample: '2026-09-24 11:40:58' },
+        { index: 1, header: '交易类型', role: null, sample: '商户消费' },
+        { index: 2, header: '交易对方', role: 'tag', sample: '示例商户' },
+        { index: 3, header: '商品', role: 'note', sample: '示例商品' },
+        { index: 4, header: '收/支', role: 'type', sample: '支出' },
+        { index: 5, header: '金额(元)', role: 'amount', sample: '9.78' },
+        { index: 6, header: '支付方式', role: null, sample: '零钱' },
+        { index: 7, header: '当前状态', role: null, sample: '支付成功' },
+        { index: 8, header: '交易单号', role: null, sample: '42000' },
+        { index: 9, header: '商户单号', role: null, sample: '/' },
+        { index: 10, header: '备注', role: null, sample: '/' },
+      ],
+      suggested_type_source: 'column',
+      encoding: 'xlsx',
+      sample_rows: [['2026-09-24 11:40:58', '商户消费', '示例商户', '示例商品', '支出', '9.78']],
+      warnings: ['已忽略 17 行前导说明', '未识别到分类列：需指定默认分类'],
+      container: 'xlsx',
+      ...overrides,
+    })
+
+  const mountDialog = async (previewData) => {
+    const wrapper = mount(CsvMappingDialog, {
+      props: { modelValue: true, previewData, categories: reorderCopy() },
+    })
+    await flushPromises()
+    return wrapper
+  }
+
+  // jsdom 无布局引擎也不加载 Vuetify → 文本断言统一压掉空白，避免插值两侧空格漂移
+  const flat = (wrapper) => wrapper.text().replace(/\s+/g, '')
+  const confirmBtn = (wrapper) => wrapper.findAll('v-btn').find((node) => node.text() === '确认导入')
+  // 桩环境下 Vue 把 :disabled 落自定义元素成 attribute（含字符串 'false'）→ 三型并取
+  const confirmDisabled = (wrapper) => {
+    const btn = confirmBtn(wrapper)
+    expect(btn, '确认按钮未渲染').toBeTruthy()
+    const attr = btn.attributes('disabled')
+    return btn.element.disabled === true || (attr != null && attr !== 'false')
+  }
+
+  // 任务 §6.4.1（+ §2.3/§2.4/§2.5）
+  it('用例M4-1: 区块一按 columns 渲染列角色表（初值=后端建议 role）与样例行表格', async () => {
+    const wrapper = await mountDialog(templatePreview())
+    const text = flat(wrapper)
+    expect(text).toContain('来源与列')
+    // 列角色表行数 = columns.length（含 role=null 的丢弃列也要显示，供用户手改）
+    expect(wrapper.findAll('.column-name')).toHaveLength(6)
+    // 初值逐位取 columns[].role（§2.4）
+    expect(wrapper.vm.columnRoles).toEqual({
+      0: 'consume_time',
+      1: 'amount',
+      2: 'category',
+      3: 'tag',
+      4: 'note',
+      5: null,
+    })
+    // 角色下拉选项：不导入 + D3 六角色
+    expect(wrapper.vm.roleOptions.map((o) => o.label)).toEqual([
+      '不导入',
+      '金额',
+      '收/支',
+      '分类',
+      '标签',
+      '时间',
+      '备注',
+    ])
+    expect(wrapper.vm.roleOptions.map((o) => o.value)).toEqual([
+      null,
+      'amount',
+      'type',
+      'category',
+      'tag',
+      'consume_time',
+      'note',
+    ])
+    // 该列样例值（§2.3）
+    expect(text).toContain('样例：2026-09-2411:07:54.617083'.replace(/\s+/g, ''))
+    // 样例行表格：表头行 = headers、数据行 = sample_rows，且横向滚动容器在场（§2.5）
+    expect(wrapper.find('.sample-scroll').exists()).toBe(true)
+    expect(wrapper.findAll('.sample-table thead th').map((n) => n.text())).toEqual([
+      'Date',
+      'Amount',
+      'Category',
+      'Title',
+      'Note',
+      'Account',
+    ])
+    expect(wrapper.findAll('.sample-table tbody tr')).toHaveLength(2)
+    expect(text).toContain('编码：utf-8-sig')
+  })
+
+  // 任务 §2.5（前 5 行截断 + 空态）
+  it('用例M4-2: 样例行只取前 5 行；sample_rows 为空时显示「无数据行」', async () => {
+    const many = await mountDialog(
+      templatePreview({
+        sample_rows: Array.from({ length: 7 }, (_, i) => [`d${i}`, `${i}`]),
+      })
+    )
+    expect(many.findAll('.sample-table tbody tr')).toHaveLength(5)
+
+    const empty = await mountDialog(templatePreview({ sample_rows: [] }))
+    expect(empty.find('.sample-table').exists()).toBe(false)
+    expect(flat(empty)).toContain('无数据行')
+  })
+
+  // 任务 §2.1 + §2.2（§6.4.2）
+  it('用例M4-3: formatLabel 六值中文映射 + 兜底不变；header_row_index>0 出前导行提示', async () => {
+    const six = {
+      native: '本系统格式',
+      cashew: 'Cashew 格式',
+      cashew_template: 'Cashew 模板',
+      alipay: '支付宝账单',
+      wechat: '微信账单',
+      custom: '手动映射',
+    }
+    for (const [format, label] of Object.entries(six)) {
+      const wrapper = await mountDialog(templatePreview({ format }))
+      expect(wrapper.vm.formatLabel).toBe(label)
+    }
+    // SQL 预览复用同组件：format 不在六值集内 → 继续落兜底「未知格式」（行为不变）
+    for (const format of ['sqlite_binary', 'text_sql', 'unknown']) {
+      const wrapper = await mountDialog({ format, row_count: 1, categories_in_file: [], tags_in_file: [] })
+      expect(wrapper.vm.formatLabel).toBe('未知格式')
+    }
+
+    // §6.4.2：header_row_index = 16 → 提示文本含「16」
+    const hint = await mountDialog(wechatPreview({ header_row_index: 16, warnings: [] }))
+    expect(hint.text()).toContain('16')
+    expect(flat(hint)).toContain('已忽略16行账单说明文字')
+    const none = await mountDialog(templatePreview({ header_row_index: 0 }))
+    expect(flat(none)).not.toContain('已忽略')
+    // 后端 warnings 原样透出（§1.2.5 契约字段消费）
+    const warned = await mountDialog(wechatPreview({ warnings: ['已忽略 17 行前导说明'] }))
+    expect(flat(warned)).toContain('已忽略17行前导说明')
+  })
+
+  // 任务 §6.4.3（+ §3.3/§3.4、D8）
+  it('用例M4-4: 无分类列时「账单归入」出现且必选，候选去掉跳过/新建、选定后才可确认并发 fallback_category', async () => {
+    const wrapper = await mountDialog(wechatPreview())
+    // 有分类列的模板 → 整行不渲染
+    const withCategory = await mountDialog(templatePreview())
+    expect(flat(withCategory)).not.toContain('账单归入')
+    expect(withCategory.vm.showFallbackCategory).toBe(false)
+
+    // 无分类列 → 出现且必选
+    expect(flat(wrapper)).toContain('账单归入')
+    expect(wrapper.vm.showFallbackCategory).toBe(true)
+    // D8：禁止自动挂「其他」（候选含其他 id=8，但初值必为 null）
+    expect(wrapper.vm.fallbackCategoryId).toBe(null)
+    expect(wrapper.vm.missingRequiredCount).toBe(1)
+    expect(flat(wrapper)).toContain('未识别到分类列')
+    expect(confirmDisabled(wrapper)).toBe(true)
+
+    // 候选去掉「— 跳过 —」与「+ 新建分类」（必须落到真实分类）
+    expect(wrapper.vm.fallbackCategoryOptions).toEqual([
+      { label: '餐饮', value: 1 },
+      { label: '出行', value: 2 },
+      { label: '购物', value: 3 },
+      { label: '工资', value: 9 },
+      { label: '红包', value: 10 },
+      { label: '其他', value: 8 },
+    ])
+    // 区块三既有 categoryOptions（含跳过/新建）不受影响（用例 10.5 的口径来源）
+    expect(wrapper.vm.categoryOptions[0]).toEqual({ label: '— 跳过 —', value: null })
+    expect(wrapper.vm.categoryOptions[7]).toEqual({ label: '+ 新建分类', value: 'create' })
+
+    wrapper.vm.setFallbackCategory(8)
+    await nextTick()
+    expect(wrapper.vm.missingRequiredCount).toBe(0)
+    expect(wrapper.vm.unmappedCount).toBe(0)
+    expect(confirmDisabled(wrapper)).toBe(false)
+
+    await wrapper.vm.handleConfirm()
+    const payload = wrapper.emitted('confirm')[0][0]
+    expect(payload.fallback_category).toEqual({ action: 'map', target_id: 8 })
+    expect(payload.fallback_category).not.toHaveProperty('type')
+  })
+
+  // 任务 §6.4.4（+ §3.1/§3.2/§3.5、D10）
+  it('用例M4-5: 收支四态——有 type 列才出「按收/支列」，初值取 suggested_type_source，改不导入即回落 sign', async () => {
+    const withType = await mountDialog(wechatPreview())
+    expect(withType.vm.typeSource).toBe('column')
+    expect(withType.vm.typeSourceOptions.map((o) => o.label)).toEqual([
+      '按收/支列',
+      '按金额正负',
+      '全部支出',
+      '全部收入',
+    ])
+    expect(withType.findAll('v-radio')).toHaveLength(4)
+    // §3.5：口径说明随选项切换而变
+    expect(flat(withType)).toContain('按「收/支」列的值逐行判定')
+    withType.vm.setTypeSource('all_expense')
+    await nextTick()
+    expect(flat(withType)).toContain('整表一律记为支出')
+    withType.vm.setTypeSource('sign')
+    await nextTick()
+    // D10/D11：符号法 0 归支出
+    expect(flat(withType)).toContain('0记为支出')
+
+    // 把收支列改成「不导入」（§3.2：当前口径为 column 时才回落）→ 选项消失 + 回落 sign + 卡片内提示
+    withType.vm.setTypeSource('column')
+    await nextTick()
+    withType.vm.setColumnRole(4, null)
+    await nextTick()
+    expect(withType.vm.typeSource).toBe('sign')
+    expect(withType.vm.typeSourceHint).not.toBe('')
+    expect(withType.vm.typeSourceOptions.map((o) => o.value)).toEqual(['sign', 'all_expense', 'all_income'])
+    expect(withType.findAll('v-radio')).toHaveLength(3)
+    expect(flat(withType)).toContain('收支判定已回落为按金额正负')
+    // 用户重新手选口径即清提示
+    withType.vm.setTypeSource('all_income')
+    await nextTick()
+    expect(withType.vm.typeSourceHint).toBe('')
+
+    // 无 type 列（Cashew 模板 suggested=sign）→ 该选项根本不出现
+    const noType = await mountDialog(templatePreview())
+    expect(noType.vm.typeSource).toBe('sign')
+    expect(noType.vm.typeSourceOptions.map((o) => o.value)).toEqual(['sign', 'all_expense', 'all_income'])
+    expect(flat(noType)).toContain('负数记为支出')
+    // 建议 column 但表内无收支列 → 初值自检回落 sign（不给无效选项）
+    const invalid = await mountDialog(templatePreview({ suggested_type_source: 'column' }))
+    expect(invalid.vm.typeSource).toBe('sign')
+  })
+
+  // 任务 §6.4.5（+ §4.1/§4.2）
+  it('用例M4-6: amount/consume_time 列改「不导入」→ missingRequiredCount>0、确认禁用并出缺项中文清单', async () => {
+    const wrapper = await mountDialog(templatePreview())
+    expect(wrapper.vm.missingRequiredCount).toBe(0)
+    expect(wrapper.vm.unmappedCount).toBe(0)
+    expect(confirmDisabled(wrapper)).toBe(false)
+
+    wrapper.vm.setColumnRole(1, null) // Amount 列改不导入
+    await nextTick()
+    expect(wrapper.vm.missingRequiredCount).toBe(1)
+    expect(flat(wrapper)).toContain('缺少「金额」列')
+    expect(confirmDisabled(wrapper)).toBe(true)
+
+    wrapper.vm.setColumnRole(0, null) // Date 列也改不导入
+    await nextTick()
+    expect(wrapper.vm.missingRequiredCount).toBe(2)
+    expect(wrapper.vm.missingRequired.join('|')).toContain('时间')
+    // 与 unmappedCount 并列：后者仍只统计 categories_in_file（§4.3 零改动）
+    expect(wrapper.vm.unmappedCount).toBe(0)
+
+    // 改回来即恢复可确认（columns 载荷按用户最终选择重算）
+    wrapper.vm.setColumnRole(0, 'consume_time')
+    wrapper.vm.setColumnRole(1, 'amount')
+    await nextTick()
+    expect(wrapper.vm.missingRequiredCount).toBe(0)
+    await wrapper.vm.handleConfirm()
+    const payload = wrapper.emitted('confirm')[0][0]
+    expect(payload.columns).toEqual({
+      consume_time: 0,
+      amount: 1,
+      category: 2,
+      tag: 3,
+      note: 4,
+    })
+    expect(payload.type_source).toBe('sign')
+    expect(payload).not.toHaveProperty('fallback_category')
+  })
+
+  // 任务 §6.4.6（+ §1.2/§1.3/§4.4、红线 2）
+  it('用例M4-7: SQL 复用路径（无 columns）→ 区块一/二 find 长度为 0、confirm 载荷三字段缺席', async () => {
+    const sqlPreview = {
+      cache_id: 'sql-cache-1',
+      format: 'sqlite_binary',
+      is_third_party: true,
+      tables: { records: { count: 5 } },
+      categories_in_file: ['餐饮'],
+      tags_in_file: [],
+    }
+    const wrapper = await mountDialog(sqlPreview)
+    const text = flat(wrapper)
+    // 两区块整体不存在
+    expect(wrapper.findAll('.column-name')).toHaveLength(0)
+    expect(wrapper.findAll('.sample-table')).toHaveLength(0)
+    expect(wrapper.findAll('v-radio-group')).toHaveLength(0)
+    expect(text).not.toContain('来源与列')
+    expect(text).not.toContain('收支与默认分类')
+    expect(text).not.toContain('账单归入')
+    // 区块三照常（用例 10.5 的观感基线）
+    expect(text).toContain('分类映射')
+    expect(wrapper.vm.missingRequiredCount).toBe(0)
+
+    await wrapper.vm.handleConfirm()
+    const payload = wrapper.emitted('confirm')[0][0]
+    expect(Object.keys(payload).sort()).toEqual(['category_mapping', 'tag_mapping'])
+    expect(payload).not.toHaveProperty('columns')
+    expect(payload).not.toHaveProperty('type_source')
+    expect(payload).not.toHaveProperty('fallback_category')
+  })
+
+  // 任务 §6.4.7（+ §2.3 空列名、设计 §1.2.6 支付宝尾随逗号）
+  it('用例M4-8: 空列名显示「第 N 列（空列名）」且默认不导入', async () => {
+    const preview = templatePreview({
+      headers: ['交易时间', '交易分类', '金额', ''],
+      columns: [
+        { index: 0, header: '交易时间', role: 'consume_time', sample: '2026-09-24 11:40:58' },
+        { index: 1, header: '交易分类', role: 'category', sample: '餐饮美食' },
+        { index: 2, header: '金额', role: 'amount', sample: '28.16' },
+        { index: 3, header: '', role: null, sample: '' },
+      ],
+      sample_rows: [['2026-09-24 11:40:58', '餐饮美食', '28.16', '']],
+      suggested_type_source: 'sign',
+    })
+    const wrapper = await mountDialog(preview)
+    expect(flat(wrapper)).toContain('第4列（空列名）')
+    expect(wrapper.findAll('.column-name')[3].text()).toBe('第 4 列（空列名）')
+    expect(wrapper.vm.columnRoles[3]).toBe(null)
+    // 表头行同样走空列名口径；空单元格显示占位不破版
+    expect(wrapper.findAll('.sample-table thead th')[3].text()).toBe('第 4 列（空列名）')
+    expect(wrapper.findAll('.sample-table tbody td')[3].text()).toBe('—')
+    // 空列名默认不导入 → 不影响必需角色判定
+    expect(wrapper.vm.missingRequiredCount).toBe(0)
+  })
+
+  // 任务 §6.4.8（+ §1.1 红线、D19）
+  it('用例M4-9: ?raw 红线——源码不含 v-stepper、无新增 vuetify import、Vuetify 标签集合封闭', () => {
+    expect(csvMappingSource).not.toContain('v-stepper')
+    expect(csvMappingSource).not.toMatch(/^\s*import .*['"]vuetify.*['"]\s*$/m)
+    expect(csvMappingSource).not.toMatch(/from ['"]vuetify/)
+    // 既有外壳与滚动容器不动：AppDialog 恰一处、既有滚动样式不动（M14 动画锁同口径）
+    expect(csvMappingSource.match(/<AppDialog\b/g)).toHaveLength(1)
+    // 模板内出现的 Vuetify 标签集合 = 既有五件套 + 任务 §3.1 明定的 v-radio-group/v-radio
+    const tags = [...csvMappingSource.matchAll(/<(v-[a-z-]+)/g)].map((m) => m[1])
+    expect([...new Set(tags)].sort()).toEqual(
+      ['v-btn', 'v-card', 'v-card-title', 'v-icon', 'v-radio', 'v-radio-group', 'v-select'].sort()
+    )
+    // 区块一/二一律绑 previewData?.columns（SQL 复用零变化的唯一保障）
+    expect(csvMappingSource.match(/v-if="previewData\?\.columns"/g)).toHaveLength(2)
+    // 未重命名：文件名/组件用法与既有函数名在场（红线 12）
+    ;['handleConfirm', 'unmappedCount', 'categoryOptions', 'tagOptions', 'setCategoryMapping'].forEach(
+      (name) => expect(csvMappingSource).toContain(name)
+    )
+    // 禁用条件并列（§4.2）：unmappedCount > 0 || missingRequiredCount > 0
+    expect(csvMappingSource).toContain(':disabled="unmappedCount > 0 || missingRequiredCount > 0"')
+  })
+
+  // 任务 §6.4.9（+ §5.5、D29）
+  it('用例M4-10: container=xlsx 出「Excel 工作表」、字段缺席（M1 期/SQL 路径）不渲染；accept 逐字 .csv,.xlsx', async () => {
+    const xlsx = await mountDialog(wechatPreview({ container: 'xlsx' }))
+    expect(flat(xlsx)).toContain('Excel工作表')
+    // encoding 在 xlsx 通道按设计取字符串 "xlsx" → 不当编码值展示
+    expect(flat(xlsx)).not.toContain('文件编码：xlsx'.replace(/\s+/g, ''))
+
+    const asCsv = await mountDialog(wechatPreview({ container: 'csv' }))
+    expect(flat(asCsv)).not.toContain('Excel工作表')
+
+    // container 字段整体缺席（M1 期合法状态，M6 才落地；SQL 响应本就不带）→ 不渲染该 caption
+    const withoutContainer = wechatPreview()
+    delete withoutContainer.container
+    const absent = await mountDialog(withoutContainer)
+    expect(flat(absent)).not.toContain('Excel工作表')
+    expect(flat(absent)).not.toContain('CSV文本')
+    // 区块一其余部分不受影响（字段缺席只少一行 caption）
+    expect(absent.findAll('.column-name')).toHaveLength(11)
+    // xlsx 通道的编码字段缺席/为 xlsx 时都不出「文件编码」行
+    const noEncoding = await mountDialog(
+      wechatPreview({ container: undefined, encoding: undefined })
+    )
+    expect(flat(noEncoding)).not.toContain('文件编码')
+
+    // §5.5 需求 E 前端唯一 DOM 改动：accept 逐字（?raw 口径，不新增状态名）
+    expect(importExportPageSource).toContain('accept=".csv,.xlsx"')
+    expect(importExportPageSource).toContain('accept=".sql,.db"')
+    const inputs = [...importExportPageSource.matchAll(/accept="([^"]*)"/g)].map((m) => m[1])
+    expect(inputs).toEqual(['.csv,.xlsx', '.sql,.db'])
+  })
+
+  // 任务 §2.6 + §4.3：同角色两列前端不阻止、载荷取靠前列（后端 D3 同口径）
+  it('用例M4-11: 同一角色被两列选中时不阻止不报错，载荷与样例仍取靠前列', async () => {
+    const wrapper = await mountDialog(templatePreview())
+    wrapper.vm.setColumnRole(5, 'amount') // 把 Account 列也选成金额
+    await nextTick()
+    expect(wrapper.vm.missingRequiredCount).toBe(0)
+    await wrapper.vm.handleConfirm()
+    const payload = wrapper.emitted('confirm')[0][0]
+    expect(payload.columns.amount).toBe(1) // D3：靠前列胜出
+    expect(payload.columns).not.toHaveProperty('null')
+    // 用户改动不回写 previewData（§2.4）
+    expect(templatePreview().columns[5].role).toBe(null)
+    expect(wrapper.props('previewData').columns[5].role).toBe(null)
   })
 })
