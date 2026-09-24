@@ -6,6 +6,7 @@ import logging
 import re
 import sqlite3
 import tempfile
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Any
 
@@ -24,6 +25,14 @@ from app.models.category import LEGACY_CATEGORY_TYPE, Category
 from app.models.quick_template import QuickTemplate
 from app.models.record import Record
 from app.models.tag import Tag
+from app.services.csv_dialects import (
+    REQUIRED_ROLES,
+    ROLE_LABELS,
+    is_blank_cell,
+    locate_header_rows,
+    match_dialect,
+    resolve_columns,
+)
 from app.utils.cache import delete_cache, read_from_cache, save_to_cache
 from app.utils.history import create_history_entry
 from app.utils.money import round_money
@@ -33,43 +42,63 @@ logger = logging.getLogger(__name__)
 # ── CSV Import ─────────────────────────────────────────────────────
 
 
-def detect_and_decode(file_bytes: bytes) -> str:
-    """Detect encoding: UTF-8 first, then chardet, fallback GBK."""
-    try:
-        return file_bytes.decode("utf-8")
-    except UnicodeDecodeError:
-        pass
+def detect_and_decode(file_bytes: bytes) -> tuple[str, str]:
+    """字节 → `(文本, 编码标签)`（D7 / M1 §3，需求 D 主体）。
+
+    解码序 `utf-8-sig` → `utf-8` → chardet 探测 → `gb18030`(`errors="replace"`) 兜底。
+    `gb18030` 替换原 `gbk`（它是 GBK 超集，覆盖中文账单的生僻字）。返回前统一
+    `lstrip("\ufeff")` 再兜一层：`export_csv` 写 BOM（`export_service.py:69`）而旧实现
+    用 `utf-8` 解码，BOM 粘在首列表头成 `\ufeffamount`（`\ufeff`.isspace() 为 False、
+    `strip()` 去不掉）→ 自家导出回导必报「无法识别」，本函数即该缺陷的修复落点。
+
+    生僻字走 `errors="replace"` 时**不抛**（设计 §1.3 登记的已知边界，不扩范围）。
+    """
+    bom_present = file_bytes.startswith(b"\xef\xbb\xbf")
+    for encoding in ("utf-8-sig", "utf-8"):
+        try:
+            decoded = file_bytes.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+        # `utf-8-sig` 也能解无 BOM 字节 → 标签只在真有 BOM 时报 sig，不谎报
+        label = "utf-8-sig" if (encoding == "utf-8-sig" and bom_present) else "utf-8"
+        return decoded.lstrip("\ufeff"), label
+
     detected = chardet.detect(file_bytes)
-    encoding = detected.get("encoding", "gbk")
+    guess = str(detected.get("encoding") or "")
+    if guess:
+        try:
+            return file_bytes.decode(guess).lstrip("\ufeff"), guess
+        except (UnicodeDecodeError, TypeError, LookupError):
+            pass
+
+    return file_bytes.decode("gb18030", errors="replace").lstrip("\ufeff"), "gb18030"
+
+
+def csv_rows(text: str) -> list[list[str]]:
+    """文本 → **行矩阵** `list[list[str]]`（M1 §4.2，D27 的 CSV 半边）。
+
+    `csv.reader` 对非 CSV 内容（如被改名上传的 xlsx / 任意二进制）会抛英文
+    `_csv.Error: new-line character seen in unquoted field…`，它不是 `ValueError` →
+    落到路由 `Exception` 分支变成 `SERVER_ERROR` 并把内部文案透出给用户（§0.4-14）。
+    此处统一收口为中文 `ValueError`，由路由转 `PARAM_ERROR`。
+
+    产物直接喂 `csv_dialects.locate_header_rows(rows)`；M6 的 xlsx 通道产同型行矩阵，
+    两容器共用同一套表头定位算法（D25）。
+    """
     try:
-        return file_bytes.decode(encoding)
-    except (UnicodeDecodeError, TypeError):
-        return file_bytes.decode("gbk", errors="replace")
+        return [list(row) for row in csv.reader(io.StringIO(text))]
+    except csv.Error as exc:  # 收口英文内部异常（D27）
+        raise ValueError("CSV 文件内容为空或格式不正确") from exc
 
 
 def detect_csv_format(headers: list[str]) -> str:
-    """Detect CSV format: native | cashew | unknown."""
-    normalized = [h.strip().lower() for h in headers]
-    native_headers = {"amount", "type", "category_name", "tag_name", "consume_time", "note"}
-    if set(normalized) == native_headers:
-        return "native"
-    if "title" in normalized and "category name" in normalized:
-        return "cashew"
-    return "unknown"
+    """表头 → 方言 key（`native|cashew|cashew_template|alipay|wechat`）或 `custom`。
 
-
-CASHEW_COLUMN_MAP = {
-    "title": "tag_name",
-    "category name": "category_name",
-    "amount": "amount",
-    "income": "type",
-    "note": "note",
-    "date": "consume_time",
-}
-
-CASHEW_IGNORED_COLUMNS = {
-    "subcategory name", "account", "currency", "wallet",
-}
+    语义从「native|cashew|unknown」扩展为六值枚举之一（M1 §5.2）：未命中内置方言
+    **不抛异常、不再返回 `unknown`**——未知表头进预览由用户手选列角色（需求 A/D）。
+    """
+    dialect = match_dialect(headers)
+    return dialect.key if dialect is not None else "custom"
 
 
 def convert_cashew_type(value: str) -> str:
@@ -90,47 +119,91 @@ def convert_cashew_date(value: str) -> str:
     return value[:16] if len(value) >= 16 else value
 
 
+def _is_blank_row(row: Sequence[str]) -> bool:
+    """全空行判定（现状既有口径，逐字保留）。"""
+    return not row or all(cell.strip() == "" for cell in row)
+
+
+def _cell_by_index(row: Sequence[str], index: int | None) -> str:
+    """按列下标取单元格：越界 / 无该角色列 / 空占位（含 `/`，D31）一律返回空串。"""
+    if index is None or index >= len(row):
+        return ""
+    value = row[index].strip()
+    return "" if is_blank_cell(value) else value
+
+
 async def preview_csv(
     db: AsyncSession, file_bytes: bytes
 ) -> dict[str, Any]:
-    """Preview CSV import: detect format, extract categories/tags, cache file."""
-    content = detect_and_decode(file_bytes)
-    reader = csv.reader(io.StringIO(content))
-    headers = next(reader, None)
-    if not headers:
-        raise ValueError("CSV 文件为空")
+    """预览 CSV：解码 → 行矩阵 → 表头定位 → 方言匹配 → 逐列角色 → 缓存原字节。
 
-    format_type = detect_csv_format(headers)
-    if format_type == "unknown":
-        raise ValueError("无法识别的 CSV 格式")
+    响应契约见设计 §1.2.5（M4 依此冻结）：既有 5 字段全保留，新增 7 字段
+    `headers`/`header_row_index`/`columns`/`suggested_type_source`/`encoding`/
+    `sample_rows`/`warnings`。**第 8 个契约字段 `container` 由 M6 落地**（D29），
+    本模块既不预留空值也不造假值。
 
-    # Build column index lookup
-    normalized_headers = [h.strip().lower() for h in headers]
+    未知表头不再整文件拒绝（需求 A/D）：`format` 落到 `custom`、全列 `role=None`，
+    由用户在前端手选列角色。业务校验（必需列缺失等）只在 `warnings` 提示，
+    确认阶段由 M3 显式拒绝。
 
-    if format_type == "native":
-        cat_idx = normalized_headers.index("category_name")
-        tag_idx = normalized_headers.index("tag_name")
-    else:  # cashew
-        cat_idx = normalized_headers.index("category name")
-        tag_idx = normalized_headers.index("title")
+    注：`db` 形参现状无消费方（设计 §1.2.6 / M1 §5.5 保留签名，路由依赖注入不动）。
+    """
+    text, encoding = detect_and_decode(file_bytes)
+    rows = csv_rows(text)
+    header_row_index, headers, data_rows = locate_header_rows(rows)
 
-    # Parse rows
+    dialect = match_dialect(headers)
+    format_type = dialect.key if dialect is not None else "custom"
+    raw_headers = [cell.strip() for cell in rows[header_row_index]]
+    columns = resolve_columns(raw_headers, dialect, data_rows)
+
+    # 按**列角色**定位分类 / 标签列（取代现状「按表头名硬编码」）
+    role_index: dict[str, int] = {
+        hint.role: hint.index for hint in columns if hint.role is not None
+    }
+    cat_idx: int | None = role_index.get("category")
+    tag_idx: int | None = role_index.get("tag")
+
     categories_in_file: set[str] = set()
     tags_in_file: set[str] = set()
     row_count = 0
 
-    for row in reader:
-        if not row or all(cell.strip() == "" for cell in row):
+    for row in data_rows:
+        if _is_blank_row(row):
             continue
         row_count += 1
 
-        cat_name = row[cat_idx].strip() if len(row) > cat_idx else ""
-        tag_name = row[tag_idx].strip() if len(row) > tag_idx else ""
+        cat_name = _cell_by_index(row, cat_idx)
+        tag_name = _cell_by_index(row, tag_idx)
 
         if cat_name:
             categories_in_file.add(cat_name)
         if tag_name:
             tags_in_file.add(tag_name)
+
+    warnings: list[str] = []
+    if header_row_index > 0:
+        warnings.append(f"已忽略表头前的 {header_row_index} 行说明文字")
+    if "category" not in role_index:
+        warnings.append("未识别到分类列：需指定默认分类")
+    missing_roles = [role for role in REQUIRED_ROLES if role not in role_index]
+    if missing_roles:
+        warnings.append(
+            "缺少必需列：" + "、".join(ROLE_LABELS[role] for role in missing_roles)
+        )
+    dropped = [hint.header for hint in columns if hint.conflict]
+    if dropped:
+        warnings.append("多列对应同一角色：仅保留靠前列，未采用 " + "、".join(dropped))
+
+    if dialect is not None:
+        suggested_type_source = dialect.type_source
+    else:
+        # D10：custom 有收支列走列值，否则按金额正负
+        suggested_type_source = "column" if "type" in role_index else "sign"
+
+    sample_rows: list[list[str]] = [
+        list(row) for row in data_rows if not _is_blank_row(row)
+    ][:5]
 
     # Cache the file
     cache_id = save_to_cache(file_bytes, ".csv")
@@ -141,6 +214,21 @@ async def preview_csv(
         "categories_in_file": sorted(categories_in_file),
         "tags_in_file": sorted(tags_in_file),
         "cache_id": cache_id,
+        "headers": raw_headers,
+        "header_row_index": header_row_index,
+        "columns": [
+            {
+                "index": hint.index,
+                "header": hint.header,
+                "role": hint.role,
+                "sample": hint.sample,
+            }
+            for hint in columns
+        ],
+        "suggested_type_source": suggested_type_source,
+        "encoding": encoding,
+        "sample_rows": sample_rows,
+        "warnings": warnings,
     }
 
 
@@ -177,7 +265,8 @@ async def import_csv_data(
 ) -> dict[str, Any]:
     """Import CSV data with mapping."""
     file_bytes = read_from_cache(cache_id, ".csv")
-    content = detect_and_decode(file_bytes)
+    # 仅改解包以适配 `detect_and_decode` 的新返回形状（M1 §3.4）；落库改造属 M3。
+    content, _encoding = detect_and_decode(file_bytes)
     reader = csv.reader(io.StringIO(content))
     headers = next(reader, None)
 
