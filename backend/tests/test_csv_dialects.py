@@ -620,7 +620,7 @@ class Test88PreviewContract:
         ]
         assert result["warnings"] == []
         assert result["row_count"] == 2  # 中间空行不计入
-        assert "container" not in result  # 第 8 个契约字段属 M6
+        assert result["container"] == "csv"  # 第 8 契约字段已由 M6 落地（原「缺席」断言到期，主 Agent 单点改写）
 
     async def test_8_8_three_warning_classes(self) -> None:
         """warnings 三类：前导行丢弃 / 无分类列 / 缺必需列（§6.4，全中文、无内部术语）。"""
