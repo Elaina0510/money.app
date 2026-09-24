@@ -53,10 +53,20 @@ async def import_csv(
         tag_mapping = {
             k: v.model_dump() for k, v in data.tag_mapping.items()
         }
+        fallback = (
+            data.fallback_category.model_dump()
+            if data.fallback_category is not None
+            else None
+        )
         result = await import_service.import_csv_data(
             db, current_user.id, data.cache_id, data.format,
             cat_mapping, tag_mapping,
+            columns=data.columns,
+            type_source=data.type_source,
+            fallback_category=fallback,
         )
+        # v1.4.3-boot3 D12：`data.skipped_reasons` 随 result 一并返回（五键恒在）；
+        # 后端 message 文案不改（U3），「跳过」的展示由 M4 前端负责。
         return success_response(
             data=result,
             message=f"成功导入 {result['imported_count']} 条记录",

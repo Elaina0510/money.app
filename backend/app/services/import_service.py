@@ -26,13 +26,17 @@ from app.models.quick_template import QuickTemplate
 from app.models.record import Record
 from app.models.tag import Tag
 from app.services.csv_dialects import (
+    DIALECTS,
     REQUIRED_ROLES,
     ROLE_LABELS,
+    ROLES,
+    Dialect,
     is_blank_cell,
     locate_header_rows,
     match_dialect,
     resolve_columns,
 )
+from app.services.csv_values import parse_amount, parse_time, resolve_type
 from app.services.xlsx_reader import detect_container, xlsx_rows
 from app.utils.cache import delete_cache, read_from_cache, save_to_cache
 from app.utils.history import create_history_entry
@@ -153,22 +157,9 @@ def detect_csv_format(headers: list[str]) -> str:
     return dialect.key if dialect is not None else "custom"
 
 
-def convert_cashew_type(value: str) -> str:
-    """Convert Cashew income field to type."""
-    return "income" if value.strip().lower() == "true" else "expense"
-
-
-def convert_cashew_amount(value: str) -> float:
-    """Convert Cashew amount: take absolute value, round to 2 decimals."""
-    try:
-        return round_money(abs(float(value)))
-    except (ValueError, TypeError):
-        return 0.0
-
-
-def convert_cashew_date(value: str) -> str:
-    """Convert Cashew date: truncate to YYYY-MM-DD HH:MM."""
-    return value[:16] if len(value) >= 16 else value
+# D16（v1.4.3-boot3 M3）：`convert_cashew_type` / `convert_cashew_amount` /
+# `convert_cashew_date` 已物理删除、**不留转发壳**——职责由 M2 `csv_values` 的
+# `resolve_type` / `parse_amount` / `parse_time` 承担（`abs()` 口径迁入下方落库半区 D13）。
 
 
 def _is_blank_row(row: Sequence[str]) -> bool:
@@ -309,6 +300,177 @@ async def _resolve_or_create_category(
     return category.id
 
 
+# ── 落库区（M3）：统一按「角色 → 列索引」解析每一行 ────────────────────
+#
+# D16：旧的两套解析 `_parse_native_row`（按**位置** 0..5 取值、完全不看表头）与
+# `_parse_cashew_row`（硬编码字面量 key）已连同 `convert_cashew_*` 一并物理删除，
+# **不留转发壳**。它们造成的「预览按表头名定位、导入按位置读」错位隐患
+# （列序打乱的 native 文件会静默错位入库）由本区的单一角色表消除——
+# 识别与落库两条链路从此共用 `csv_dialects` 的同一份表头/角色实现（D25）。
+
+SKIPPED_REASONS: tuple[str, ...] = (
+    "invalid_amount",
+    "invalid_date",
+    "type_ignored",
+    "type_unresolved",
+    "category_unresolved",
+)
+"""跳过原因五键（D12）：**恒在、缺省 0**。键序与前端 `SKIPPED_REASON_LABELS` 同序
+（M4 取首个非零键的中文标签拼 toast），故此处不得随意调序。"""
+
+
+def _value_by_index(row: Sequence[str], index: int | None) -> str:
+    """按列下标取**原值**（只两端去空白，**不**把 `/` 归成空串）。
+
+    与识别区 `_cell_by_index` 的分工即 D31 的两半：`/` 是**分类 / 标签 / 备注**列的空
+    占位，却是**收支列**的中性交易取值（一手实测 `支出`×176 / `收入`×48 / `/`×4）。
+    收支列若走 `_cell_by_index` 会被归成空串 → 该行记为 `type_unresolved` 而非
+    `type_ignored`，跳过原因失真（结果同为跳过，但用户看到的解释必须准确）。
+    金额列同理把原值交给 `parse_amount`（D13：`/`、`-`、`""` 自然归 None）。
+    """
+    if index is None or index >= len(row):
+        return ""
+    return row[index].strip()
+
+
+def _as_int(value: Any) -> int | None:
+    """把映射载荷里的 id 安全转 int；不可转 / 空值 → ``None``（交由调用方计未落位）。"""
+    try:
+        converted = int(value)
+    except (TypeError, ValueError):
+        return None
+    return converted or None
+
+
+def _default_type_source(
+    format_type: str, dialect: Dialect | None, role_index: dict[str, int]
+) -> str:
+    """``type_source`` 缺省值（D10 / 任务 §2.1）。
+
+    ``format_type`` 参数保留，语义 = 方言 key，**仅用于展示与本缺省**（设计 §3.5
+    「`columns` 与 `format` 矛盾」行：请求 `columns` 才是权威位）：
+    按 `format` 取方言预设 → 取不到则用重算出的方言 → 再退化为 `custom` 推导
+    （有 type 列走 `column`，否则按金额正负）。
+    """
+    source_dialect = DIALECTS.get(format_type) or dialect
+    if source_dialect is not None:
+        return source_dialect.type_source
+    return "column" if "type" in role_index else "sign"
+
+
+def _authoritative_role_index(
+    derived: dict[str, int], requested: dict[str, int] | None, column_count: int
+) -> dict[str, int]:
+    """列角色定稿（任务 §2.3/§2.4）：请求 ``columns`` 是**权威位**。
+
+    - 未发 `columns`（旧前端，D18）→ 用 §2.2 的重算推导值。
+    - 发了 → **整体替换**推导值：前端载荷恒为「用户最终选择的全量角色 → 列索引」
+      （`CsvMappingDialog.roleColumns`），缺席即代表用户把该列改成了「不导入」，
+      此时再补推导值等于违背手选。
+    - 只认 `ROLES` 六角色封闭集（D3）：未知键不参与解析（等价于该角色不导入），
+      最终由 `REQUIRED_ROLES` 的校验兜住。
+
+    Raises:
+        ValueError: 索引非整数 / 为负 / ≥ 列数 → `列索引超出范围`（转 `PARAM_ERROR`，
+            **不依赖 FastAPI 422**，§0.4-8）。
+    """
+    if requested is None:
+        return dict(derived)
+
+    resolved: dict[str, int] = {}
+    for role, index in requested.items():
+        if role not in ROLES:
+            continue
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ValueError("列索引超出范围")
+        if index < 0 or index >= column_count:
+            raise ValueError("列索引超出范围")
+        resolved[role] = index
+    return resolved
+
+
+async def _apply_category_action(
+    db: AsyncSession, user_id: int | None, name: str, action: Any, target_id: Any
+) -> int | None:
+    """把一个 `CategoryMappingItem` 形状的载荷落成 category_id；落不了 → ``None``。"""
+    if action == "create":
+        if not name:
+            # fallback_category 只能沿用行内的分类名；空名（含 `/`，D31）不猜、
+            # 不建出名为 `/` 的分类（D8「禁止自动挂其他」同一条纪律）。
+            return None
+        # v1.4.3 M8：type 恒写占位值（分类收支共用，映射载荷不再携带 type）；
+        # 同名即复用（见 _resolve_or_create_category）。现状登记：此处不设
+        # sort_order（默认 0）、未经 _next_sort_order——本期不扩范围。
+        return await _resolve_or_create_category(db, user_id, name)
+    return _as_int(target_id)
+
+
+async def _resolve_row_category(
+    db: AsyncSession,
+    user_id: int | None,
+    cat_name: str,
+    category_mapping: dict[str, Any],
+    fallback_category: dict[str, Any] | None,
+) -> int | None:
+    """分类落位顺序（任务 §2.6）：`category_mapping` → `fallback_category` → ``None``。
+
+    ``cat_name`` 已由 `_cell_by_index` 把空串与 `/`（D31 一手实测占位符）归一为空，
+    故「值为空或 `/`」与「映射落空」一样都走 `fallback_category`；调用方拿到 ``None``
+    时计 `category_unresolved` 并跳过该行（**不抛异常**，用户可改向导后重试）。
+    """
+    if cat_name:
+        mapped = category_mapping.get(cat_name)
+        if mapped:
+            category_id = await _apply_category_action(
+                db, user_id, cat_name, mapped.get("action"), mapped.get("target_id")
+            )
+            if category_id is not None:
+                return category_id
+    if fallback_category:
+        return await _apply_category_action(
+            db,
+            user_id,
+            cat_name,
+            fallback_category.get("action"),
+            fallback_category.get("target_id"),
+        )
+    return None
+
+
+async def _resolve_row_tag(
+    db: AsyncSession, user_id: int | None, tag_name: str, tag_mapping: dict[str, Any]
+) -> int | None:
+    """标签落位（任务 §2.10）：`create` 分支补**先查后插**。
+
+    修的是 §0.4-6 登记的既有缺陷：`tags` 表没有唯一约束，旧 CSV 分支不查重 →
+    同一文件同名标签出现两次即建两行。手法对齐 SQL 路径的既有同名复用
+    （`select(Tag).where(name, user_id).first()` 命中即复用），**改动仅限 CSV 分支，
+    SQL 侧一字不动**（D17）。
+    """
+    if not tag_name:
+        return None
+    mapping = tag_mapping.get(tag_name)
+    if not mapping:
+        return None
+    if mapping.get("action") == "create":
+        existing = (
+            await db.exec(
+                select(Tag).where(Tag.name == tag_name, Tag.user_id == user_id)
+            )
+        ).first()
+        if existing is not None:
+            return existing.id
+        tag = Tag(
+            name=tag_name,
+            category_id=mapping.get("category_id"),
+            user_id=user_id,
+        )
+        db.add(tag)
+        await db.flush()
+        return tag.id
+    return _as_int(mapping.get("target_id"))
+
+
 async def import_csv_data(
     db: AsyncSession,
     user_id: int | None,
@@ -316,92 +478,97 @@ async def import_csv_data(
     format_type: str,
     category_mapping: dict[str, Any],
     tag_mapping: dict[str, Any],
+    columns: dict[str, int] | None = None,
+    type_source: str | None = None,
+    fallback_category: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Import CSV data with mapping."""
+    """确认阶段落库（CSV / xlsx **同一套代码**）：按角色取单元格 → 清洗 → 落位。
+
+    流程（设计 §3.3）：
+      1. 取回缓存原字节 → `_to_rows()`（M6 §2.5 交接的唯一容器分派器，**不自行
+         `detect_and_decode` + `csv.reader`**，否则 xlsx 确认通道退回乱码）→
+         `locate_header_rows` → `match_dialect` → `resolve_columns`。缓存只存原字节，
+         预览的内存结果不可依赖（§0.4-9），故此处**全量重算**。
+      2. 请求 `columns` 为权威位；`REQUIRED_ROLES` 未覆盖 / 索引越界 → 中文 `ValueError`。
+      3. 逐行 `parse_amount` → `resolve_type` → `parse_time` → 分类 → 标签 → 入库。
+      4. `amount` 入库 `round_money(abs(value))`（D13，方向只由 `type` 承载；旧
+         `convert_cashew_amount` 的 abs 口径迁到此处）；`consume_time` 用 `parse_time`
+         的 16 字符产物（D14），**替换旧「非空即入库」**。
+      5. 返回 `{imported_count, skipped_count, skipped_reasons}`（D12）。
+
+    全空行按既有口径直接跳过、不计入 `skipped_count`（唯一空行判定 `_is_blank_row`，
+    与 `preview_csv` 共用）。历史写入与 `delete_cache` 时机零改动。
+    """
     # M6 §2.4：缓存后缀已按容器实参化，故取回按候选后缀探测、容器判定仍以字节 magic
     # 为准（D22）；`cache_suffix` 供末尾 `delete_cache` 成对使用。
-    # 行矩阵化与「按容器重算」的落库改造属 M3（M3 §2.2 重算步骤直接复用 `_to_rows`）。
     file_bytes = _read_cached_bytes(cache_id)
     cache_suffix = _cache_suffix(detect_container(file_bytes))
-    # 仅改解包以适配 `detect_and_decode` 的新返回形状（M1 §3.4）；落库改造属 M3。
-    content, _encoding = detect_and_decode(file_bytes)
-    reader = csv.reader(io.StringIO(content))
-    headers = next(reader, None)
 
-    # Normalize headers
-    normalized = [h.strip().lower() for h in headers]
+    rows, _container = _to_rows(file_bytes)
+    header_row_index, _normalized_headers, data_rows = locate_header_rows(rows)
+    raw_headers = [cell.strip() for cell in rows[header_row_index]]
+    dialect = match_dialect(raw_headers)
+    hints = resolve_columns(raw_headers, dialect, data_rows)
+    role_index = _authoritative_role_index(
+        {hint.role: hint.index for hint in hints if hint.role is not None},
+        columns,
+        len(raw_headers),
+    )
+    if any(role not in role_index for role in REQUIRED_ROLES):
+        raise ValueError("缺少必需列：金额/交易时间")
+
+    source = (
+        type_source
+        if type_source is not None
+        else _default_type_source(format_type, dialect, role_index)
+    )
 
     imported_count = 0
     skipped_count = 0
+    skipped_reasons: dict[str, int] = {reason: 0 for reason in SKIPPED_REASONS}
     imported_records: list[dict[str, Any]] = []
 
-    for row in reader:
-        if not row or all(cell.strip() == "" for cell in row):
+    def skip(reason: str) -> None:
+        nonlocal skipped_count
+        skipped_count += 1
+        skipped_reasons[reason if reason in skipped_reasons else "type_unresolved"] += 1
+
+    for row in data_rows:
+        if _is_blank_row(row):
             continue
 
-        # Parse row based on format
-        if format_type == "native":
-            amount_str, type_str, cat_name, tag_name, consume_time, note = (
-                _parse_native_row(row)
-            )
-        else:  # cashew
-            amount_str, type_str, cat_name, tag_name, consume_time, note = (
-                _parse_cashew_row(row, normalized)
-            )
-
-        # Validate required fields
-        try:
-            amount = round_money(float(amount_str))
-        except (ValueError, TypeError):
-            skipped_count += 1
+        amount_value = parse_amount(_value_by_index(row, role_index.get("amount")))
+        if amount_value is None:
+            skip("invalid_amount")
             continue
 
-        if type_str not in ("income", "expense"):
-            skipped_count += 1
+        type_str, type_reason = resolve_type(
+            _value_by_index(row, role_index.get("type")), amount_value, source
+        )
+        if type_str is None:
+            skip(type_reason or "type_unresolved")
             continue
 
-        if not consume_time:
-            skipped_count += 1
+        consume_time = parse_time(_cell_by_index(row, role_index.get("consume_time")))
+        if consume_time is None:
+            skip("invalid_date")
             continue
 
-        # Resolve category
-        cat_mapping = category_mapping.get(cat_name)
-        if not cat_mapping:
-            skipped_count += 1
+        cat_name = _cell_by_index(row, role_index.get("category"))
+        category_id = await _resolve_row_category(
+            db, user_id, cat_name, category_mapping, fallback_category
+        )
+        if category_id is None:
+            skip("category_unresolved")
             continue
 
-        if cat_mapping.get("action") == "create":
-            # v1.4.3 M8：type 恒写占位值（分类收支共用，映射载荷不再携带 type）；
-            # 同名即复用（见 _resolve_or_create_category）。
-            # 现状登记：此处不设 sort_order（默认 0）、未经 _next_sort_order——
-            # 本期只改 type 语义，排序行为维持现状不扩范围。
-            category_id = await _resolve_or_create_category(db, user_id, cat_name)
-        else:
-            category_id = cat_mapping.get("target_id")
-            if not category_id:
-                skipped_count += 1
-                continue
+        tag_name = _cell_by_index(row, role_index.get("tag"))
+        tag_id = await _resolve_row_tag(db, user_id, tag_name, tag_mapping)
 
-        # Resolve tag
-        tag_id = None
-        if tag_name:
-            t_mapping = tag_mapping.get(tag_name)
-            if t_mapping:
-                if t_mapping.get("action") == "create":
-                    tag = Tag(
-                        name=tag_name,
-                        category_id=t_mapping.get("category_id"),
-                        user_id=user_id,
-                    )
-                    db.add(tag)
-                    await db.flush()
-                    tag_id = tag.id
-                else:
-                    tag_id = t_mapping.get("target_id")
-
+        note = _cell_by_index(row, role_index.get("note"))
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         record = Record(
-            amount=amount,
+            amount=round_money(abs(amount_value)),
             type=type_str,
             category_id=category_id,
             tag_id=tag_id,
@@ -438,42 +605,18 @@ async def import_csv_data(
     delete_cache(cache_id, cache_suffix)
 
     logger.info(
-        "csv_import done user=%s imported=%d skipped=%d", user_id, imported_count, skipped_count
+        "csv_import done user=%s imported=%d skipped=%d reasons=%s",
+        user_id,
+        imported_count,
+        skipped_count,
+        ",".join(f"{key}={skipped_reasons[key]}" for key in SKIPPED_REASONS),
     )
 
     return {
         "imported_count": imported_count,
         "skipped_count": skipped_count,
+        "skipped_reasons": skipped_reasons,
     }
-
-
-def _parse_native_row(row: list[str]) -> tuple:
-    """Parse a native format CSV row."""
-    amount = row[0].strip() if len(row) > 0 else ""
-    type_ = row[1].strip() if len(row) > 1 else ""
-    cat_name = row[2].strip() if len(row) > 2 else ""
-    tag_name = row[3].strip() if len(row) > 3 else ""
-    consume_time = row[4].strip() if len(row) > 4 else ""
-    note = row[5].strip() if len(row) > 5 else ""
-    return amount, type_, cat_name, tag_name, consume_time, note
-
-
-def _parse_cashew_row(
-    row: list[str], headers: list[str]
-) -> tuple:
-    """Parse a Cashew format CSV row."""
-    data = {}
-    for i, header in enumerate(headers):
-        if i < len(row):
-            data[header] = row[i].strip()
-
-    amount = convert_cashew_amount(data.get("amount", "0"))
-    type_ = convert_cashew_type(data.get("income", "false"))
-    cat_name = data.get("category name", "")
-    tag_name = data.get("title", "")
-    consume_time = convert_cashew_date(data.get("date", ""))
-    note = data.get("note", "")
-    return str(amount), type_, cat_name, tag_name, consume_time, note
 
 
 # ── SQL Import ─────────────────────────────────────────────────────

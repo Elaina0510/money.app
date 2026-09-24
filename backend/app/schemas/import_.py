@@ -20,12 +20,26 @@ class TagMappingItem(BaseModel):
 
 
 class ImportCsvRequest(BaseModel):
-    """CSV import confirm request body."""
+    """CSV import confirm request body.
+
+    v1.4.3-boot3 §3.2（D18）：`columns` / `type_source` / `fallback_category` **全可选**，
+    `category_mapping` / `tag_mapping` 由必填改为**默认空 dict**（微信账单无分类列时前端
+    可只发 `fallback_category`）→ 旧前端不发新字段也能跑。
+    必需角色缺失、列索引越界等业务校验**不放这里**（Pydantic 抛 422 时前端拦截器读不到
+    `detail`，设计 §0.4-8），一律由 service 抛中文 `ValueError` 经路由转 `PARAM_ERROR`。
+    """
 
     cache_id: str
-    format: str = Field(..., pattern="^(native|cashew)$")
-    category_mapping: dict[str, CategoryMappingItem]
-    tag_mapping: dict[str, TagMappingItem]
+    format: str = Field(
+        ..., pattern="^(native|cashew|cashew_template|alipay|wechat|custom)$"
+    )
+    columns: dict[str, int] | None = None  # 角色 → 列索引；缺省 = 后端按方言自行推导
+    type_source: str | None = Field(
+        None, pattern="^(column|sign|all_expense|all_income)$"
+    )
+    fallback_category: CategoryMappingItem | None = None  # 无分类列 / 分类名落空时的默认归入
+    category_mapping: dict[str, CategoryMappingItem] = {}
+    tag_mapping: dict[str, TagMappingItem] = {}
 
 
 class ImportSqlRequest(BaseModel):
