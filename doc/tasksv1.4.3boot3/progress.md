@@ -13,7 +13,7 @@
 | M1 | 后端识别层：解码 + 表头定位（**交付行矩阵契约**）+ 方言与列角色 | A、B、D | `m1-backend-detect-layer.md` | **done** | `449ff6e` |
 | M2 | 后端清洗层：金额/日期/收支三态纯函数 | C | `m2-csv-value-normalization.md` | **done** | `7c3c87f` |
 | **M6** | 后端 **Excel(.xlsx) 容器层**：magic 判定 + stdlib 读表 → 行矩阵（日期序列号在容器层换算为文本） | **E** | `m6-xlsx-container.md` | **done** | `1db6e54` + `d93c736` + 断言修正 `2107429`（见执行记录） |
-| M3 | 后端落库层：统一列角色解析 + 契约扩展 | A、C、D | `m3-backend-import-writer.md` | pending | — |
+| M3 | 后端落库层：统一列角色解析 + 契约扩展 | A、C、D | `m3-backend-import-writer.md` | **done** | `a46b0f2` |
 | M4 | 前端列映射向导（+ `accept` 扩 `.xlsx` 与 Excel 标识） | A、**E** | `m4-frontend-column-mapping.md` | **done** | `158726c`（归属注记见执行记录） |
 | M5 | 端到端真实样例回归 + 文档收口 | 全部总验 | `m5-e2e-and-docs.md` | pending | — |
 
@@ -113,8 +113,8 @@
 
 | 项 | 数值 |
 |----|------|
-| 模块 done | 4 / 6（M1、M2、M4、M6） |
-| checklist 勾选 | 144（M1 50 + M2 22 + M4 41 + M6 31）+ 在途模块待计；M1 未勾 9.1/9.2 与 M6 未勾 5.1 待 M3 反转后由主 Agent 复核补勾 |
+| 模块 done | 5 / 6（M1、M2、M3、M4、M6）；全仓 pytest 603 绿 / vitest 408 绿 |
+| checklist 勾选 | 188（M1 52 含补勾 + M2 22 + M3 44 + M4 41 + M6 32 含补勾）+ M5 待计；未勾仅剩 M4 §7.3 人工观感 1 条 |
 | 待人工抽检 | M4 抄录 5 条（观感截图 / 浏览器整链 / 微信 .xlsx 对照 / 支付宝账单 / .xls 中文透出），与上方既有条目部分同源 |
 | 阻塞 | 0 |
 
@@ -147,7 +147,15 @@
 - 主 Agent 复核认可的偏离：① `io.BytesIO` 入依赖（`zipfile.ZipFile` 不接受裸 bytes，标准库内、零新增第三方，认可）；② §4.10 `header_row_index` 三事不可能同时成立 → 一手事实优先、两口径并测（矩阵内 16 / `extra_preamble=1` 得 17），**M5 §2.9.1 按 M6 交接口径取用**；③ numFmt `formatCode` 含 y/m/d 为设计逐字判据，`[Red]` 理论误判不扩白名单，登记 §6.7 已知边界；④ 预览 CSV 通道对同批字节二次解码取 encoding（性能可忽略，保签名稳定，认可）
 - **合成构造器交接 M5（只调不重写）**：`build_xlsx(rows,*,inline=False,hidden_before=0)->bytes`、`wechat_xlsx_bytes(...)`、`wechat_matrix_rows()`/`wechat_preamble_rows()`/`wechat_data_rows()`、`_zip_write(payload,*,drop="",replace=...)`、常量 `WECHAT_HEADERS`/`DATA_ROW_COUNT`/`DATE_SERIAL_TEXT`/`DATE_TEXT`/日期样式与金额样式索引；均在 `tests/test_xlsx_reader.py` 内 import 复用
 - 待人工抽检抄录：真实微信 `.xlsx` P4 对照 / `.xls` 中文透出 / 用户 Excel 另存 CSV 路径 / 真实浏览器文件选择整链——4 条均与「待人工抽检清单」既有条目（含 M4 抄录行）同源，未新增行
-### M3（pending）
+### M3（done，`a46b0f2`，主 Agent 2026-09-24 核验通过）
+- 提交 pathspec 精确（6 文件含夹具）；任务文件 **44/44 全勾**；`money.db` SHA256 逐字未变
+- 主 Agent 复跑：全量 pytest **603 passed / 0 failed / 0 skipped**（本批首次全仓绿灯，含 §5.1 反转闭合）；mypy **85 errors/14 files**（基线 89 → 零新增且 -3）；ruff clean；SQL 区与识别区分派函数在 diff 中**零命中/零删除行**实证
+- D16 旧符号零残留：`def` 与调用点全域零命中，剩余命中全为注释/docstring 溯源（`import_service.py:495`、`test_csv_import_export.py:936-938` 等，合法）；`import_csv_data` 内裸 `csv.reader` 已消失（M6 遗留点闭合，xlsx 确认通道经 `_to_rows` 打通）；`detect_and_decode` 不再被 `import_csv_data` 直接调用
+- 夹具可跟踪实证：`git ls-files` 命中 `cashew_import_template.csv`（工作树 181 B / blob 179 B 系 autocrlf 归一，用例只按字节流解析不断言长度——主 Agent 认可）；`example/` 字面量全域零命中延续（M3 新注释按 `d93c736` 同口径书写）
+- **P3 契约差异终核（M3 notes，主 Agent 认可）：与 M4 冻结契约零差异**。关键裁定：① `columns` 权威位 = **整体替换**语义（与 M4 恒发全量角色的载荷行为天然匹配，§5.5 正反锁死）；② CSV 成功文案：后端 message 保持「成功导入 N 条记录」一字未动（U3），前端 toast「成功导入 N 条」为本地拼接不消费后端 message——**两口径不冲突，无需 M4 修正轮**（M4 台账中的该项疑虑就此销项）；③ `skipped_reasons` 键序与前端 `SKIPPED_REASON_LABELS` 逐位同序已核
+- 主 Agent 复核认可的偏离：(1) 落库侧新增私有 `_value_by_index`（只 strip 不归 `/`）防 `type_ignored`/`type_unresolved` 标签失真，**未回改 M1 `_cell_by_index`**（预览语义不变）——D31 落库半区的正确收口；(2) 索引越界以表头单元格数为基准、未知角色键由 `REQUIRED_ROLES` 兜底；(3) §5.11 xlsx HTTP 端到端按任务归 M5 §2.9，M3 实走 `_to_rows` 服务层
+- **M1 §9.1/§9.2 与 M6 §5.1 到期未勾项：主 Agent 已补勾**（任务文件内附引用块说明，随本批 progress 提交）
+- 待人工抽检抄录：M3 手工项 6.2/6.3/6.5 均已在 HTTP/git 层自动覆盖并实证（6.2→§5.3/5.4/5.10 读 `/api/records` 回核；6.3→SHA256 双对照+工作树盘点；6.5→ls-files+show --stat），登记为「已自动化实测，人工无需复做」
 ### M4（done，内容全量落在 `158726c`，主 Agent 2026-09-24 核验通过）
 - **提交归属注记（并行事故，内容无损）**：M4 子 Agent 按 pathspec `git add` 后其 3 次 `git commit` 均被权限层拦下（未产生独立 feat 提交）；主 Agent 提交 progress.md 时 git 默认提交整个索引，把 M4 四文件（`CsvMappingDialog.vue`/`SettingsImportExportPage.vue`/`SettingsSubPages.test.js`/其任务文件）**一并带入 `158726c`**（标题仍为 M2 落盘）。核验 `git show --name-only 158726c` = 该四文件 + progress.md，**不含 M1 在途文件**；工作树与 HEAD 对这 4 文件零差异；不 rewrite 历史（禁 amend/reset），特此登记。此后主 Agent 提交 progress.md 一律 `git commit -- <path>` 只提指定路径。
 - 任务文件 41/42 勾选（唯一未勾 = §7.3 明暗×竖/宽屏观感，人工终判类，正确留人工）
