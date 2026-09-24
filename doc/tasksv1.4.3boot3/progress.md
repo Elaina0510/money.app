@@ -12,7 +12,7 @@
 |------|------|------|----------|------|------|
 | M1 | 后端识别层：解码 + 表头定位（**交付行矩阵契约**）+ 方言与列角色 | A、B、D | `m1-backend-detect-layer.md` | **done** | `449ff6e` |
 | M2 | 后端清洗层：金额/日期/收支三态纯函数 | C | `m2-csv-value-normalization.md` | **done** | `7c3c87f` |
-| **M6** | 后端 **Excel(.xlsx) 容器层**：magic 判定 + stdlib 读表 → 行矩阵（日期序列号在容器层换算为文本） | **E** | `m6-xlsx-container.md` | pending | — |
+| **M6** | 后端 **Excel(.xlsx) 容器层**：magic 判定 + stdlib 读表 → 行矩阵（日期序列号在容器层换算为文本） | **E** | `m6-xlsx-container.md` | **done** | `1db6e54` + `d93c736` + 断言修正 `2107429`（见执行记录） |
 | M3 | 后端落库层：统一列角色解析 + 契约扩展 | A、C、D | `m3-backend-import-writer.md` | pending | — |
 | M4 | 前端列映射向导（+ `accept` 扩 `.xlsx` 与 Excel 标识） | A、**E** | `m4-frontend-column-mapping.md` | **done** | `158726c`（归属注记见执行记录） |
 | M5 | 端到端真实样例回归 + 文档收口 | 全部总验 | `m5-e2e-and-docs.md` | pending | — |
@@ -113,8 +113,8 @@
 
 | 项 | 数值 |
 |----|------|
-| 模块 done | 3 / 6（M1、M2、M4） |
-| checklist 勾选 | 113（M1 50 + M2 22 + M4 41）+ 在途模块待计；M1 未勾 9.1/9.2 待 M3 反转后由主 Agent 复核补勾 |
+| 模块 done | 4 / 6（M1、M2、M4、M6） |
+| checklist 勾选 | 144（M1 50 + M2 22 + M4 41 + M6 31）+ 在途模块待计；M1 未勾 9.1/9.2 与 M6 未勾 5.1 待 M3 反转后由主 Agent 复核补勾 |
 | 待人工抽检 | M4 抄录 5 条（观感截图 / 浏览器整链 / 微信 .xlsx 对照 / 支付宝账单 / .xls 中文透出），与上方既有条目部分同源 |
 | 阻塞 | 0 |
 
@@ -138,7 +138,15 @@
 - 子 Agent 登记的偏离/收口（主 Agent 复核认可，不判偏离）：`math.isfinite` 兜底 inf/nan→None（验收标准「绝不静默产脏值」必要收口，有专门用例）；`元` 首尾皆剥；`(-12.00)`→+12.0（括号取负语义）；`parse_time` 不做 NFKC（全角日期不猜）；任务文件 §1.3 line25 内部矛盾按 D10+边界表实现为 `>0`→income、`<=0`→expense
 - 已知边界（§5.3 登记）：歧义日期序不支持、CSV 侧无 Unix 时间戳换算、Excel 改「常规」另存的裸序列号 `46289.48…` 判 None
 - 待人工抽检：M2 无新增人工项（其手工口径已被 §4.1–4.8 自动化覆盖）
-### M6（pending）
+### M6（done，`1db6e54` + `d93c736` + 主 Agent 断言修正 `2107429`，2026-09-24 核验通过）
+- 提交 pathspec 精确（4 文件；`d93c736` 为测试注释去 `example/` 字面量的红线自查修正）；任务文件 31/32（唯一未勾 §5.1 全量绿 = 两登记内红灯，沿 M1 §9.1 口径不静默勾选）
+- **container 到期断言处置（主 Agent P3 单点）**：M1 `test_8_8` 原断言 `"container" not in result`（自带注释「属 M6」）到期 → 主 Agent 改写为 `result["container"]=="csv"`（`2107429`，改断言不改后端）。M6 不越界改 M1 独占文件、不删契约，处置正确
+- 主 Agent 复跑：`test_csv_dialects.py`+`test_xlsx_reader.py` **132 passed**；全量 **588 passed / 1 failed**（唯一红灯 = `test_preview_unknown_format`，M3 §5.1 预留反转）；mypy **88 errors/14 files** 零新增（`xlsx_reader.py` 自身 strict 零报错）；ruff clean
+- 红线 grep 实证：四表头函数 `def` 仍只在 `csv_dialects.py`；`openpyxl|xlrd|pandas` 零命中；`example/` 零命中；裸 `csv.reader` 现状 = `csv_rows` 内收口 1 处（合法）+ **`import_csv_data` :328 归 M3** + SQL 区 :531/:1508 禁触不计；money.db SHA256 逐字未变
+- 交接 M3 的关键事实：`_to_rows(file_bytes)->(rows, container)` @ `import_service.py:105`（**M3 §2.2 确认阶段重算必须调用它**，同批字节两次调用必得同一 container）；配套 `_cache_suffix` :99 / `_read_cached_bytes` :131（后缀已成对）；**遗留禁触 = `import_csv_data` :324-328 的 `detect_and_decode`+裸 `csv.reader` 三步与行循环，M3 用 `_to_rows` 替换即闭合 xlsx 确认通道**；行号漂移：detect_and_decode :46、csv_rows :78、preview_csv :187
+- 主 Agent 复核认可的偏离：① `io.BytesIO` 入依赖（`zipfile.ZipFile` 不接受裸 bytes，标准库内、零新增第三方，认可）；② §4.10 `header_row_index` 三事不可能同时成立 → 一手事实优先、两口径并测（矩阵内 16 / `extra_preamble=1` 得 17），**M5 §2.9.1 按 M6 交接口径取用**；③ numFmt `formatCode` 含 y/m/d 为设计逐字判据，`[Red]` 理论误判不扩白名单，登记 §6.7 已知边界；④ 预览 CSV 通道对同批字节二次解码取 encoding（性能可忽略，保签名稳定，认可）
+- **合成构造器交接 M5（只调不重写）**：`build_xlsx(rows,*,inline=False,hidden_before=0)->bytes`、`wechat_xlsx_bytes(...)`、`wechat_matrix_rows()`/`wechat_preamble_rows()`/`wechat_data_rows()`、`_zip_write(payload,*,drop="",replace=...)`、常量 `WECHAT_HEADERS`/`DATA_ROW_COUNT`/`DATE_SERIAL_TEXT`/`DATE_TEXT`/日期样式与金额样式索引；均在 `tests/test_xlsx_reader.py` 内 import 复用
+- 待人工抽检抄录：真实微信 `.xlsx` P4 对照 / `.xls` 中文透出 / 用户 Excel 另存 CSV 路径 / 真实浏览器文件选择整链——4 条均与「待人工抽检清单」既有条目（含 M4 抄录行）同源，未新增行
 ### M3（pending）
 ### M4（done，内容全量落在 `158726c`，主 Agent 2026-09-24 核验通过）
 - **提交归属注记（并行事故，内容无损）**：M4 子 Agent 按 pathspec `git add` 后其 3 次 `git commit` 均被权限层拦下（未产生独立 feat 提交）；主 Agent 提交 progress.md 时 git 默认提交整个索引，把 M4 四文件（`CsvMappingDialog.vue`/`SettingsImportExportPage.vue`/`SettingsSubPages.test.js`/其任务文件）**一并带入 `158726c`**（标题仍为 M2 落盘）。核验 `git show --name-only 158726c` = 该四文件 + progress.md，**不含 M1 在途文件**；工作树与 HEAD 对这 4 文件零差异；不 rewrite 历史（禁 amend/reset），特此登记。此后主 Agent 提交 progress.md 一律 `git commit -- <path>` 只提指定路径。
