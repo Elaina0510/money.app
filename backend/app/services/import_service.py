@@ -33,6 +33,7 @@ from app.services.csv_dialects import (
     match_dialect,
     resolve_columns,
 )
+from app.services.xlsx_reader import detect_container, xlsx_rows
 from app.utils.cache import delete_cache, read_from_cache, save_to_cache
 from app.utils.history import create_history_entry
 from app.utils.money import round_money
@@ -91,6 +92,57 @@ def csv_rows(text: str) -> list[list[str]]:
         raise ValueError("CSV 文件内容为空或格式不正确") from exc
 
 
+CSV_CACHE_SUFFIX = ".csv"
+XLSX_CACHE_SUFFIX = ".xlsx"
+CACHE_SUFFIXES: tuple[str, ...] = (CSV_CACHE_SUFFIX, XLSX_CACHE_SUFFIX)
+
+
+def _cache_suffix(container: str) -> str:
+    """容器标签 → 缓存文件后缀（**只是文件名装饰**，判据永远是 magic，D22）。"""
+    return XLSX_CACHE_SUFFIX if container == "xlsx" else CSV_CACHE_SUFFIX
+
+
+def _to_rows(file_bytes: bytes) -> tuple[list[list[str]], str]:
+    """字节 → **（行矩阵, 容器标签）**（M6 §2.1，设计 §6.3 第 1 步）。
+
+    本文件唯一的容器分叉点：`detect_container` 只看 magic（D22，不信扩展名与缓存后缀）——
+    `xlsx` → `xlsx_rows()`；`xls` → 中文 `ValueError` 指引另存；其余 → M1 的
+    `detect_and_decode()` + `csv_rows()`。三条出口产**同型**行矩阵，其后
+    `locate_header_rows` / `match_dialect` / `resolve_columns` 一套代码共用（D25）。
+
+    Returns:
+        `(行矩阵, container)`，`container ∈ {"csv", "xlsx"}`。
+
+    Raises:
+        ValueError: 全中文文案（D27）——`.xls` 指引、`Excel 文件为空`、
+            `文件不是有效的 Excel(.xlsx)`、`Excel 文件过大或格式异常`、CSV 侧既有文案。
+
+    M3 交接：确认阶段的重算步骤**直接调用本函数**（对同一批字节返回与预览同一 `container`）。
+    """
+    container = detect_container(file_bytes)
+    if container == "xls":
+        raise ValueError("暂不支持 .xls，请在 Excel 里另存为 .xlsx 或 .csv")
+    if container == "xlsx":
+        return xlsx_rows(file_bytes), "xlsx"
+    text, _encoding = detect_and_decode(file_bytes)
+    return csv_rows(text), "csv"
+
+
+def _read_cached_bytes(cache_id: str) -> bytes:
+    """按候选后缀取回缓存原字节（M6 §2.4 与 `save_to_cache` 成对的**另一半**）。
+
+    `cache.py:_cache_path` 只做字符串拼接，后缀写死 `.csv` 时 xlsx 缓存必然
+    「缓存文件不存在」；而按 `cache_id` 逐个探测再交给 magic 判定，才不违反
+    D22「不信缓存后缀」。取回后容器仍以字节 magic 为准。
+    """
+    for suffix in CACHE_SUFFIXES:
+        try:
+            return read_from_cache(cache_id, suffix)
+        except FileNotFoundError:
+            continue
+    raise FileNotFoundError("缓存文件不存在或已过期")
+
+
 def detect_csv_format(headers: list[str]) -> str:
     """表头 → 方言 key（`native|cashew|cashew_template|alipay|wechat`）或 `custom`。
 
@@ -135,12 +187,13 @@ def _cell_by_index(row: Sequence[str], index: int | None) -> str:
 async def preview_csv(
     db: AsyncSession, file_bytes: bytes
 ) -> dict[str, Any]:
-    """预览 CSV：解码 → 行矩阵 → 表头定位 → 方言匹配 → 逐列角色 → 缓存原字节。
+    """预览（CSV / xlsx 两容器）：magic 判容器 → 行矩阵 → 表头定位 → 方言匹配 → 逐列角色。
 
     响应契约见设计 §1.2.5（M4 依此冻结）：既有 5 字段全保留，新增 7 字段
     `headers`/`header_row_index`/`columns`/`suggested_type_source`/`encoding`/
-    `sample_rows`/`warnings`。**第 8 个契约字段 `container` 由 M6 落地**（D29），
-    本模块既不预留空值也不造假值。
+    `sample_rows`/`warnings`；第 8 个契约字段 **`container`（`"csv" | "xlsx"`）由 M6
+    的容器分派器给出**（D29）——老前端不读即可（D18）。xlsx 通道无字符编码可言，
+    `encoding` 按设计定死取哨兵字符串 `"xlsx"`（不是错值，M4 已按「不当编码展示」处理）。
 
     未知表头不再整文件拒绝（需求 A/D）：`format` 落到 `custom`、全列 `role=None`，
     由用户在前端手选列角色。业务校验（必需列缺失等）只在 `warnings` 提示，
@@ -148,8 +201,8 @@ async def preview_csv(
 
     注：`db` 形参现状无消费方（设计 §1.2.6 / M1 §5.5 保留签名，路由依赖注入不动）。
     """
-    text, encoding = detect_and_decode(file_bytes)
-    rows = csv_rows(text)
+    rows, container = _to_rows(file_bytes)
+    encoding = "xlsx" if container == "xlsx" else detect_and_decode(file_bytes)[1]
     header_row_index, headers, data_rows = locate_header_rows(rows)
 
     dialect = match_dialect(headers)
@@ -205,8 +258,8 @@ async def preview_csv(
         list(row) for row in data_rows if not _is_blank_row(row)
     ][:5]
 
-    # Cache the file
-    cache_id = save_to_cache(file_bytes, ".csv")
+    # Cache the file —— 后缀按容器实参化（M6 §2.4，与 `_read_cached_bytes` 成对）
+    cache_id = save_to_cache(file_bytes, _cache_suffix(container))
 
     return {
         "format": format_type,
@@ -227,6 +280,7 @@ async def preview_csv(
         ],
         "suggested_type_source": suggested_type_source,
         "encoding": encoding,
+        "container": container,
         "sample_rows": sample_rows,
         "warnings": warnings,
     }
@@ -264,7 +318,11 @@ async def import_csv_data(
     tag_mapping: dict[str, Any],
 ) -> dict[str, Any]:
     """Import CSV data with mapping."""
-    file_bytes = read_from_cache(cache_id, ".csv")
+    # M6 §2.4：缓存后缀已按容器实参化，故取回按候选后缀探测、容器判定仍以字节 magic
+    # 为准（D22）；`cache_suffix` 供末尾 `delete_cache` 成对使用。
+    # 行矩阵化与「按容器重算」的落库改造属 M3（M3 §2.2 重算步骤直接复用 `_to_rows`）。
+    file_bytes = _read_cached_bytes(cache_id)
+    cache_suffix = _cache_suffix(detect_container(file_bytes))
     # 仅改解包以适配 `detect_and_decode` 的新返回形状（M1 §3.4）；落库改造属 M3。
     content, _encoding = detect_and_decode(file_bytes)
     reader = csv.reader(io.StringIO(content))
@@ -377,7 +435,7 @@ async def import_csv_data(
         )
 
     await db.commit()
-    delete_cache(cache_id, ".csv")
+    delete_cache(cache_id, cache_suffix)
 
     logger.info(
         "csv_import done user=%s imported=%d skipped=%d", user_id, imported_count, skipped_count
