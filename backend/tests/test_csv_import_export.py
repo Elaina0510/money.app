@@ -1183,3 +1183,77 @@ class TestCsvV144Decisions:
         assert body["code"] == 0, body["message"]
         rows = await _records(auth_client)
         assert [r["note"] for r in rows] == ["午饭"], "int 载荷只取那一列，不做拼接"
+
+    async def test_v144_preview_categories_suggested_reuses_the_auto_match_chain(
+        self, auth_client: AsyncClient
+    ):
+        """v1.4.4 前端轮的唯一后端扩展：`categories_suggested` 与落库链**同源同值**。
+
+        形状逐字对齐前端简报：键 = `categories_in_file` 的同名值、值 = `_match_category_auto`
+        命中的现有分类 id，未命中为 ``None``（前端据此留「— 跳过 —」= 交给后端兜底）。
+        同义词 `饮食→餐饮` 与双向包含 `餐饮美食⊇餐饮` 都要出预选值——conftest 预置的
+        全局预设「餐饮」（`user_id IS NULL`）正是预览候选集里的行。
+        """
+        preset_food = await _category_id_by_name(auth_client, "餐饮")
+        raw = (
+            WECHAT_HEADER + "\n"
+            "2024-05-20 09:00:00,饮食,甲店,午饭,支出,¥10.00,零钱,成功,S144A,/,/\n"
+            "2024-05-21 09:00:00,餐饮美食,乙店,晚饭,支出,¥20.00,零钱,成功,S144B,/,/\n"
+            "2024-05-22 09:00:00,外星货币,丙店,纪念品,支出,¥30.00,零钱,成功,S144C,/,/"
+        ).encode()
+
+        data = await _preview(auth_client, raw)
+        assert data["categories_in_file"] == ["外星货币", "餐饮美食", "饮食"]
+        assert set(data["categories_suggested"]) == set(data["categories_in_file"]), \
+            "键集与 categories_in_file 同名同集"
+        assert data["categories_suggested"] == {
+            "饮食": preset_food,
+            "餐饮美食": preset_food,
+            "外星货币": None,
+        }
+        # 预览只读不写：给了建议也不得顺手建出同义分类
+        assert "饮食" not in await _category_names(auth_client)
+
+        # 同口径终证：不带任何映射直接确认，两行仍落到**同一个**预设分类、第三行挂「其他」
+        body = await _confirm(auth_client, data["cache_id"], "wechat")
+        assert body["code"] == 0, body["message"]
+        assert body["data"]["skipped_reasons"] == {
+            "invalid_amount": 0,
+            "invalid_date": 0,
+            "type_ignored": 0,
+            "type_unresolved": 0,
+            "category_unresolved": 0,
+        }, "新增可选字段不得动 skipped_reasons 五键（D12）"
+        rows = {r["note"]: r for r in await _records(auth_client)}
+        assert rows["甲店·午饭"]["category_id"] == preset_food, "预览建议 == 落库自动匹配结果"
+        assert rows["乙店·晚饭"]["category_id"] == preset_food
+        other_id = await _category_id_by_name(auth_client, "其他")
+        assert rows["丙店·纪念品"]["category_id"] == other_id
+
+    async def test_v144_preview_without_category_column_suggests_nothing(
+        self, auth_client: AsyncClient
+    ):
+        """无分类列 → `categories_suggested` 是**空字典**（不是缺席），其余字段一字不动。"""
+        data = await _preview(auth_client, b"col1,col2,col3\na,b,c")
+        assert data["format"] == "custom"
+        assert data["categories_in_file"] == []
+        assert data["categories_suggested"] == {}
+        assert data["tags_in_file"] == []
+        assert "未识别到分类列：需指定默认分类" in data["warnings"], "告警口径不变（本批零扩围）"
+        # 预览响应契约字段全集：既有 13 + 本批新增 1，多一个少一个都算契约漂移
+        assert sorted(data) == [
+            "cache_id",
+            "categories_in_file",
+            "categories_suggested",
+            "columns",
+            "container",
+            "encoding",
+            "format",
+            "header_row_index",
+            "headers",
+            "row_count",
+            "sample_rows",
+            "suggested_type_source",
+            "tags_in_file",
+            "warnings",
+        ]

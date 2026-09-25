@@ -45,7 +45,8 @@ from app.utils.cache import delete_cache, read_from_cache
 # 用例无需 `pytestmark`：pyproject 已配 `asyncio_mode = "auto"`，异步用例自动收集。
 
 NO_DB = cast(AsyncSession, None)
-"""`preview_csv` 的 `db` 形参现状无消费方（设计 §1.2.6），本文件按 §1.2.6 直接传 None。"""
+"""v1.4.4 起 `preview_csv` 的 `db` **有了消费方**（文件带分类值时算 `categories_suggested`）
+→ 只有「解析首步即抛、根本不触库」的 `.xls` 用例仍传 None，其余预览用例改带真实会话。"""
 
 MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
 REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -902,12 +903,12 @@ def test_preamble_drift_still_locates_the_header() -> None:
 
 
 # ══════════════════════════════════════════════════════════════════
-#  §4.10 分派与契约：preview_csv 八字段 + 缓存后缀成对
+#  §4.10 分派与契约：preview_csv 九字段（含 v1.4.4 `categories_suggested`）+ 缓存后缀成对
 # ══════════════════════════════════════════════════════════════════
 
 
-async def test_preview_contract_for_synthetic_xlsx() -> None:
-    result = await import_service.preview_csv(NO_DB, wechat_xlsx_bytes())
+async def test_preview_contract_for_synthetic_xlsx(db_session: AsyncSession) -> None:
+    result = await import_service.preview_csv(db_session, wechat_xlsx_bytes())
     assert result["container"] == "xlsx"
     assert result["encoding"] == "xlsx"
     assert result["format"] == "wechat"
@@ -921,10 +922,14 @@ async def test_preview_contract_for_synthetic_xlsx() -> None:
         "v1.4.4 V2：微信的分类来源是 `交易类型` 列"
     assert f"已忽略表头前的 {result['header_row_index']} 行说明文字" in result["warnings"]
     assert "未识别到分类列：需指定默认分类" not in result["warnings"], "V2：微信已有分类列"
+    # v1.4.4 第 9 字段：四个交易类型都命中不了现有分类 → 逐个 None（键集仍同名同集）
+    assert set(result["categories_suggested"]) == set(result["categories_in_file"])
+    assert set(result["categories_suggested"].values()) == {None}
     assert set(result) == {
         "format",
         "row_count",
         "categories_in_file",
+        "categories_suggested",
         "tags_in_file",
         "cache_id",
         "headers",
@@ -938,21 +943,21 @@ async def test_preview_contract_for_synthetic_xlsx() -> None:
     }
 
 
-async def test_preview_header_row_index_can_be_seventeen() -> None:
+async def test_preview_header_row_index_can_be_seventeen(db_session: AsyncSession) -> None:
     """§4.10 的字面口径：17 条**存在**的前导行 → `header_row_index == 17`。
 
     真实镜像夹具（第 16 行整体缺失）前导**存在**行只有 16 条，故上一条断言 16；
     此处以「再加一条合成前导注释」的变体把 17 口径也钉住（两个口径都在场）。
     """
-    result = await import_service.preview_csv(NO_DB, wechat_xlsx_bytes(extra_preamble=1))
+    result = await import_service.preview_csv(db_session, wechat_xlsx_bytes(extra_preamble=1))
     assert result["header_row_index"] == 17
     assert result["container"] == "xlsx"
     assert result["row_count"] == DATA_ROW_COUNT
 
 
-async def test_csv_channel_contract_is_unchanged() -> None:
+async def test_csv_channel_contract_is_unchanged(db_session: AsyncSession) -> None:
     text = "amount,type,category_name,tag_name,consume_time,note\n50.0,expense,餐饮,午餐,2024-01-15 12:00,测试\n"
-    result = await import_service.preview_csv(NO_DB, text.encode("utf-8"))
+    result = await import_service.preview_csv(db_session, text.encode("utf-8"))
     assert result["container"] == "csv"
     assert result["encoding"] == "utf-8"
     assert result["header_row_index"] == 0
@@ -960,10 +965,10 @@ async def test_csv_channel_contract_is_unchanged() -> None:
     assert result["row_count"] == 1
 
 
-async def test_cache_suffix_pairing_roundtrip() -> None:
+async def test_cache_suffix_pairing_roundtrip(db_session: AsyncSession) -> None:
     """缓存后缀成对：按 `cache_id` 读回同批字节并重算出同一 container（M6 §2.4）。"""
     payload = wechat_xlsx_bytes()
-    result = await import_service.preview_csv(NO_DB, payload)
+    result = await import_service.preview_csv(db_session, payload)
     cache_id = result["cache_id"]
 
     recovered = read_from_cache(cache_id, ".xlsx")
@@ -981,9 +986,9 @@ async def test_cache_suffix_pairing_roundtrip() -> None:
         import_service._read_cached_bytes(cache_id)
 
 
-async def test_csv_cache_still_uses_csv_suffix() -> None:
+async def test_csv_cache_still_uses_csv_suffix(db_session: AsyncSession) -> None:
     text = "amount,type,category_name,tag_name,consume_time,note\n50.0,expense,餐饮,,2024-01-15 12:00,x\n"
-    result = await import_service.preview_csv(NO_DB, text.encode("utf-8"))
+    result = await import_service.preview_csv(db_session, text.encode("utf-8"))
     cache_id = result["cache_id"]
     assert read_from_cache(cache_id, ".csv") == text.encode("utf-8")
     assert import_service._read_cached_bytes(cache_id) == text.encode("utf-8")
@@ -1009,13 +1014,13 @@ def test_slash_in_type_column_is_type_ignored_not_unresolved() -> None:
     assert resolve_type("收入", 10.0, "column") == ("income", None)
 
 
-async def test_slash_placeholder_absent_from_categories_and_tags() -> None:
+async def test_slash_placeholder_absent_from_categories_and_tags(db_session: AsyncSession) -> None:
     """§3.2：`/` 在分类 / 标签 / 备注列按空串处理，不进 `categories_in_file`/`tags_in_file`。
 
     v1.4.4 V2：镜像的 `交易对方` 已改判 note（备注来源）→ 微信形态**没有** tag 列，
     `tags_in_file` 恒为空集；分类集合改由 `交易类型` 供值，`/` 那一行的值仍被排除在外。
     """
-    result = await import_service.preview_csv(NO_DB, wechat_xlsx_bytes())
+    result = await import_service.preview_csv(db_session, wechat_xlsx_bytes())
     assert "/" not in result["categories_in_file"]
     assert "/" not in result["tags_in_file"]
     assert result["tags_in_file"] == [], "V2：微信不再产生标签（交易对方→note）"

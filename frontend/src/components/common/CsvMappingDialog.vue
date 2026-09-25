@@ -87,28 +87,37 @@
         </v-radio-group>
         <div v-if="typeSourceHint" class="text-caption text-warning mb-2">{{ typeSourceHint }}</div>
 
-        <!-- D8：文件内无分类列时必须显式表态，候选只给真实分类（无「跳过」「新建分类」） -->
-        <div v-if="showFallbackCategory" class="d-flex align-center mt-2">
-          <span class="text-body-2 mr-2" style="min-width: 80px">账单归入</span>
-          <v-select
-            class="flex-grow-1"
-            :model-value="fallbackCategoryId"
-            transition="fab-transition"
-            :items="fallbackCategoryOptions"
-            item-title="label"
-            item-value="value"
-            placeholder="请选择分类"
-            density="compact"
-            hide-details
-            variant="outlined"
-            @update:model-value="setFallbackCategory($event)"
-          />
+        <!-- v1.4.4（后端 V3）：分类链尾恒有兜底（映射→归入→自动匹配→「其他」）→
+             「账单归入」自本版本起是**可选项**：不计入 missingRequired，不选即交给后端。 -->
+        <div v-if="showFallbackCategory" class="mt-2">
+          <div class="d-flex align-center">
+            <span class="text-body-2 mr-2" style="min-width: 80px">账单归入</span>
+            <v-select
+              class="flex-grow-1"
+              :model-value="fallbackCategoryId"
+              transition="fab-transition"
+              :items="fallbackCategoryOptions"
+              item-title="label"
+              item-value="value"
+              placeholder="请选择分类"
+              density="compact"
+              hide-details
+              variant="outlined"
+              @update:model-value="setFallbackCategory($event)"
+            />
+          </div>
+          <div class="text-caption text-grey mt-1">不选时自动匹配，匹配不到归入其他</div>
         </div>
       </div>
 
       <!-- Category Mapping -->
       <div class="mb-4">
         <div class="text-subtitle-2 font-weight-bold mb-2">分类映射</div>
+        <!-- v1.4.4（后端 V3）：跳过不再等于丢行——后端分类链恒有兜底，未命中的行自动匹配、
+             仍匹配不到即挂「其他」。选项文案不改（用例 10.5 逐字锁），语义在此说明。 -->
+        <div v-if="hasColumns" class="text-caption text-grey mb-2">
+          自动匹配到的已替你选好；留「跳过」即交给后端自动匹配，匹配不到归入其他
+        </div>
         <div v-for="catName in (previewData?.categories_in_file || [])" :key="catName" class="mb-2">
           <div class="d-flex align-center">
             <span class="text-body-2 mr-2" style="min-width: 80px">{{ catName }}</span>
@@ -258,15 +267,26 @@ const encodingText = computed(() => {
 
 const sampleRows = computed(() => (props.previewData?.sample_rows || []).slice(0, 5))
 
-// 角色 → 列索引（一角色一列）：两列选同一角色时前端不阻止、不报错，
-// 载荷与后端 D3 同口径取靠前列（设计 §4.3）
+// 角色 → 列索引：v1.4.4 V2 起 **`note` 可来自多列**（微信 `交易对方` + `商品`、
+// 支付宝 `交易对方` + `商品说明`），收成**升序 int 数组**；其余角色沿用「先列独占」
+// （两列选同一非 note 角色时前端不阻止、不报错，载荷取靠前列，与后端 D3 同口径，
+// 设计 §4.3）。单列 note 仍发 `int`——后端 `_indexes()` 两型通吃（D18 向后兼容）。
 const roleColumns = computed(() => {
   const map = {}
+  const noteIndexes = []
   for (const col of (props.previewData?.columns || [])) {
     // 已手选（含「不导入」= null）一律以手选为准；仅未初始化的列才退回后端建议 role
     const chosen = col.index in columnRoles.value
     const role = chosen ? columnRoles.value[col.index] : (col.role ?? null)
-    if (role && map[role] === undefined) map[role] = col.index
+    if (!role) continue
+    if (role === 'note') {
+      noteIndexes.push(col.index)
+      continue
+    }
+    if (map[role] === undefined) map[role] = col.index
+  }
+  if (noteIndexes.length > 0) {
+    map.note = noteIndexes.length > 1 ? [...noteIndexes].sort((a, b) => a - b) : noteIndexes[0]
   }
   return map
 })
@@ -277,22 +297,22 @@ const typeSourceOptions = computed(() =>
 
 const typeSourceCaption = computed(() => TYPE_SOURCE_CAPTIONS[typeSource.value] || '')
 
-// D8：文件内无分类列 → 「账单归入」出现且必选；有分类列则整行不渲染
+// v1.4.4（后端 V3）：文件内无分类列时「账单归入」**仍出现**，但自此是**可选项**
+// （见下方 missingRequired：不再计入禁用条件）；有分类列则整行不渲染
 const showFallbackCategory = computed(() => hasColumns.value && roleColumns.value.category === undefined)
 
 const fallbackCategoryOptions = computed(() =>
   (props.categories || []).map((cat) => ({ label: cat.name, value: cat.id }))
 )
 
-// 缺项明细（§4.2.2）：与 unmappedCount 并列作为禁用条件
+// 缺项明细（§4.2.2）：与 unmappedCount 并列作为禁用条件。
+// v1.4.4 摘掉「未识别到分类列：请选择账单归入」那一条——后端分类链尾恒有「其他」兜底、
+// `category_unresolved` 恒 0，必选已无依据（用户裁定 V3），故只剩两个必需列。
 const missingRequired = computed(() => {
   if (!hasColumns.value) return []
   const items = []
   if (roleColumns.value.amount === undefined) items.push('缺少「金额」列：请为某一列指定金额角色')
   if (roleColumns.value.consume_time === undefined) items.push('缺少「时间」列：请为某一列指定时间角色')
-  if (showFallbackCategory.value && fallbackCategoryId.value == null) {
-    items.push('未识别到分类列：请选择「账单归入」的分类')
-  }
   return items
 })
 
@@ -396,7 +416,9 @@ function handleConfirm() {
     category_mapping: { ...categoryMapping.value },
     tag_mapping: { ...tagMapping.value },
   }
-  // 区块隐藏（SQL 弹窗复用）时三字段整体不写入 → SQL 请求体一字不变（§4.4）
+  // 区块隐藏（SQL 弹窗复用）时三字段整体不写入 → SQL 请求体一字不变（§4.4）。
+  // `columns.note` 两列及以上时为**升序 int 数组**、单列仍是 int（V2 / D18）；
+  // `fallback_category` 自此**只在用户真选了才发**（V3 降级为可选项，不选即交给后端兜底）。
   if (hasColumns.value) {
     payload.columns = { ...roleColumns.value }
     payload.type_source = typeSource.value
@@ -423,11 +445,21 @@ watch(() => props.previewData, (data) => {
   typeSourceHint.value = ''
 }, { immediate: true })
 
-// Auto-match categories by name
+// 区块三的初值（v1.4.4）：**首选**后端 `categories_suggested`——它就是落库层
+// `_match_category_auto` 的同一份结果（同名 / 双向包含 / 同义词三档），前端照抄即
+// 「预览所见 == 导入所得」。建议 id 不在可见分类里（如被用户同名副本遮蔽的预设行）
+// 即不预选，退回既有的「按 name 命中即映射」；两者都落空 → 留「— 跳过 —」，
+// 由后端链尾的「自动匹配 → 其他」兜底（不再丢行）。
 watch(() => props.previewData, (data) => {
   if (!data) return
   const cats = props.categories || []
+  const suggested = data.categories_suggested || {}
   for (const catName of (data.categories_in_file || [])) {
+    const suggestedId = suggested[catName]
+    if (suggestedId != null && cats.some((c) => c.id === suggestedId)) {
+      categoryMapping.value[catName] = { action: 'map', target_id: suggestedId }
+      continue
+    }
     const match = cats.find((c) => c.name === catName)
     if (match) {
       categoryMapping.value[catName] = { action: 'map', target_id: match.id }

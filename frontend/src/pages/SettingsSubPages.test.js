@@ -2330,6 +2330,8 @@ describe('v1.4.3 M5 导入导出二级页', () => {
       // §3.2 确认请求三字段名逐字在场
       'type_source',
       'fallback_category',
+      // v1.4.4 追加：预览第 9 契约字段（分类映射区块的初值来源）
+      'categories_suggested',
     ]
     boot3DialogLiterals.forEach((id) => expect(csvMappingSource, `弹窗缺「${id}」`).toContain(id))
     // 任务 §5.2 三条 ?raw 断言
@@ -2810,6 +2812,8 @@ describe('v1.4.3-boot3 CSV 列映射向导', () => {
     format: 'cashew_template',
     row_count: 2,
     categories_in_file: [],
+    // v1.4.4 第 9 契约字段（可选读）：键 = categories_in_file 同名值、值 = 命中的分类 id / null
+    categories_suggested: {},
     tags_in_file: ['Fruits and Vegetables'],
     headers: ['Date', 'Amount', 'Category', 'Title', 'Note', 'Account'],
     header_row_index: 0,
@@ -2832,14 +2836,18 @@ describe('v1.4.3-boot3 CSV 列映射向导', () => {
     ...overrides,
   })
 
-  // 微信账单形态（11 列表头逐字取设计 §0.4-10；角色预设按 D9；**无分类列** → D8 必选默认分类；
+  // 微信账单形态（11 列表头逐字取设计 §0.4-10；**v1.4.4 V2 用户裁定后的真实角色形状**：
+  // `交易类型` = category（微信的分类来源）→ 「未识别到分类列」告警消失、无需归入分类；
+  // `交易对方` + `商品` = **两列 note**（不再为交易对方建标签）→ tags_in_file 恒空；
   // 数据行全合成，container=xlsx 对应 M6 落地后的真实形态）
   const wechatPreview = (overrides = {}) =>
     templatePreview({
       cache_id: 'csv-boot3-2',
       format: 'wechat',
       row_count: 3,
-      categories_in_file: [],
+      categories_in_file: ['餐饮美食'],
+      // 后端 `_match_category_auto` 的包含档：`餐饮美食` ⊇ 预设「餐饮」(id 1)
+      categories_suggested: { 餐饮美食: 1 },
       tags_in_file: [],
       headers: [
         '交易时间',
@@ -2857,8 +2865,8 @@ describe('v1.4.3-boot3 CSV 列映射向导', () => {
       header_row_index: 17,
       columns: [
         { index: 0, header: '交易时间', role: 'consume_time', sample: '2026-09-24 11:40:58' },
-        { index: 1, header: '交易类型', role: null, sample: '商户消费' },
-        { index: 2, header: '交易对方', role: 'tag', sample: '示例商户' },
+        { index: 1, header: '交易类型', role: 'category', sample: '餐饮美食' },
+        { index: 2, header: '交易对方', role: 'note', sample: '示例商户' },
         { index: 3, header: '商品', role: 'note', sample: '示例商品' },
         { index: 4, header: '收/支', role: 'type', sample: '支出' },
         { index: 5, header: '金额(元)', role: 'amount', sample: '9.78' },
@@ -2870,9 +2878,22 @@ describe('v1.4.3-boot3 CSV 列映射向导', () => {
       ],
       suggested_type_source: 'column',
       encoding: 'xlsx',
-      sample_rows: [['2026-09-24 11:40:58', '商户消费', '示例商户', '示例商品', '支出', '9.78']],
-      warnings: ['已忽略 17 行前导说明', '未识别到分类列：需指定默认分类'],
+      sample_rows: [['2026-09-24 11:40:58', '餐饮美食', '示例商户', '示例商品', '支出', '9.78']],
+      warnings: ['已忽略 17 行前导说明'],
       container: 'xlsx',
+      ...overrides,
+    })
+
+  // v1.4.4 的「文件内无分类列」形态（V3 后「账单归入」**仍是可选项**）：微信形状里
+  // 把 `交易类型` 改回不导入即得，两列 note 与 tags 空集等其余事实保持不变
+  const noCategoryPreview = (overrides = {}) =>
+    wechatPreview({
+      categories_in_file: [],
+      categories_suggested: {},
+      columns: wechatPreview().columns.map((col) =>
+        col.index === 1 ? { ...col, role: null } : col
+      ),
+      warnings: ['已忽略 17 行前导说明', '未识别到分类列：需指定默认分类'],
       ...overrides,
     })
 
@@ -2991,24 +3012,29 @@ describe('v1.4.3-boot3 CSV 列映射向导', () => {
     expect(flat(warned)).toContain('已忽略17行前导说明')
   })
 
-  // 任务 §6.4.3（+ §3.3/§3.4、D8）
-  it('用例M4-4: 无分类列时「账单归入」出现且必选，候选去掉跳过/新建、选定后才可确认并发 fallback_category', async () => {
-    const wrapper = await mountDialog(wechatPreview())
-    // 有分类列的模板 → 整行不渲染
+  // 任务 §6.4.3（+ §3.3/§3.4）· **v1.4.4 改写**：用户裁定 V3 后「账单归入」由必选**降级为可选**
+  // （后端分类链尾恒有「其他」兜底、`category_unresolved` 恒 0 → 必选已无依据）
+  it('用例M4-4: 无分类列时「账单归入」出现但可选——未选即可确认且载荷无 fallback_category，选定才发', async () => {
+    const wrapper = await mountDialog(noCategoryPreview())
+    // 有分类列 → 整行不渲染（v1.4.4 后**真实微信账单即属此型**：`交易类型` 是分类列）
     const withCategory = await mountDialog(templatePreview())
     expect(flat(withCategory)).not.toContain('账单归入')
     expect(withCategory.vm.showFallbackCategory).toBe(false)
+    const wechat = await mountDialog(wechatPreview())
+    expect(flat(wechat)).not.toContain('账单归入')
+    expect(wechat.vm.showFallbackCategory).toBe(false)
 
-    // 无分类列 → 出现且必选
+    // 无分类列 → 控件在场，但**不再计入禁用条件**
     expect(flat(wrapper)).toContain('账单归入')
     expect(wrapper.vm.showFallbackCategory).toBe(true)
-    // D8：禁止自动挂「其他」（候选含其他 id=8，但初值必为 null）
+    // D8 的另一半仍然成立：不自动挂「其他」（候选含其他 id=8，但初值必为 null）
     expect(wrapper.vm.fallbackCategoryId).toBe(null)
-    expect(wrapper.vm.missingRequiredCount).toBe(1)
-    expect(flat(wrapper)).toContain('未识别到分类列')
-    expect(confirmDisabled(wrapper)).toBe(true)
+    expect(wrapper.vm.missingRequiredCount).toBe(0)
+    expect(wrapper.vm.missingRequired.join('|')).not.toContain('分类')
+    expect(flat(wrapper)).toContain('不选时自动匹配，匹配不到归入其他'.replace(/\s+/g, ''))
+    expect(confirmDisabled(wrapper)).toBe(false)
 
-    // 候选去掉「— 跳过 —」与「+ 新建分类」（必须落到真实分类）
+    // 候选去掉「— 跳过 —」与「+ 新建分类」（要选就选真实分类；不选即整字段不发）
     expect(wrapper.vm.fallbackCategoryOptions).toEqual([
       { label: '餐饮', value: 1 },
       { label: '出行', value: 2 },
@@ -3021,6 +3047,12 @@ describe('v1.4.3-boot3 CSV 列映射向导', () => {
     expect(wrapper.vm.categoryOptions[0]).toEqual({ label: '— 跳过 —', value: null })
     expect(wrapper.vm.categoryOptions[7]).toEqual({ label: '+ 新建分类', value: 'create' })
 
+    // 未选即确认：载荷**不含** fallback_category（后端自动匹配 → 归入其他 兜底）
+    await wrapper.vm.handleConfirm()
+    let payload = wrapper.emitted('confirm')[0][0]
+    expect(payload).not.toHaveProperty('fallback_category')
+    expect(payload.columns).toEqual({ consume_time: 0, type: 4, amount: 5, note: [2, 3] })
+
     wrapper.vm.setFallbackCategory(8)
     await nextTick()
     expect(wrapper.vm.missingRequiredCount).toBe(0)
@@ -3028,7 +3060,7 @@ describe('v1.4.3-boot3 CSV 列映射向导', () => {
     expect(confirmDisabled(wrapper)).toBe(false)
 
     await wrapper.vm.handleConfirm()
-    const payload = wrapper.emitted('confirm')[0][0]
+    payload = wrapper.emitted('confirm')[1][0]
     expect(payload.fallback_category).toEqual({ action: 'map', target_id: 8 })
     expect(payload.fallback_category).not.toHaveProperty('type')
   })
@@ -3238,5 +3270,86 @@ describe('v1.4.3-boot3 CSV 列映射向导', () => {
     // 用户改动不回写 previewData（§2.4）
     expect(templatePreview().columns[5].role).toBe(null)
     expect(wrapper.props('previewData').columns[5].role).toBe(null)
+  })
+
+  // ── v1.4.4 用户裁定 V2/V3 的前端落点 ─────────────────────────────────
+  it('用例M4-12: 后端建议的两列 note 同时预选；载荷 note 为升序 int 数组、单列仍回 int', async () => {
+    const wrapper = await mountDialog(wechatPreview())
+    // 区块一：`交易对方`(2) 与 `商品`(3) **都**取后端的 note 建议（旧口径是 2=tag）
+    expect(wrapper.vm.columnRoles[2]).toBe('note')
+    expect(wrapper.vm.columnRoles[3]).toBe('note')
+    expect(wrapper.vm.columnRoles[1]).toBe('category')
+    expect(wrapper.vm.roleColumns.note).toEqual([2, 3])
+    expect(wrapper.vm.missingRequiredCount).toBe(0)
+    expect(wrapper.vm.unmappedCount).toBe(0)
+    await wrapper.vm.handleConfirm()
+    let payload = wrapper.emitted('confirm')[0][0]
+    expect(payload.columns).toEqual({ consume_time: 0, category: 1, type: 4, amount: 5, note: [2, 3] })
+
+    // 用户把「备注」列也选成备注 → 三列并一条，索引仍升序（后端按此序拼 `·`）
+    wrapper.vm.setColumnRole(10, 'note')
+    await nextTick()
+    expect(wrapper.vm.roleColumns.note).toEqual([2, 3, 10])
+    await wrapper.vm.handleConfirm()
+    payload = wrapper.emitted('confirm')[1][0]
+    expect(payload.columns.note).toEqual([2, 3, 10])
+
+    // 退回单列 → 回到旧 `int` 形状（D18：后端 `_indexes()` 两型通吃）
+    wrapper.vm.setColumnRole(3, null)
+    wrapper.vm.setColumnRole(10, null)
+    await nextTick()
+    await wrapper.vm.handleConfirm()
+    payload = wrapper.emitted('confirm')[2][0]
+    expect(payload.columns.note).toBe(2)
+    // 其余角色键集不变（note 之外仍是「一角色一列」）
+    expect(Object.keys(payload.columns).sort()).toEqual(['amount', 'category', 'consume_time', 'note', 'type'])
+
+    // Cashew 模板单列 note → 载荷逐字保持旧形状（既有 M4-6 口径的显式复述）
+    const single = await mountDialog(templatePreview())
+    await single.vm.handleConfirm()
+    expect(single.emitted('confirm')[0][0].columns.note).toBe(4)
+  })
+
+  it('用例M4-13: 区块三初值取 categories_suggested（命中即预选），未命中/建议 id 不在候选集仍留跳过', async () => {
+    // ① 同义词档：文件里是「饮食」、库里只有「餐饮」(id 1) → 名称直配对不上、后端建议能配上
+    const hit = await mountDialog(templatePreview({
+      categories_in_file: ['饮食', '外星货币'],
+      categories_suggested: { 饮食: 1, 外星货币: null },
+    }))
+    expect(hit.vm.getCategoryMapping('饮食')).toBe(1)
+    expect(hit.vm.unmappedCount).toBe(1, '未命中的那行仍算未映射（留「— 跳过 —」= 交后端兜底）')
+    expect(hit.vm.getCategoryMapping('外星货币')).toBe(null)
+    expect(flat(hit)).toContain('自动匹配到的已替你选好')
+    await hit.vm.handleConfirm()
+    expect(hit.emitted('confirm')[0][0].category_mapping).toEqual({
+      饮食: { action: 'map', target_id: 1 },
+    })
+
+    // ② 护栏：建议的 id 不在可见分类里（如被用户同名副本遮蔽的预设行）→ 不采纳，
+    //    退回既有的「按 name 命中即映射」，不让下拉挂出一个用户看不见的分类
+    const ghost = await mountDialog(templatePreview({
+      categories_in_file: ['餐饮'],
+      categories_suggested: { 餐饮: 999 },
+    }))
+    expect(ghost.vm.getCategoryMapping('餐饮')).toBe(1)
+
+    // ③ 字段整体缺席（旧后端预览 / SQL 复用响应）→ 与改版前逐字一致（D18）
+    const legacy = templatePreview({ categories_in_file: ['工资'] })
+    delete legacy.categories_suggested
+    const legacyWrapper = await mountDialog(legacy)
+    expect(legacyWrapper.vm.getCategoryMapping('工资')).toBe(9)
+    expect(legacyWrapper.vm.unmappedCount).toBe(0)
+  })
+
+  it('用例M4-14: tags_in_file 为空时不渲染标签映射区（真实微信即此型），非空时照常渲染', async () => {
+    expect(wechatPreview().tags_in_file).toEqual([], 'V2：微信不再产生标签')
+    const noTags = await mountDialog(wechatPreview())
+    expect(flat(noTags)).not.toContain('标签映射')
+    // 分类映射区仍在场（只有标签区被收起，其余区块零改动）
+    expect(flat(noTags)).toContain('分类映射')
+
+    const withTags = await mountDialog(templatePreview())
+    expect(flat(withTags)).toContain('标签映射')
+    expect(flat(withTags)).toContain('FruitsandVegetables')
   })
 })

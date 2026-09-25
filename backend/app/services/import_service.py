@@ -256,7 +256,13 @@ async def preview_csv(
     由用户在前端手选列角色。业务校验（必需列缺失等）只在 `warnings` 提示，
     确认阶段由 M3 显式拒绝。
 
-    注：`db` 形参现状无消费方（设计 §1.2.6 / M1 §5.5 保留签名，路由依赖注入不动）。
+    v1.4.4 追加的**第 9 个契约字段** `categories_suggested`（可选读、旧前端不读即无感）：
+    键与 `categories_in_file` 同名同集，值 = `_match_category_auto` 命中的现有分类 id，
+    未命中为 ``None``，供向导「分类映射」区块预选。除此之外既有字段、
+    `skipped_reasons` 五键、错误口径**一字未动**。
+
+    注：`db` 形参自 v1.4.4 起**有了消费方**（`categories_suggested` 的自动匹配查候选），
+    但签名与路由的依赖注入仍一字不动（设计 §1.2.6 / M1 §5.5 保留签名）。
 
     v1.4.4 V2 的两处可观察后果（后端事实，前端轮据此调整）：
       * 微信账单**有**分类列了（`交易类型` → `category`）→ `categories_in_file` 出的是
@@ -320,6 +326,17 @@ async def preview_csv(
         list(row) for row in data_rows if not _is_blank_row(row)
     ][:5]
 
+    # v1.4.4 前端轮的唯一后端扩展：**可选**契约字段 `categories_suggested`——把落库层的
+    # 自动匹配（V3 链的第三档 `_match_category_auto`）前移一份给预览，向导据此在「分类映射」
+    # 区块预选。键与 `categories_in_file` **同名同集**，值 = 命中的现有分类 id / `None`。
+    # 直接复用落库层同一个函数（D25 精神：识别与落库不分两套口径），两侧永不漂移。
+    # `user_id` 传 `None`：预览路由不注入用户（改签名即越界）→ 候选集 = 全局预设分类行；
+    # 用户自建分类的同名预选由前端既有的「按 name 命中即映射」补齐，两条链在向导里汇流。
+    categories_suggested: dict[str, int | None] = {
+        name: await _match_category_auto(db, None, name)
+        for name in sorted(categories_in_file)
+    }
+
     # Cache the file —— 后缀按容器实参化（M6 §2.4，与 `_read_cached_bytes` 成对）
     cache_id = save_to_cache(file_bytes, _cache_suffix(container))
 
@@ -327,6 +344,7 @@ async def preview_csv(
         "format": format_type,
         "row_count": row_count,
         "categories_in_file": sorted(categories_in_file),
+        "categories_suggested": categories_suggested,
         "tags_in_file": sorted(tags_in_file),
         "cache_id": cache_id,
         "headers": raw_headers,

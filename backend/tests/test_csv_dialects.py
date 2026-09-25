@@ -141,7 +141,9 @@ def _alipay_matrix(extra: int = 0) -> list[list[str]]:
 class Test81BomClosedLoop:
     """自家带 BOM 的导出必须能识别回 `native`。"""
 
-    async def test_8_1_real_export_bytes_roundtrip(self, auth_client: AsyncClient) -> None:
+    async def test_8_1_real_export_bytes_roundtrip(
+        self, auth_client: AsyncClient, db_session
+    ) -> None:
         """取 `export_csv` 的**真实产物字节**走完整识别链（非手写无 BOM 串）。"""
         cat_resp = await auth_client.post(
             "/api/categories",
@@ -171,7 +173,7 @@ class Test81BomClosedLoop:
         assert rows[0][0] == "amount"  # 旧实现此处为 "\ufeffamount" → 整文件被拒
         assert detect_csv_format(rows[0]) == "native"
 
-        result = await preview_csv(None, raw)  # type: ignore[arg-type]  # db 形参未使用
+        result = await preview_csv(db_session, raw)
         assert result["format"] == "native"
         assert result["encoding"] == "utf-8-sig"
         assert result["headers"] == _split(NATIVE_HEADER)
@@ -352,7 +354,7 @@ class Test83bCsvRows:
 
     async def test_8_3b_single_column_preview_warns_not_rejects(self) -> None:
         """设计 §1.3「单列文件（只有 Amount）」：只 warning，不拒绝（确认阶段才由 M3 拒）。"""
-        result = await preview_csv(None, b"amount\r\n50")  # type: ignore[arg-type]  # db 形参未使用
+        result = await preview_csv(None, b"amount\r\n50")  # type: ignore[arg-type]  # 无分类值 → 不触库
         assert result["format"] == "custom"
         assert result["row_count"] == 1
         assert [c["role"] for c in result["columns"]] == ["amount"]
@@ -593,10 +595,10 @@ class Test87Gb18030:
         assert text
         assert encoding
 
-    async def test_8_7_preview_reports_decoding_label(self) -> None:
+    async def test_8_7_preview_reports_decoding_label(self, db_session) -> None:
         row = "2024-01-15 12:00,餐饮,某商家,,外卖,支出,28.16,支付宝,成功,T,M,/,/"
         raw = (ALIPAY_HEADER + "\n" + (row + "\n") * 8).encode("gb18030")
-        result = await preview_csv(None, raw)  # type: ignore[arg-type]
+        result = await preview_csv(db_session, raw)
         assert result["format"] == "alipay"
         assert result["encoding"].lower().replace("-", "") in {"gb18030", "gbk", "gb2312"}
         assert result["categories_in_file"] == ["餐饮"]
@@ -606,33 +608,33 @@ class Test87Gb18030:
 
 
 class Test88PreviewContract:
-    async def test_8_8_native_regression_bitwise(self) -> None:
+    async def test_8_8_native_regression_bitwise(self, db_session) -> None:
         """与改造前**逐位一致**：format / row_count / categories_in_file / tags_in_file。"""
         raw = (NATIVE_HEADER + "\n50.0,expense,餐饮,午餐,2024-01-15 12:00,测试").encode("utf-8")
-        result = await preview_csv(None, raw)  # type: ignore[arg-type]
+        result = await preview_csv(db_session, raw)
         assert result["format"] == "native"
         assert result["row_count"] == 1
         assert result["categories_in_file"] == ["餐饮"]
         assert result["tags_in_file"] == ["午餐"]
         assert result["cache_id"]
 
-    async def test_8_8_cashew_regression_bitwise(self) -> None:
+    async def test_8_8_cashew_regression_bitwise(self, db_session) -> None:
         raw = (
             CASHEW_HEADER + "\n午餐,餐饮,-50.0,false,测试,2024-01-15 12:00:00.000,"
             "子分类,账户,人民币,钱包"
         ).encode("utf-8")
-        result = await preview_csv(None, raw)  # type: ignore[arg-type]
+        result = await preview_csv(db_session, raw)
         assert result["format"] == "cashew"
         assert result["row_count"] == 1
         assert result["categories_in_file"] == ["餐饮"]
         assert result["tags_in_file"] == ["午餐"]
 
-    async def test_8_8_seven_new_fields_shape(self) -> None:
+    async def test_8_8_seven_new_fields_shape(self, db_session) -> None:
         body = (
             NATIVE_HEADER + "\n50.0,expense,餐饮,午餐,2024-01-15 12:00,测试\n"
             "\n60.0,income,工资,奖金,2024-02-01 09:00,月薪"
         )
-        result = await preview_csv(None, body.encode("utf-8"))  # type: ignore[arg-type]
+        result = await preview_csv(db_session, body.encode("utf-8"))
         assert result["headers"] == _split(NATIVE_HEADER)
         assert result["header_row_index"] == 0
         assert [set(c) for c in result["columns"]] == [{"index", "header", "role", "sample"}] * 6
@@ -649,6 +651,11 @@ class Test88PreviewContract:
         assert result["warnings"] == []
         assert result["row_count"] == 2  # 中间空行不计入
         assert result["container"] == "csv"  # 第 8 契约字段已由 M6 落地（原「缺席」断言到期，主 Agent 单点改写）
+        # v1.4.4 的第 9 契约字段：键 = `categories_in_file` 同名值、值 = 命中的分类 id / None。
+        # 本例两个名字都是 conftest 预置的预设分类 → 自动匹配（= 落库链同一函数）必命中。
+        suggested = result["categories_suggested"]
+        assert set(suggested) == set(result["categories_in_file"]) == {"餐饮", "工资"}
+        assert all(isinstance(cid, int) for cid in suggested.values()), suggested
 
     async def test_8_8_three_warning_classes(self) -> None:
         """warnings 三类：前导行丢弃 / 无分类列 / 缺必需列（§6.4，全中文、无内部术语）。"""
@@ -673,22 +680,24 @@ class Test88PreviewContract:
         assert any("未识别到分类列" in w for w in result["warnings"])
         assert not any("缺少必需列" in w for w in result["warnings"])
 
-    async def test_8_8_cashew_template_enters_preview(self) -> None:
+    async def test_8_8_cashew_template_enters_preview(self, db_session) -> None:
         """用户发起本批的那份模板：不再报「无法识别」，且 `suggested_type_source == sign`。"""
         body = (
             CASHEW_TEMPLATE_HEADER + "\n"
             "2026-09-24 11:07:54.617083,-50,Groceries,Fruits and Vegetables,Paid with cash,\n"
             "2026-09-24 11:07:54.617085,250,Bills & Fees,Monthly Income,,"
         )
-        result = await preview_csv(None, body.encode("utf-8"))  # type: ignore[arg-type]
+        result = await preview_csv(db_session, body.encode("utf-8"))
         assert result["format"] == "cashew_template"
         assert result["suggested_type_source"] == "sign"
         assert result["row_count"] == 2
         assert result["categories_in_file"] == ["Bills & Fees", "Groceries"]
+        # 全不命中（库内无同名/包含/同义词分类）→ 值逐个为 None，前端即留「— 跳过 —」
+        assert result["categories_suggested"] == {"Bills & Fees": None, "Groceries": None}
         assert result["columns"][5] == {"index": 5, "header": "Account", "role": None, "sample": ""}
         assert result["sample_rows"][0][1] == "-50"
 
-    async def test_8_8_wechat_leading_rows_preview(self) -> None:
+    async def test_8_8_wechat_leading_rows_preview(self, db_session) -> None:
         """真实形态：前导 17 行微信表头进预览，`/` 不产生分类/标签（D31）。
 
         v1.4.4 V2 的预览侧后果：分类列来自 `交易类型`（`categories_in_file` 不再是空集），
@@ -696,12 +705,15 @@ class Test88PreviewContract:
         「未识别到分类列：需指定默认分类」告警对真实微信账单**消失**。
         """
         text = "\n".join(",".join(row) for row in _wechat_matrix(17))
-        result = await preview_csv(None, text.encode("utf-8"))  # type: ignore[arg-type]
+        result = await preview_csv(db_session, text.encode("utf-8"))
         assert result["format"] == "wechat"
         assert result["header_row_index"] == 17
         assert result["row_count"] == 3
         assert result["categories_in_file"] == ["商户消费", "转账", "零钱提现"]
         assert result["tags_in_file"] == [], "V2：微信无 tag 列（交易对方已并入备注）"
+        # 三个交易类型都对不上预设分类 → 建议逐个 None（前端留「— 跳过 —」交后端链尾兜底）
+        assert set(result["categories_suggested"]) == set(result["categories_in_file"])
+        assert set(result["categories_suggested"].values()) == {None}
         assert "/" not in result["tags_in_file"]
         assert result["warnings"] == ["已忽略表头前的 17 行说明文字"]
         assert "未识别到分类列：需指定默认分类" not in result["warnings"]

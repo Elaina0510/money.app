@@ -258,7 +258,8 @@ async function handleCsvImport(mapping) {
       format: csvPreviewData.value.format,
       category_mapping: mapping.category_mapping,
       tag_mapping: mapping.tag_mapping,
-      // v1.4.3-boot3 §5.1：向导里用户手选的列角色 / 收支口径 / 无分类列时的默认分类
+      // v1.4.3-boot3 §5.1 + v1.4.4：向导里用户手选的列角色（`note` 可为多列的升序数组）、
+      // 收支口径、以及**可选**的默认归入分类（不选即交给后端自动匹配 → 归入其他）
       columns: mapping.columns,
       type_source: mapping.type_source,
       fallback_category: mapping.fallback_category,
