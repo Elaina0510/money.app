@@ -1,0 +1,1 @@
+import{p as e}from"./index-Dx_aH6DZ.js";function t(t={}){return e.get(`/statistics/summary`,{params:t})}function n(t={}){return e.get(`/statistics/by-category`,{params:t})}function r(t={}){return e.get(`/statistics/trend`,{params:t})}export{t as n,r,n as t};
