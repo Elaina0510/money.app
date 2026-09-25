@@ -237,3 +237,15 @@
 - [x] dist gzip 基准：**535,927 B**（现有 dist，js/css/html 合计 gzip 后；终验重建后对比，boot2 增量基准 +127 B）
 - [x] 现场库只读复测（`file:money.db?mode=ro`）：`budgets` 列集含 `scope_mode`+`dormant`；`categories` 全库仅一个「其他」（id=34、user_id NULL）；`PRAGMA foreign_key_check` = **52 条且全在 `tags`**（与发布备忘登记一致，本批不恶化基线）
 - [x] 工作区既有未跟踪文件盘点：`doc/` 各批输入文档（含本批 prompt/设计/tasks 全套）、`screenshots/ali|baota|v1.2|v1.3|v1.3.1|v1.4.3-boot` ——**除本批点名文件外一律不触碰、不提交**
+
+---
+
+## 附录：v1.4.4 增补批（2026-09-25，用户三条新裁定，会话内直改非 boot 文档批）
+
+**裁定翻案登记**（推翻本批 D8/D9/D15 局部，其余 D 决策继续有效）：**V1** 斜杠日期按「唯一合法解释」识别（`09/24/2026`/`24/09/2026` 收，`05/06/2026`、`05/05/2026` 两读皆可 → 照旧跳过计 `invalid_date`）；**V2** `交易对方`+`商品/商品说明` 双列 note 拼接（`·` 分隔、空段省略、不再建标签），`交易类型`（微信）与`交易分类`并列作分类来源（别名层全局生效）；**V3** 分类落空链 = 映射 → `fallback_category` → 自动匹配（归一相等/双向包含≥2/同义词`饮食→餐饮`）→ 全局「其他」，`category_unresolved` 恒 0（键位保留）、「账单归入」降级为可选。预览新增可选字段 `categories_suggested`（与落库共用同一 `_match_category_auto`，所见即所得）。
+
+**提交**：后端 `328812c`（662 绿）→ 前端+preview 字段 `be13f91`（pytest 664 / vitest 411 / mypy 85=基线 / ruff / eslint 基线 / build）→ dist `+210 B` 与 README 收口 `8e7d118`。既有用例按 V 逐条改写 23+4 处（子 Agent notes 全清单在案），int 型 `columns` 旧载荷兼容有专测（D18 延续）。
+
+**真实账单复测（tmp 副本库，原库 SHA256 全程未变）**：微信 `.xlsx` = 判 wechat、category 1 列 + note 2 列、**零映射**导入 224/跳过 4、96 条 `·` 拼备注、0 标签、时间零违例；支付宝 CSV = 判 alipay、零映射导入 39/跳过 49（`/`）、suggested 命中 2/11、3 分类复用无膨胀；斜杠日三例端到端如期（2 收 1 跳）。
+
+**已知边界（v1.4.4 新增）**：`categories_suggested` 的自动匹配候选 = 全局预设 +（前端 name 直配链）用户自建分类——预览路由未注入 user，后端建议值对用户自建分类不覆盖（UI 直配兜住，登记备查）；导入中途并发改分类名的极端竞态未扩范围。
