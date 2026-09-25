@@ -114,6 +114,44 @@ class TestCsvExport:
         assert "餐饮" in row
         assert "午餐" in row
 
+    async def test_export_csv_preset_category_and_tag_names(
+        self, auth_client: AsyncClient, db_session, auth_user
+    ):
+        """v1.4.4 hotfix 回归：挂全局共享行（`user_id IS NULL`）分类/标签的记录，
+        导出不得空白分类名/标签名（P4 实测真实微信账单 227/229 条为空）。"""
+        from app.models.record import Record
+        from app.models.tag import Tag
+
+        preset_cat = Category(name="预设饮食", type="expense", icon="mdi-food", sort_order=99)
+        preset_tag = Tag(name="预置标签")
+        db_session.add_all([preset_cat, preset_tag])
+        await db_session.commit()
+        await db_session.refresh(preset_cat)
+        await db_session.refresh(preset_tag)
+        assert preset_cat.user_id is None and preset_tag.user_id is None
+
+        now = "2024-01-15 12:00:00"
+        db_session.add(
+            Record(
+                amount=12.5,
+                type="expense",
+                category_id=preset_cat.id,
+                tag_id=preset_tag.id,
+                consume_time="2024-01-15 12:00",
+                note="预设并挂导出",
+                user_id=auth_user.id,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        await db_session.commit()
+
+        resp = await auth_client.get("/api/export/csv")
+        content = resp.content.decode("utf-8-sig")
+        csv_line = next(x for x in content.strip().split("\n") if "预设并挂导出" in x)
+        assert "预设饮食" in csv_line
+        assert "预置标签" in csv_line
+
     async def test_export_csv_empty_data(self, auth_client: AsyncClient):
         """Export with no data should return CSV with headers only."""
         resp = await auth_client.get("/api/export/csv")

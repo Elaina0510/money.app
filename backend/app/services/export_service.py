@@ -22,16 +22,22 @@ async def export_csv(
     """Export records as CSV with UTF-8 BOM."""
     from sqlalchemy import text
 
-    # Fetch all categories for lookup
+    # Fetch all categories for lookup.
+    # v1.4.4 hotfix：全局预设行（user_id IS NULL）也要取得到名——导入兜底链会把记录
+    # 挂到预设分类/按分类推荐挂全局标签（实测真实微信账单导出 227/229 条分类名为空）。
+    # id 全局唯一，扩集合同名共存无覆盖问题。
     cat_result = await db.execute(
-        text("SELECT id, name FROM categories WHERE user_id = :uid"),
+        text(
+            "SELECT id, name FROM categories "
+            "WHERE user_id = :uid OR user_id IS NULL"
+        ),
         {"uid": user_id},
     )
     categories = {row[0]: row[1] for row in cat_result.fetchall()}
 
-    # Fetch all tags for lookup
+    # Fetch all tags for lookup（同上：tags 也存在全局行）
     tag_result = await db.execute(
-        text("SELECT id, name FROM tags WHERE user_id = :uid"),
+        text("SELECT id, name FROM tags WHERE user_id = :uid OR user_id IS NULL"),
         {"uid": user_id},
     )
     tags = {row[0]: row[1] for row in tag_result.fetchall()}
