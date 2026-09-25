@@ -24,9 +24,15 @@
 ``借/贷``（以及 ``是/否``、``true/false``）属于**值映射**而不是列名别名（D6）：银行
 列名不内置进识别层，但用户手选该列后，列里的值在本模块仍可判。
 
-已知边界（D15/D17，登记不修、不扩范围）：歧义日期序（``09/24/2026`` 美式、
-``24/09/2026`` 欧式）不支持；CSV 侧不做 Unix 时间戳（时区不可知；SQLite 导入路径的
-既有换算不属本模块）。
+已知边界（D15/D17，登记不修、不扩范围）：**歧义**日期序仍不猜（``05/06/2026`` 月/日两读
+皆合法 → ``None``）；CSV 侧不做 Unix 时间戳（时区不可知；SQLite 导入路径的既有换算不属
+本模块）。
+
+v1.4.4 V1（用户翻案，推翻 boot3 D15 的「斜杠序整体不支持」半区）：**无歧义**的斜杠日
+``dd/mm/yyyy`` / ``mm/dd/yyyy`` 形态开始支持——按 (月,日) 与 (日,月) 各试构一次，
+**恰一个合法**才采用（``09/24/2026`` → 2026-09-24、``13/05/2026`` → 2026-05-13），
+两个都合法（真歧义）或都不合法照旧 ``None``，**不猜、不看地区偏好、不做多数投票**。
+两位年（``09/24/26``）不在支持范围（世纪不可知）。
 """
 
 import re
@@ -59,9 +65,22 @@ TYPE_VALUE_IGNORE = {"不计收支", "不计", "中性交易", "neutral", "ignor
 # 归一输出目标（设计 D14：年在前、补零、16 字符；库内 TEXT 靠字典序 + strftime 读取）
 OUTPUT_FORMAT = "%Y-%m-%d %H:%M"
 
-# 粗判前置正则（D15 歧义序的**唯一**防线）：年份必须在最前且紧跟分隔符，
-# 故 `09/24/2026`、`24/09/2026`、`1727147274`、裸 Excel 序列号统统不进白名单。
-_TIME_PREFIX_RE = re.compile(r"^\s*(19|20)\d{2}\s*[-/年]")
+# 粗判前置正则（D15 歧义序的**唯一**防线）：分支一 = 年份在最前且紧跟分隔符；
+# 分支二 = v1.4.4 V1 的斜杠日（年**在尾部**且为四位 `(19|20)\d{2}`）。
+# 故 `1727147274`（纯数字时间戳）、裸 Excel 序列号 `46289.48`、`2026.09.24`、
+# 两位年 `09/24/26` 统统不进本模块（歧义与世纪不可知的一律不猜）。
+# 斜杠日的**合法性**不靠这条正则判，由 `_parse_slash_day` 的双解释裁决。
+_TIME_PREFIX_RE = re.compile(
+    r"^\s*(19|20)\d{2}\s*[-/年]"
+    r"|^\s*\d{1,2}/\d{1,2}/(?:19|20)\d{2}(?:[ T]\d{1,2}:\d{2}(?::\d{2})?)?\s*$"
+)
+
+# v1.4.4 V1 斜杠日形态：`9/24/2026`、`24/09/2026 15:30`、`13/05/2026 8:30:00`
+# （日/月 1~2 位、年四位且以 19/20 开头、时间成分可选，空格或 `T` 分隔）
+_SLASH_DAY_RE = re.compile(
+    r"^(\d{1,2})/(\d{1,2})/((?:19|20)\d{2})"
+    r"(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?)?\s*$"
+)
 
 _WHITESPACE_RE = re.compile(r"\s+")
 _CURRENCY_CHARS = ("¥", "￥", "$")
@@ -126,14 +145,15 @@ def parse_amount(raw: str | None) -> float | None:
 def parse_time(raw: str | None) -> str | None:
     """日期清洗（D14）：归一为唯一目标 ``YYYY-MM-DD HH:MM``，否则 ``None``。
 
-    处理序：粗判前置正则（挡住歧义序与纯数字时间戳，D15）→ ``~`` 时间区间取前段
-    → 按 ``TIME_FORMATS`` **顺序**逐个 ``strptime`` → 命中后 ``strftime`` 输出。
+    处理序：粗判前置正则（挡住纯数字时间戳与裸序列号，D15）→ ``~`` 时间区间取前段
+    → 按 ``TIME_FORMATS`` **顺序**逐个 ``strptime`` → 命中后 ``strftime`` 输出 →
+    全落空才试 v1.4.4 V1 的斜杠日 ``_parse_slash_day``。
     无时间成分的形态由 ``strftime`` 自然补 ``00:00``；``strptime`` 容忍非补零输入
     （``2026/9/24``、``8:30``），输出侧恒为 16 字符、补零、24 小时制。
 
     **禁止按 ``.`` 截断**：微秒位数不固定（模板 6 位、全量导出 3 位），必须走 ``%f``
     （其本身支持 1~6 位）。xlsx 通道不改本函数（D24）——容器层已把日期单元格换算成
-    ``"%Y-%m-%d %H:%M:%S"`` 文本，白名单成员与顺序一字不改。
+    ``"%Y-%m-%d %H:%M:%S"`` 文本（年在前，走分支一），白名单成员与顺序一字不改。
     """
     if raw is None:
         return None
@@ -153,7 +173,53 @@ def parse_time(raw: str | None) -> str | None:
         except ValueError:
             continue
         return parsed.strftime(OUTPUT_FORMAT)
-    return None
+    return _parse_slash_day(text)
+
+
+def _try_slash_datetime(
+    year: int, month: int, day: int, hour: int, minute: int, second: int
+) -> datetime | None:
+    """按**一种**月/日解释构 ``datetime``；非法（月 >12、日超出该月天数等）→ ``None``。"""
+    try:
+        return datetime(year, month, day, hour, minute, second)
+    except ValueError:
+        return None
+
+
+def _parse_slash_day(text: str) -> str | None:
+    """v1.4.4 V1：斜杠日 ``mm/dd/yyyy`` / ``dd/mm/yyyy`` 的**双解释判歧义**归一。
+
+    同一串分别按 (月,日) 与 (日,月) 试构一次：
+
+    * **恰一个**合法 → 采用（``09/24/2026`` 月位 24 非法 → 日序唯一；``13/05/2026``
+      月位 13 非法 → 日序唯一）；
+    * **两个都**合法 → 真歧义、不猜 → ``None``（``05/06/2026``；``05/05/2026`` 即便
+      两读同日也照此拒，判据只数「合法解释的个数」，不看结果是否相同）；
+    * 两个都**不**合法（``02/30/2026`` 两种月日组合都不存在）→ ``None``。
+
+    时间成分可选、缺省 ``00:00``；``hour``/``minute``/``second`` 一并交给 ``datetime``
+    校验（``24/09/2026 25:00`` 这类越界即两种解释都非法 → ``None``）。
+    产物仍走 ``OUTPUT_FORMAT``，与白名单通道同一个 16 字符契约。
+    """
+    matched = _SLASH_DAY_RE.match(text)
+    if matched is None:
+        return None
+    first, second_num, year_text, hour_text, minute_text, second_text = matched.groups()
+    a = int(first)
+    b = int(second_num)
+    year = int(year_text)
+    hour = int(hour_text) if hour_text is not None else 0
+    minute = int(minute_text) if minute_text is not None else 0
+    second = int(second_text) if second_text is not None else 0
+
+    as_month_day = _try_slash_datetime(year, a, b, hour, minute, second)
+    as_day_month = _try_slash_datetime(year, b, a, hour, minute, second)
+    if (as_month_day is None) is (as_day_month is None):
+        # 两个都合法（真歧义）或两个都不合法（非法日历日）→ 不猜
+        return None
+    picked = as_month_day or as_day_month
+    assert picked is not None  # 上一分支已排除「两者皆 None」
+    return picked.strftime(OUTPUT_FORMAT)
 
 
 def resolve_type(

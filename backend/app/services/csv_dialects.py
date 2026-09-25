@@ -61,20 +61,25 @@ COLUMN_ALIASES: dict[str, str] = {
     "category_name": "category",
     "category": "category",
     "交易分类": "category",
+    "交易类型": "category",
     # tag
     "tag_name": "tag",
     "title": "tag",
-    "交易对方": "tag",
     # note
     "note": "note",
     "备注": "note",
+    "交易对方": "note",
     "商品": "note",
     "商品说明": "note",
 }
 """归一化列名 → 角色。
 
 - `金额(元)` 经 `normalize_header` 落 `金额` 键，故**不重复登记**带单位形态（D4 防死键）。
-- `交易类型`（微信的资金渠道列）**故意不在表内**（D9：它不是分类，登记即污染）。
+- **v1.4.4 V2 翻案登记**（推翻 boot3 D9 的这两处局部口径，其余 D 决策继续有效）：
+  `交易对方` 从 `tag` 改判 `note`（用户裁定：不再为交易对方建标签），
+  `交易类型`（微信资金渠道列）**开始登记为 `category`**——原 D9 的「它不是分类、
+  登记即污染」被用户翻案推翻，微信账单的分类来源自此就是这一列。
+- `note` 是**可多列并存**的角色（见 `resolve_columns` 的 V2 例外）。
 - 空列名归一为 `""` 且不落任何键 → 天然 `role=None`（M1 §2.2）。
 """
 
@@ -176,13 +181,14 @@ ALIPAY = Dialect(
     key="alipay",
     label="支付宝账单",
     required=frozenset({"交易时间", "交易分类", "金额", "收/支"}),
-    # 丢弃列：对方账号 / 收/付款方式 / 交易状态 / 交易订单号 / 商家订单号 / 备注（D9）
+    # 丢弃列：对方账号 / 收/付款方式 / 交易状态 / 交易订单号 / 商家订单号 / 备注。
+    # v1.4.4 V2：`交易对方` 从 tag 改判 note，与 `商品说明` **并存**（两列拼成一条备注）。
     roles={
         "交易时间": "consume_time",
         "交易分类": "category",
         "金额": "amount",
         "收/支": "type",
-        "交易对方": "tag",
+        "交易对方": "note",
         "商品说明": "note",
     },
     type_source="column",
@@ -193,13 +199,16 @@ WECHAT = Dialect(
     label="微信账单",
     required=frozenset({"交易时间", "金额", "收/支"}),
     # `金额(元)` 经归一化落 `金额` 键（D4）。
-    # 丢弃列：交易类型（资金渠道，非分类）/ 支付方式 / 当前状态 / 交易单号 /
-    #         商户单号 / 备注（D9：`商品` 信息量高于常为 `/` 的 `备注`）。
+    # 丢弃列：支付方式 / 当前状态 / 交易单号 / 商户单号 / 备注。
+    # v1.4.4 V2 翻案（原 D9「交易类型是资金渠道、不登记」+「交易对方→tag」）：
+    #   `交易类型` 登记为 **category**（微信分类来源），
+    #   `交易对方` 改判 **note**，与 `商品` 并存拼一条备注、不再建标签。
     roles={
         "交易时间": "consume_time",
+        "交易类型": "category",
         "金额": "amount",
         "收/支": "type",
-        "交易对方": "tag",
+        "交易对方": "note",
         "商品": "note",
     },
     type_source="column",
@@ -217,6 +226,8 @@ DIALECT_ORDER: tuple[str, ...] = ("native", "cashew", "cashew_template", "alipay
 是微信必要列集 `{交易时间, 金额, 收/支}` 的**超集**，一旦倒序，支付宝表头会先命中
 微信的宽松判据 → 被判成 `wechat` → `交易分类` 不在微信 roles 里 → **分类列被丢掉**，
 用户只能看到「无分类列」。倒序的后果由 `test_csv_dialects.py` §8.4 显式取证。
+（v1.4.4 V2 之后该陷阱**依旧成立**：微信登记的分类列名是 `交易类型`、支付宝是
+`交易分类`，两个列名不同 → 支付宝表头落到微信 roles 上仍然拿不到 category 角色。）
 """
 
 
@@ -300,8 +311,9 @@ def locate_header_rows(
 class ColumnHint:
     """一列的识别建议：原样列名 + 角色 + 样例值。
 
-    `conflict` 记录「本列被同角色更靠前列挤掉」（D3），仅供 `preview_csv` 生成
-    `warnings`；**不进响应契约**（`columns` 项只有 index/header/role/sample 四键）。
+    `conflict` 记录「本列被同角色更靠前列挤掉」（D3；`note` 角色**不适用**，V2 允许多列），
+    仅供 `preview_csv` 生成 `warnings`；**不进响应契约**（`columns` 项只有 index/header/
+    role/sample 四键）。
     """
 
     index: int
@@ -339,11 +351,13 @@ def resolve_columns(
     dialect: Dialect | None,
     data_rows: Sequence[Sequence[str]] = (),
 ) -> list[ColumnHint]:
-    """逐列给出角色建议（D3/D9）。
+    """逐列给出角色建议（D3 + v1.4.4 V2 的 note 例外）。
 
     - 有方言 → 取 `dialect.roles`；无方言（`custom`）→ 取通用 `COLUMN_ALIASES`。
-    - **每角色最多一列**：两列抢同一角色时靠前列得角色，后者 `role=None` 并置
-      `conflict=True`（D3）。
+    - **每角色最多一列**（D3）：两列抢同一角色时靠前列得角色，后者 `role=None` 并置
+      `conflict=True`。**`note` 是该规则的唯一例外**（V2）：一个文件里的多列备注来源
+      （微信 `交易对方` + `商品`、支付宝 `交易对方` + `商品说明`）都保留 `role="note"`、
+      不判冲突、不进 `warnings`，由 M3 落库层按列索引升序拼成一条备注。
     - `header` 为原样列名（**仅两端去空白**，保留大小写与中文）；`role` 查表用的是
       `normalize_header` 后的键，故空列名（支付宝表头末尾多一个逗号）天然 `None`。
     - `sample` 取该列**第一个非空**数据值（`/` 按空占位跳过，D31），无则 `""`。
@@ -365,6 +379,8 @@ def resolve_columns(
         conflict = False
         if candidate is None:
             pass
+        elif candidate == "note":
+            pass  # V2：note 可多列并存，既不挤掉前者、也不标冲突
         elif candidate in taken:
             role = None
             conflict = True

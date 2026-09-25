@@ -6,12 +6,13 @@ import logging
 import re
 import sqlite3
 import tempfile
+import unicodedata
 from collections.abc import Sequence
 from datetime import datetime
-from typing import Any
+from typing import Any, NamedTuple, cast
 
 import chardet
-from sqlmodel import select
+from sqlmodel import or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.budget import (
@@ -25,11 +26,13 @@ from app.models.category import LEGACY_CATEGORY_TYPE, Category
 from app.models.quick_template import QuickTemplate
 from app.models.record import Record
 from app.models.tag import Tag
+from app.services.category_service import OTHER_CATEGORY_NAME
 from app.services.csv_dialects import (
     DIALECTS,
     REQUIRED_ROLES,
     ROLE_LABELS,
     ROLES,
+    ColumnHint,
     Dialect,
     is_blank_cell,
     locate_header_rows,
@@ -175,6 +178,69 @@ def _cell_by_index(row: Sequence[str], index: int | None) -> str:
     return "" if is_blank_cell(value) else value
 
 
+# ── 角色 → 列索引（v1.4.4 V2：`note` 可来自多列，其余角色仍是一列）──────────
+
+RoleIndex = dict[str, int | list[int]]
+"""`_authoritative_role_index` 与识别区推导共用的形状：角色 → 列索引（`note` 可为列表）。"""
+
+
+def _indexes(value: int | list[int] | None) -> list[int]:
+    """把某个角色的列索引形状归一为**升序**列表（`None` → 空表）。
+
+    旧前端的 `int` 载荷与新前端的 `list[int]` 载荷在此汇流（D18 向后兼容）；
+    升序即「按列索引顺序拼接备注」的口径（V2）。
+    """
+    if value is None:
+        return []
+    if isinstance(value, int):
+        return [value]
+    return sorted(value)
+
+
+def _first_index(value: int | list[int] | None) -> int | None:
+    """单列角色（consume_time/amount/type/category/tag）取**第一命中列**（任务 §C）。"""
+    indexes = _indexes(value)
+    return indexes[0] if indexes else None
+
+
+def _role_index_from_hints(hints: Sequence[ColumnHint]) -> RoleIndex:
+    """列提示 → 角色索引（识别区与落库区的**同一份**推导，D25 精神）。
+
+    非 `note` 角色沿用「先列独占」（`resolve_columns` 已把后来的同角色列判为冲突 →
+    此处天然只有一个命中列）；`note` 例外地把全部命中列收成列表（V2）。
+    """
+    index: RoleIndex = {}
+    for hint in hints:
+        if hint.role is None:
+            continue
+        if hint.role == "note":
+            existing = index.get("note")
+            if isinstance(existing, list):
+                existing.append(hint.index)
+            elif existing is None:
+                index["note"] = [hint.index]
+            else:
+                index["note"] = [existing, hint.index]
+            continue
+        index.setdefault(hint.role, hint.index)
+    return index
+
+
+NOTE_JOINER = "·"
+"""多列备注的拼接符（v1.4.4 V2：微信 `交易对方` + `商品` 拼成一条备注）。"""
+
+
+def _join_note_parts(row: Sequence[str], indexes: Sequence[int]) -> str | None:
+    """按**升序列索引**取每列备注来源并拼一条（V2）。
+
+    每列走 `_cell_by_index`（`/` 与空白按空占位处理，D31），非空值以 `·` 连接；
+    全空 → ``None``（**不产出空串、不产出 `·`**）。列序即拼接序，与前端向导的
+    列顺序一致、可预期。
+    """
+    parts = [value for value in (_cell_by_index(row, index) for index in indexes) if value]
+    return NOTE_JOINER.join(parts) or None
+
+
 async def preview_csv(
     db: AsyncSession, file_bytes: bytes
 ) -> dict[str, Any]:
@@ -191,6 +257,13 @@ async def preview_csv(
     确认阶段由 M3 显式拒绝。
 
     注：`db` 形参现状无消费方（设计 §1.2.6 / M1 §5.5 保留签名，路由依赖注入不动）。
+
+    v1.4.4 V2 的两处可观察后果（后端事实，前端轮据此调整）：
+      * 微信账单**有**分类列了（`交易类型` → `category`）→ `categories_in_file` 出的是
+        该列取值，`warnings` 里的「未识别到分类列：需指定默认分类」对真实微信账单消失；
+      * `note` 可由多列同时命中（微信 `交易对方`+`商品`、支付宝 `交易对方`+`商品说明`），
+        按列索引升序拼一条备注（拼接发生在落库层）；`categories_in_file`/`tags_in_file`
+        仍只按 category / tag 角色列收集，**不受 note 多列影响**。
     """
     rows, container = _to_rows(file_bytes)
     encoding = "xlsx" if container == "xlsx" else detect_and_decode(file_bytes)[1]
@@ -202,11 +275,9 @@ async def preview_csv(
     columns = resolve_columns(raw_headers, dialect, data_rows)
 
     # 按**列角色**定位分类 / 标签列（取代现状「按表头名硬编码」）
-    role_index: dict[str, int] = {
-        hint.role: hint.index for hint in columns if hint.role is not None
-    }
-    cat_idx: int | None = role_index.get("category")
-    tag_idx: int | None = role_index.get("tag")
+    role_index: RoleIndex = _role_index_from_hints(columns)
+    cat_idx: int | None = _first_index(role_index.get("category"))
+    tag_idx: int | None = _first_index(role_index.get("tag"))
 
     categories_in_file: set[str] = set()
     tags_in_file: set[str] = set()
@@ -316,7 +387,13 @@ SKIPPED_REASONS: tuple[str, ...] = (
     "category_unresolved",
 )
 """跳过原因五键（D12）：**恒在、缺省 0**。键序与前端 `SKIPPED_REASON_LABELS` 同序
-（M4 取首个非零键的中文标签拼 toast），故此处不得随意调序。"""
+（M4 取首个非零键的中文标签拼 toast），故此处不得随意调序。
+
+v1.4.4 V3：五键**结构一字不动**，但 `category_unresolved` 自此**不再产生**、恒为 0——
+分类链改以「自动同名匹配 → 全局『其他』预设」兜底收口，任何行都能拿到一个
+`category_id`（`records.category_id` 自 v1.4.3 起 NOT NULL），整行跳过的旧口径作废。
+该键保留是给前端 toast 文案用的向后兼容位，不得删除。
+"""
 
 
 def _value_by_index(row: Sequence[str], index: int | None) -> str:
@@ -343,7 +420,7 @@ def _as_int(value: Any) -> int | None:
 
 
 def _default_type_source(
-    format_type: str, dialect: Dialect | None, role_index: dict[str, int]
+    format_type: str, dialect: Dialect | None, role_index: RoleIndex
 ) -> str:
     """``type_source`` 缺省值（D10 / 任务 §2.1）。
 
@@ -358,10 +435,38 @@ def _default_type_source(
     return "column" if "type" in role_index else "sign"
 
 
+def _validated_column_indexes(value: object, column_count: int) -> int | list[int]:
+    """校验单个角色的列索引载荷并**原形返回**（int 仍是 int、list 仍是 list）。
+
+    v1.4.4 V2：`note` 可发 `list[int]`（多列备注），其余角色仍发 `int`。
+    `list` 载荷**逐元素**做同一套越界判定（空列表按「无该角色列」处理，不当越界拒绝，
+    与前端把某列改成「不导入」的既有语义一致）。文案与 `PARAM_ERROR` 口径不变（§0.4-8）。
+
+    Raises:
+        ValueError: 非整数 / 布尔 / 负数 / ≥ 列数 / 列表含非法元素 → `列索引超出范围`。
+    """
+    if isinstance(value, bool):
+        raise ValueError("列索引超出范围")
+    if isinstance(value, int):
+        if value < 0 or value >= column_count:
+            raise ValueError("列索引超出范围")
+        return value
+    if isinstance(value, list):
+        checked: list[int] = []
+        for item in value:
+            if isinstance(item, bool) or not isinstance(item, int):
+                raise ValueError("列索引超出范围")
+            if item < 0 or item >= column_count:
+                raise ValueError("列索引超出范围")
+            checked.append(item)
+        return checked
+    raise ValueError("列索引超出范围")
+
+
 def _authoritative_role_index(
-    derived: dict[str, int], requested: dict[str, int] | None, column_count: int
-) -> dict[str, int]:
-    """列角色定稿（任务 §2.3/§2.4）：请求 ``columns`` 是**权威位**。
+    derived: RoleIndex, requested: RoleIndex | None, column_count: int
+) -> RoleIndex:
+    """列角色定稿（任务 §2.3/§2.4 + v1.4.4 V2）：请求 ``columns`` 是**权威位**。
 
     - 未发 `columns`（旧前端，D18）→ 用 §2.2 的重算推导值。
     - 发了 → **整体替换**推导值：前端载荷恒为「用户最终选择的全量角色 → 列索引」
@@ -369,6 +474,7 @@ def _authoritative_role_index(
       此时再补推导值等于违背手选。
     - 只认 `ROLES` 六角色封闭集（D3）：未知键不参与解析（等价于该角色不导入），
       最终由 `REQUIRED_ROLES` 的校验兜住。
+    - 值形状 `int | list[int]`（V2 只有 `note` 用得到列表）；**旧 `int` 载荷继续可用**。
 
     Raises:
         ValueError: 索引非整数 / 为负 / ≥ 列数 → `列索引超出范围`（转 `PARAM_ERROR`，
@@ -377,15 +483,11 @@ def _authoritative_role_index(
     if requested is None:
         return dict(derived)
 
-    resolved: dict[str, int] = {}
+    resolved: RoleIndex = {}
     for role, index in requested.items():
         if role not in ROLES:
             continue
-        if isinstance(index, bool) or not isinstance(index, int):
-            raise ValueError("列索引超出范围")
-        if index < 0 or index >= column_count:
-            raise ValueError("列索引超出范围")
-        resolved[role] = index
+        resolved[role] = _validated_column_indexes(index, column_count)
     return resolved
 
 
@@ -396,7 +498,8 @@ async def _apply_category_action(
     if action == "create":
         if not name:
             # fallback_category 只能沿用行内的分类名；空名（含 `/`，D31）不猜、
-            # 不建出名为 `/` 的分类（D8「禁止自动挂其他」同一条纪律）。
+            # 不建出名为 `/` 的分类。落空后由调用方继续走 V3 链（自动匹配 → 「其他」），
+            # 不再整行跳过。
             return None
         # v1.4.3 M8：type 恒写占位值（分类收支共用，映射载荷不再携带 type）；
         # 同名即复用（见 _resolve_or_create_category）。现状登记：此处不设
@@ -405,36 +508,177 @@ async def _apply_category_action(
     return _as_int(target_id)
 
 
+# ── v1.4.4 V3：分类兜底链（映射落空 / 值为空或 `/` / 用户没选，一律不再整行跳过）──
+
+CATEGORY_SYNONYMS: dict[str, str] = {"饮食": "餐饮"}
+"""自动匹配的**同义词表**（本轮只登记用户裁定的这一对，禁止凭印象扩表）。
+
+键与值都是**归一后**的形态（`_normalize_category_name` 的产物），查找按**双向**做：
+账单里的「饮食」能落到已有分类「餐饮」，反向亦然。
+"""
+
+_NAME_WS_RE = re.compile(r"\s+")
+
+
+def _normalize_category_name(name: str) -> str:
+    """分类名归一（V3 比对用）：NFKC → 两端去空白 → 内部连续空白折成单空格 → lower。
+
+    与识别层 `normalize_header`（列名用，还要剥括号单位）**刻意分开**：分类名里的
+    `(含税)` 之类后缀不是单位、剥了就换词了。
+    """
+    folded = _NAME_WS_RE.sub(" ", unicodedata.normalize("NFKC", name))
+    return folded.strip().lower()
+
+
+class _CategoryCandidate(NamedTuple):
+    """一条可参与自动匹配的分类候选（只取必要列，不装载 ORM 实体的其余字段）。"""
+
+    id: int
+    name: str
+    owned: bool  # True = 用户自有行；False = 全局预设（user_id IS NULL）
+
+
+async def _category_candidates(db: AsyncSession, user_id: int | None) -> list[_CategoryCandidate]:
+    """V3 自动匹配的候选集 = **用户自有分类 + 全局预设**（他人的自定义行一律排除）。
+
+    排序口径：用户自有在前、其后按 id 升序——同名多条时「自己的」先被选中，
+    与 `_resolve_import_category_by_name`（SQL 区）的既有优先级一致。
+    """
+    stmt = select(Category.id, Category.name, Category.user_id).where(
+        or_(Category.user_id == user_id, cast("Any", Category.user_id).is_(None))
+    )
+    result = await db.exec(stmt)
+    candidates: list[_CategoryCandidate] = []
+    for row in result.all():
+        category_id, name, owner_id = cast("tuple[int | None, str, int | None]", row)
+        if category_id is None:  # 理论不可达：已落库行必有主键
+            continue
+        candidates.append(
+            _CategoryCandidate(id=int(category_id), name=name, owned=owner_id == user_id)
+        )
+    candidates.sort(key=lambda item: (not item.owned, item.id))
+    return candidates
+
+
+def _auto_match_rank(value: str, name: str) -> int | None:
+    """一行账单分类值与一个候选分类名的匹配档位；``None`` = 不匹配。
+
+    档位越小越优先（V3 裁定的三档）：
+      * ``0`` 归一后**相等**（同名即同一分类，M8 口径的自然延伸）；
+      * ``1`` **双向包含**且两侧长度都 ≥ 2（「餐饮美食」⊇「餐饮」；单字不参与，
+        否则一个「衣」字就能把整表并进别的分类）；
+      * ``2`` **同义词表**命中（`CATEGORY_SYNONYMS`，双向查）。
+    """
+    left = _normalize_category_name(value)
+    right = _normalize_category_name(name)
+    if not left or not right:
+        return None
+    if left == right:
+        return 0
+    if len(left) >= 2 and len(right) >= 2 and (left in right or right in left):
+        return 1
+    if CATEGORY_SYNONYMS.get(left) == right or CATEGORY_SYNONYMS.get(right) == left:
+        return 2
+    return None
+
+
+async def _match_category_auto(
+    db: AsyncSession, user_id: int | None, cat_name: str
+) -> int | None:
+    """自动同名匹配（V3 第三档兜底）：账单分类值 → 已有分类 id；匹配不到 → ``None``。
+
+    只在**映射与 `fallback_category` 都落空后**才跑（用户显式改道永远优先）。
+    候选集每次取一次（同一次导入内由 `_resolve_row_category` 的 memo 复用到行值粒度），
+    按档位最小、同级「用户自有优先、id 升序」取第一条。
+    """
+    if not cat_name:
+        return None
+    best: tuple[int, int, int] | None = None  # (档位, 自有排, id) —— 越小越优
+    for order, candidate in enumerate(await _category_candidates(db, user_id)):
+        rank = _auto_match_rank(cat_name, candidate.name)
+        if rank is None:
+            continue
+        key = (rank, order, candidate.id)
+        if best is None or key < best:
+            best = key
+    return best[2] if best is not None else None
+
+
+async def _resolve_other_category_id(db: AsyncSession, user_id: int | None) -> int:
+    """V3 的最后一环：全局「其他」预设分类，**恒有结果**（链在此收口，不再产 None）。
+
+    取序：用户自有「其他」 → 全局预设「其他」（`user_id IS NULL`） → 建一个名为
+    「其他」的用户分类兜底（现场库缺预设行的极端形态下仍能入库，绝不悬空）。
+    """
+    owned = (
+        await db.exec(
+            select(Category.id).where(
+                Category.name == OTHER_CATEGORY_NAME, Category.user_id == user_id
+            )
+        )
+    ).first()
+    if owned is not None:
+        return int(owned)
+    preset = (
+        await db.exec(
+            select(Category.id).where(
+                Category.name == OTHER_CATEGORY_NAME,
+                cast("Any", Category.user_id).is_(None),
+            )
+        )
+    ).first()
+    if preset is not None:
+        return int(preset)
+    return await _resolve_or_create_category(db, user_id, OTHER_CATEGORY_NAME)
+
+
 async def _resolve_row_category(
     db: AsyncSession,
     user_id: int | None,
     cat_name: str,
     category_mapping: dict[str, Any],
     fallback_category: dict[str, Any] | None,
-) -> int | None:
-    """分类落位顺序（任务 §2.6）：`category_mapping` → `fallback_category` → ``None``。
+    memo: dict[str, int] | None = None,
+) -> int:
+    """分类落位链（v1.4.4 V3）：
+    ``行值 → category_mapping → fallback_category → 自动同名匹配 → 「其他」``。
 
-    ``cat_name`` 已由 `_cell_by_index` 把空串与 `/`（D31 一手实测占位符）归一为空，
-    故「值为空或 `/`」与「映射落空」一样都走 `fallback_category`；调用方拿到 ``None``
-    时计 `category_unresolved` 并跳过该行（**不抛异常**，用户可改向导后重试）。
+    * `cat_name` 已由 `_cell_by_index` 把空串与 `/`（D31）归一为空，故「值为空或 `/`」
+      与「映射落空」同样往下走链，**不再整行跳过**；
+    * 行值空时跳过「自动匹配」那一环（没有可比对的名字），直接挂「其他」；
+    * `create` 分支的空名（含 `/`）也归此路径 → 挂「其他」，绝不建出名为 `/` 的分类；
+    * 返回值**恒不为 ``None``**（`records.category_id` NOT NULL），故
+      `category_unresolved` 自本版本起不再产生（键仍在 `skipped_reasons` 里、恒为 0）。
+
+    ``memo`` 是**单次导入内**按行值缓存结果的字典（同值不重复查库）；调用方不传即
+    每次实查，语义不变。
     """
+    if memo is not None and cat_name in memo:
+        return memo[cat_name]
+
+    category_id: int | None = None
     if cat_name:
         mapped = category_mapping.get(cat_name)
         if mapped:
             category_id = await _apply_category_action(
                 db, user_id, cat_name, mapped.get("action"), mapped.get("target_id")
             )
-            if category_id is not None:
-                return category_id
-    if fallback_category:
-        return await _apply_category_action(
+    if category_id is None and fallback_category:
+        category_id = await _apply_category_action(
             db,
             user_id,
             cat_name,
             fallback_category.get("action"),
             fallback_category.get("target_id"),
         )
-    return None
+    if category_id is None and cat_name:
+        category_id = await _match_category_auto(db, user_id, cat_name)
+    if category_id is None:
+        category_id = await _resolve_other_category_id(db, user_id)
+
+    if memo is not None:
+        memo[cat_name] = category_id
+    return category_id
 
 
 async def _resolve_row_tag(
@@ -478,7 +722,7 @@ async def import_csv_data(
     format_type: str,
     category_mapping: dict[str, Any],
     tag_mapping: dict[str, Any],
-    columns: dict[str, int] | None = None,
+    columns: dict[str, int | list[int]] | None = None,
     type_source: str | None = None,
     fallback_category: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -496,6 +740,13 @@ async def import_csv_data(
          的 16 字符产物（D14），**替换旧「非空即入库」**。
       5. 返回 `{imported_count, skipped_count, skipped_reasons}`（D12）。
 
+    v1.4.4 的两条落库口径：
+      * **V2 备注**：`note` 角色涉及的**所有**列（按列索引升序）各取一次单元格
+        （`/` 按空占位，D31），非空值以 `·` 连接成一条；全空 → `None`。
+        `columns` 的 `note` 既可是 `int`（旧前端）也可是 `list[int]`（新前端）。
+      * **V3 分类**：`_resolve_row_category` 恒给得出 id（「其他」兜底）→
+        `category_unresolved` 不再计数，键仍随 `skipped_reasons` 返回、恒为 0。
+
     全空行按既有口径直接跳过、不计入 `skipped_count`（唯一空行判定 `_is_blank_row`，
     与 `preview_csv` 共用）。历史写入与 `delete_cache` 时机零改动。
     """
@@ -510,7 +761,7 @@ async def import_csv_data(
     dialect = match_dialect(raw_headers)
     hints = resolve_columns(raw_headers, dialect, data_rows)
     role_index = _authoritative_role_index(
-        {hint.role: hint.index for hint in hints if hint.role is not None},
+        _role_index_from_hints(hints),
         columns,
         len(raw_headers),
     )
@@ -522,6 +773,15 @@ async def import_csv_data(
         if type_source is not None
         else _default_type_source(format_type, dialect, role_index)
     )
+
+    # 单列角色在循环外定一次（越界校验已在 `_authoritative_role_index` 做完）
+    amount_idx = _first_index(role_index.get("amount"))
+    type_idx = _first_index(role_index.get("type"))
+    time_idx = _first_index(role_index.get("consume_time"))
+    category_idx = _first_index(role_index.get("category"))
+    tag_idx = _first_index(role_index.get("tag"))
+    note_indexes = _indexes(role_index.get("note"))  # V2：可多列，升序拼接
+    category_memo: dict[str, int] = {}
 
     imported_count = 0
     skipped_count = 0
@@ -537,35 +797,32 @@ async def import_csv_data(
         if _is_blank_row(row):
             continue
 
-        amount_value = parse_amount(_value_by_index(row, role_index.get("amount")))
+        amount_value = parse_amount(_value_by_index(row, amount_idx))
         if amount_value is None:
             skip("invalid_amount")
             continue
 
         type_str, type_reason = resolve_type(
-            _value_by_index(row, role_index.get("type")), amount_value, source
+            _value_by_index(row, type_idx), amount_value, source
         )
         if type_str is None:
             skip(type_reason or "type_unresolved")
             continue
 
-        consume_time = parse_time(_cell_by_index(row, role_index.get("consume_time")))
+        consume_time = parse_time(_cell_by_index(row, time_idx))
         if consume_time is None:
             skip("invalid_date")
             continue
 
-        cat_name = _cell_by_index(row, role_index.get("category"))
+        cat_name = _cell_by_index(row, category_idx)
         category_id = await _resolve_row_category(
-            db, user_id, cat_name, category_mapping, fallback_category
+            db, user_id, cat_name, category_mapping, fallback_category, category_memo
         )
-        if category_id is None:
-            skip("category_unresolved")
-            continue
 
-        tag_name = _cell_by_index(row, role_index.get("tag"))
+        tag_name = _cell_by_index(row, tag_idx)
         tag_id = await _resolve_row_tag(db, user_id, tag_name, tag_mapping)
 
-        note = _cell_by_index(row, role_index.get("note"))
+        note = _join_note_parts(row, note_indexes)
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         record = Record(
             amount=round_money(abs(amount_value)),

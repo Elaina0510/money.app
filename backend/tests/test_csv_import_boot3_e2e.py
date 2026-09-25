@@ -49,6 +49,12 @@
 其它纪律：现场库文件全程只读，用例一律走 conftest 的内存引擎（§2.8）；
 **不引用本机未跟踪的现场样例目录路径**（红线 11）；§2.10 的前后端契约一致性
 **只读**前端 `.vue` / `.js` 源码文本（不改前端任何文件、不引前端依赖）。
+
+v1.4.4 三条用户新裁定对本文件的同步改写（V1 日期 / V2 角色 / V3 分类兜底）：
+  * §2.2 微信用例的口径**反转**（`交易类型` 现为分类列、未选归入时挂「其他」而非丢行）；
+  * §2.3 脏值夹具的斜杠日两例改写（无歧义者入库、真歧义者仍 `invalid_date`），
+    另新增 `test_v1_4_4_unambiguous_slash_dates_import_and_ambiguous_still_skip`；
+  * §2.2 支付宝 / §2.5 / §2.9.1 的 `note` 期望值改为「交易对方 · 商品」拼接形式。
 """
 
 import ast
@@ -525,36 +531,48 @@ async def test_2_2_alipay_dialect_auto_maps_transaction_category(
     assert body["data"]["skipped_reasons"]["type_ignored"] == 1
 
     rows = {r["note"]: r for r in await records(auth_client)}
-    assert rows["午餐"]["category_id"] == food_id, "交易分类列自动落位到同名分类"
-    assert rows["打车"]["category_id"] == taxi_id
-    assert rows["午餐"]["amount"] == 45.9
-    assert rows["打车"]["amount"] == 6.9, "裸数字 6.90 → 两位小数（D13）"
+    assert rows["某餐馆·午餐"]["category_id"] == food_id, "交易分类列自动落位到同名分类"
+    assert rows["某出行·打车"]["category_id"] == taxi_id
+    assert rows["某餐馆·午餐"]["amount"] == 45.9
+    assert rows["某出行·打车"]["amount"] == 6.9, "裸数字 6.90 → 两位小数（D13）"
 
 
 async def test_2_2_wechat_dialect_has_no_category_column_and_needs_fallback(
     auth_client: AsyncClient,
 ) -> None:
-    """§2.2 wechat：全表无分类列（D8）→ 未选「账单归入」时**不抛异常**、整表计 `category_unresolved`。
+    """§2.2 wechat：**v1.4.4 V2/V3 翻案后本用例的口径已反转**（用例名保留、断言已改写）。
 
-    表头逐字取 §0.4-10 的 11 列原文（数据行**合成**）；`交易类型` 是资金渠道
-    **不是分类**（D9 故意不登记）→ 它既不得落 `category`、也不得落任何角色。
+    旧事实（boot3 D8/D9）：微信全表无分类列（`交易类型` 故意不登记）→ 不发
+    `fallback_category` 时整表计 `category_unresolved`、0 行入库。
+    新事实（V2）：`交易类型` 登记为 `category` → 微信**有**分类列、「未识别到分类列」告警
+    消失；（V3）不发 `fallback_category` 时「零钱支付」自动匹配落空 → 挂「其他」并入库。
+    另钉 V2 的备注：`交易对方` + `商品` 拼一条、不建标签。表头 11 列逐字 §0.4-10、
+    数据行**合成**。
     """
     raw = as_bytes(
         WECHAT_HEADER + "\n"
-        "2024-04-01 09:15:00,零钱支付,某便利店,早餐,支出,¥12.50,零钱,支付成功,T0001,/,/"
+        "2024-04-01 09:15:00,零钱支付,某便利店,早餐,支出,¥12.50,零钱,支付成功,T0001,/,"
     )
     data = await preview_data(auth_client, raw)
     assert data["format"] == "wechat"
-    assert "未识别到分类列：需指定默认分类" in data["warnings"]
+    assert "未识别到分类列：需指定默认分类" not in data["warnings"], "V2：微信已有分类列"
     roles = {col["header"]: col["role"] for col in data["columns"]}
-    assert roles["交易类型"] is None, "D9：渠道列不得当分类"
-    assert "category" not in {col["role"] for col in data["columns"]}
+    assert roles["交易类型"] == "category", "V2：微信分类来源 = 交易类型"
+    assert roles["交易对方"] == "note", "V2：交易对方进备注、不再建标签"
+    assert roles["商品"] == "note"
+    assert data["categories_in_file"] == ["零钱支付"]
 
     first = await confirm(auth_client, data["cache_id"], "wechat")
-    assert first["code"] == Code.SUCCESS, "整表无分类列属**可解释跳过**，不是异常"
-    assert first["data"]["imported_count"] == 0
-    assert first["data"]["skipped_reasons"]["category_unresolved"] == 1
-    assert await records(auth_client) == []
+    assert first["code"] == Code.SUCCESS, first["message"]
+    assert first["data"]["imported_count"] == 1, "V3：分类落空的行不再被丢弃"
+    assert first["data"]["skipped_reasons"]["category_unresolved"] == 0
+    assert await tag_names(auth_client) == [], "V2：真实微信账单不再产生标签"
+
+    other_id = await category_id_by_name(auth_client, "其他")
+    rows = await records(auth_client)
+    assert rows[0]["category_id"] == other_id, "自动匹配落空 → 挂「其他」"
+    assert rows[0]["note"] == "某便利店·早餐", "V2：两列备注拼一条"
+    assert rows[0]["amount"] == 12.5
 
     cat_id = await new_category(auth_client, "账单归入")
     data = await preview_data(auth_client, raw)
@@ -566,10 +584,8 @@ async def test_2_2_wechat_dialect_has_no_category_column_and_needs_fallback(
     )
     assert body["code"] == Code.SUCCESS, body["message"]
     assert body["data"]["imported_count"] == 1
-    rows = await records(auth_client)
-    assert rows[0]["category_id"] == cat_id
-    assert rows[0]["amount"] == 12.5
-    assert rows[0]["note"] == "早餐", "D9：商品→note、交易对方→tag"
+    fresh = [r for r in await records(auth_client) if r["id"] not in {row["id"] for row in rows}]
+    assert [r["category_id"] for r in fresh] == [cat_id], "显式归入仍优先于自动匹配"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -581,7 +597,8 @@ DIRTY_CATEGORY = "脏值归一"
 DIRTY_MONTH = "2024-05"
 
 # (金额原值, 收支原值, 日期原值, note, 是否入库)；全部为**合成行**，形态逐条取自
-# 设计 §2.3 的边界表。期望聚合数写死在下面，供 §2.3.2 / §2.3.3 做**读取侧**对照。
+# 设计 §2.3 的边界表 + v1.4.4 V1 的斜杠日两例（无歧义 → 采用、真歧义 → 照旧不猜）。
+# 期望聚合数写死在下面，供 §2.3.2 / §2.3.3 做**读取侧**对照。
 DIRTY_ROWS: list[tuple[str, str, str, str, bool]] = [
     ('"¥1,234.50"', "expense", "2024/05/10 08:30:00", "货币符号与千分位", True),
     ("12.00元", "支出", "2024年5月11日 9:05", "中文日期与单位", True),
@@ -589,13 +606,16 @@ DIRTY_ROWS: list[tuple[str, str, str, str, bool]] = [
     ("１２．５", "income", "2024-05-13 07:00:00.123", "全角数字与毫秒", True),
     ("50.00", "expense", "2024-05-14~2024-05-14 09:00:00", "时间区间取前段", True),
     ("60.00", "expense", "2024-05-15", "仅日期补 00:00", True),
+    # v1.4.4 V1：日位 24 只有一种解释合法 → 采用（仍落在 DIRTY_MONTH 这个月桶里）
+    ("70.00", "expense", "05/24/2024", "斜杠日无歧义则采用（V1）", True),
+    # 月/日两读皆合法（05-06 与 06-05）→ 真歧义，照旧不猜
+    ("80.00", "expense", "05/06/2024", "斜杠日真歧义不猜（V1 另一半）", False),
     ("/", "expense", "2024-05-16 08:00", "占位金额不猜", False),
-    ("70.00", "expense", "09/24/2024", "美式歧义日期不猜（D15）", False),
-    ("80.00", "expense", "1727147274", "纯数字时间戳不猜（D15）", False),
+    ("90.00", "expense", "1727147274", "纯数字时间戳不猜（D15）", False),
 ]
 DIRTY_KEPT_NOTES = sorted(note for _amount, _type, _time, note, kept in DIRTY_ROWS if kept)
 DIRTY_KEPT_COUNT = len(DIRTY_KEPT_NOTES)
-DIRTY_EXPECTED_EXPENSE = 1234.5 + 12.0 + 20.0 + 50.0 + 60.0
+DIRTY_EXPECTED_EXPENSE = 1234.5 + 12.0 + 20.0 + 50.0 + 60.0 + 70.0
 DIRTY_EXPECTED_INCOME = 12.5
 
 
@@ -645,7 +665,7 @@ async def test_2_3_1_records_month_filter_finds_rows_written_from_dirty_dates(
     }, "五键恒在、缺省 0（D12）"
 
     hits = await records(auth_client, start_date=f"{DIRTY_MONTH}-01", end_date=f"{DIRTY_MONTH}-31")
-    assert len(hits) == DIRTY_KEPT_COUNT, "六行脏形态全部落进 2024-05 的区间"
+    assert len(hits) == DIRTY_KEPT_COUNT, "七行脏形态全部落进 2024-05 的区间（含 V1 的无歧义斜杠日）"
     assert sorted(r["note"] for r in hits) == DIRTY_KEPT_NOTES
     assert await records(auth_client, start_date="2024-06-01", end_date="2024-06-30") == [], (
         "过滤不是恒真：换个月份必须落空"
@@ -891,9 +911,49 @@ async def test_2_5_type_column_three_states_skip_counts_match_fixture(auth_clien
     assert reasons["type_unresolved"] == 0, "`/` 不得被当成「无法判定」"
 
     rows = {r["note"]: r for r in await records(auth_client)}
-    assert set(rows) == {"早餐", "退款"}
-    assert (rows["早餐"]["amount"], rows["早餐"]["type"]) == (12.5, "expense")
-    assert (rows["退款"]["amount"], rows["退款"]["type"]) == (6.6, "income")
+    assert set(rows) == {"甲店·早餐", "乙店·退款"}, "V2：备注 = `交易对方` · `商品`"
+    assert (rows["甲店·早餐"]["amount"], rows["甲店·早餐"]["type"]) == (12.5, "expense")
+    assert (rows["乙店·退款"]["amount"], rows["乙店·退款"]["type"]) == (6.6, "income")
+
+
+# ── v1.4.4 V1：斜杠日的端到端净效果（从读取侧看，不重复 §4.x 的纯函数断言）────
+
+
+async def test_v1_4_4_unambiguous_slash_dates_import_and_ambiguous_still_skip(
+    auth_client: AsyncClient,
+) -> None:
+    """V1 端到端：`09/24/2026`、`24/09/2026 15:30` 入库，`05/06/2026` 仍计 `invalid_date`。
+
+    用户翻案的正是「这类斜杠日期要能识别」，但**真歧义**（月/日两读皆合法）照旧不猜；
+    入库形态仍是 §2.3.4 那一条 16 字符规范（月份过滤能读回即证明归一真的发生）。
+    """
+    cat_id = await new_category(auth_client, "日期翻案归入")
+    raw = as_bytes(
+        WECHAT_HEADER + "\n"
+        "09/24/2026,零钱支付,甲店,无歧义美式,支出,¥1.00,零钱,成功,S1,/,/\n"
+        "24/09/2026 15:30,零钱支付,乙店,无歧义欧式带时间,支出,¥2.00,零钱,成功,S2,/,/\n"
+        "05/06/2026,零钱支付,丙店,真歧义不猜,支出,¥3.00,零钱,成功,S3,/,/\n"
+        "02/30/2026,零钱支付,丁店,双非法日历日,支出,¥4.00,零钱,成功,S4,/,/"
+    )
+    data = await preview_data(auth_client, raw)
+    assert data["format"] == "wechat"
+
+    body = await confirm(
+        auth_client,
+        data["cache_id"],
+        "wechat",
+        fallback_category={"action": "map", "target_id": cat_id},
+    )
+    assert body["code"] == Code.SUCCESS, body["message"]
+    assert body["data"]["imported_count"] == 2
+    assert body["data"]["skipped_reasons"]["invalid_date"] == 2, "真歧义 + 双非法各一条"
+
+    rows = {r["note"]: r for r in await records(auth_client)}
+    assert rows["甲店·无歧义美式"]["consume_time"] == "2026-09-24 00:00"
+    assert rows["乙店·无歧义欧式带时间"]["consume_time"] == "2026-09-24 15:30"
+    hits = await records(auth_client, start_date="2026-09-01", end_date="2026-09-30")
+    assert len(hits) == 2, "归一后的斜杠日落在 2026-09 的字符串区间里（读取侧证据）"
+    assert all(re.fullmatch(CONSUME_TIME_PATTERN, r["consume_time"]) for r in hits), hits
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1115,8 +1175,9 @@ async def test_2_9_1_wechat_xlsx_preview_and_confirm_end_to_end(auth_client: Asy
     assert data["header_row_index"] == MIRROR_HEADER_ROW_INDEX
     assert data["row_count"] == DATA_ROW_COUNT
     assert len(data["sample_rows"]) == DATA_ROW_COUNT
-    assert data["categories_in_file"] == [], "微信账单全表无分类列（D8/D30）"
-    assert "未识别到分类列：需指定默认分类" in data["warnings"]
+    assert data["categories_in_file"] == sorted({row[1] for row in data["sample_rows"]}), \
+        "v1.4.4 V2：微信的分类来源 = `交易类型` 列（按 role 定位取值）"
+    assert "未识别到分类列：需指定默认分类" not in data["warnings"], "V2：微信已有分类列"
 
     neutral = [row for row in data["sample_rows"] if row[4] == "/"]
     payable = [row for row in data["sample_rows"] if row[4] != "/"]
@@ -1130,10 +1191,15 @@ async def test_2_9_1_wechat_xlsx_preview_and_confirm_end_to_end(auth_client: Asy
     assert body["data"]["imported_count"] == len(payable), "入库条数 == 夹具数据行数 - 中性 `/` 行"
     assert body["data"]["skipped_reasons"]["type_ignored"] == len(neutral)
 
+    def expected_note(row: list[str]) -> str:
+        """V2 的备注拼接：`交易对方` · `商品`（夹具里 `/` 占位段不参与）。"""
+        parts = [part for part in (row[2], row[3]) if part and part != "/"]
+        return "·".join(parts)
+
     rows = {r["note"]: r for r in await records(auth_client)}
-    assert set(rows) == {row[3] for row in payable}, "商品列 → note（D9）"
+    assert set(rows) == {expected_note(row) for row in payable}, "商品与交易对方拼一条备注（V2）"
     for row in payable:
-        stored = rows[row[3]]
+        stored = rows[expected_note(row)]
         assert stored["amount"] == float(row[5]), "裸数字金额 → abs 后两位小数（D13）"
         assert stored["type"] == ("expense" if row[4] == "支出" else "income")
         assert stored["category_id"] == cat_id

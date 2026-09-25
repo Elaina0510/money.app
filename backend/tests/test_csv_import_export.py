@@ -3,6 +3,16 @@
 v1.4.3-boot3 M3 追加落库层用例（`TestCsvBoot3Writer`，任务 §5.1–§5.10b）：
 统一列角色 + 请求契约（`columns` / `type_source` / `fallback_category`）+
 `skipped_reasons` 五键 + CSV 标签查重。既有 native/cashew 用例断言一字不改（§5.2）。
+
+v1.4.4 三条用户新裁定（V2/V3）同步改写了本文件的既有口径，登记如下：
+  * **V2 备注**：微信/支付宝的 `交易对方` 改判 note → 入库备注是「对方·商品」一条字符串
+    （§5.6/§5.8/§5.10/§5.10b 的 note 期望值随之改），交易对方不再建标签（§5.9 改由用户
+    **手选** `columns` 把该列当 tag，查重纪律本身未松）；
+  * **V2 载荷**：`columns` 值放宽为 `int | list[int]`（`TestCsvV144Decisions` 同时保留
+    旧 `int` 载荷的回归用例，D18）；
+  * **V3 分类**：映射落空 / 值为空或 `/` / 未选归入 → 自动同名匹配 → 挂「其他」，
+    不再整行跳过（`test_import_skips_unmapped_rows`、§5.5 后半、§5.6、§5.8 的
+    `category_unresolved` 期望值按此改写；五键结构与其余键的计数一字未动）。
 """
 
 from pathlib import Path
@@ -308,7 +318,13 @@ class TestCsvImportConfirm:
         assert rows[0]["type"] == "expense"
 
     async def test_import_skips_unmapped_rows(self, auth_client: AsyncClient):
-        """Should skip rows without category mapping."""
+        """**v1.4.4 V3 口径改写**：未映射的行不再被跳过，自动匹配落空后挂到「其他」。
+
+        旧断言（boot3 D8）：`category_mapping` 落空且未发 `fallback_category`
+        → `imported_count == 0`、`skipped_count == 1`（`category_unresolved`）。
+        新断言（V3）：链尾恒有「其他」兜底 → 该行进库、`category_unresolved` **恒为 0**
+        （键仍在 `skipped_reasons` 五键结构里，前端 toast 文案向后兼容）。
+        """
         csv_content = (
             "amount,type,category_name,tag_name,consume_time,note\n"
             "50.0,expense,未映射,,2024-01-15 12:00,测试"
@@ -324,8 +340,17 @@ class TestCsvImportConfirm:
             "tag_mapping": {},
         })
         assert resp.status_code == 200
-        assert resp.json()["data"]["imported_count"] == 0
-        assert resp.json()["data"]["skipped_count"] == 1
+        data = resp.json()["data"]
+        assert data["imported_count"] == 1, "V3：分类落空不再丢行"
+        assert data["skipped_count"] == 0
+        assert set(data["skipped_reasons"]) == SKIPPED_REASON_KEYS, "五键结构一字不动（D12）"
+        assert data["skipped_reasons"]["category_unresolved"] == 0
+
+        rows = await _records(auth_client)
+        assert len(rows) == 1
+        cats = {c["id"]: c["name"] for c in (await auth_client.get("/api/categories")).json()["data"]}
+        assert cats[rows[0]["category_id"]] == "其他", "自动匹配落空 → 挂「其他」"
+        assert rows[0]["note"] == "测试"
 
     async def test_import_records_history(self, auth_client: AsyncClient, db_session):
         """Import should be recorded in history."""
@@ -494,6 +519,17 @@ async def _new_category(auth_client: AsyncClient, name: str) -> int:
     return resp.json()["data"]["id"]
 
 
+async def _categories(auth_client: AsyncClient) -> list[dict]:
+    return (await auth_client.get("/api/categories")).json()["data"]
+
+
+async def _category_id_by_name(auth_client: AsyncClient, name: str) -> int:
+    """按名取分类 id（v1.4.4 V3 的「其他」兜底断言用）；取不到即**显式 fail**。"""
+    rows = [c for c in await _categories(auth_client) if c["name"] == name]
+    assert rows, f"库里没有名为 {name!r} 的分类：V3 兜底链或自动匹配未按预期落位"
+    return rows[0]["id"]
+
+
 async def _new_tag(auth_client: AsyncClient, name: str, category_id: int) -> int:
     resp = await auth_client.post(
         "/api/tags", json={"name": name, "category_id": category_id}
@@ -606,8 +642,10 @@ class TestCsvBoot3Writer:
     async def test_5_5_manual_columns_non_default_order(self, auth_client: AsyncClient):
         """§5.5 手选列角色（需求 A 的落点）：`columns` 是权威位，非默认列序也能入库。
 
-        同一份文件**不发** `columns` 时分类列推不出来（`分类` 不在别名表内，D6）→
-        全行 `category_unresolved`，两相对照即证「手选覆盖方言推导」。
+        **旧 `int` 型 `columns` 载荷的回归证据**（v1.4.4 V2 放宽为 `int | list[int]` 后
+        仍必须可用，D18）。同一份文件**不发** `columns` 时分类列推不出来
+        （`分类` 不在别名表内，D6）→ v1.4.4 V3 起这些行不再被丢弃，而是挂到「其他」，
+        两相对照仍证明「手选覆盖方言推导」。
         """
         raw = (
             "日期,说明,流水号,金额,收支,分类\n"
@@ -625,20 +663,29 @@ class TestCsvBoot3Writer:
         )
         assert body["code"] == 0, body["message"]
         assert body["data"]["imported_count"] == 2
+        assert body["data"]["skipped_reasons"]["category_unresolved"] == 0
         rows = sorted(await _records(auth_client), key=lambda r: r["consume_time"])
         assert [(r["amount"], r["type"], r["note"]) for r in rows] == [
             (88.88, "expense", "手选列序测试"),
             (6.4, "income", "第二行"),
         ]
+        assert rows[0]["category_id"] == await _category_id_by_name(auth_client, "买菜")
 
+        # 不发 columns：分类列推不出来 → 行值为空 → V3 链尾挂「其他」（不再丢行）
+        seen_ids = {r["id"] for r in rows}
         data = await _preview(auth_client, raw)
         body = await _confirm(
             auth_client, data["cache_id"], "custom",
             category_mapping={"买菜": {"action": "create"}},
         )
         assert body["code"] == 0
-        assert body["data"]["imported_count"] == 0
-        assert body["data"]["skipped_reasons"]["category_unresolved"] == 2
+        assert body["data"]["imported_count"] == 2
+        assert body["data"]["skipped_reasons"]["category_unresolved"] == 0
+        fresh = [r for r in await _records(auth_client) if r["id"] not in seen_ids]
+        assert len(fresh) == 2
+        other_id = await _category_id_by_name(auth_client, "其他")
+        assert all(r["category_id"] == other_id for r in fresh), "无分类列可解析 → 挂「其他」"
+        assert all(r["note"] is None for r in fresh), "note 列同样推不出来（对照手选半区）"
 
     async def test_5_5_column_index_out_of_range(self, auth_client: AsyncClient):
         """§5.5 索引越界 → 中文 `ValueError` 经路由转 `PARAM_ERROR`（不依赖 422）。"""
@@ -686,7 +733,12 @@ class TestCsvBoot3Writer:
         assert "必需列" in body["message"]
 
     async def test_5_6_fallback_category(self, auth_client: AsyncClient):
-        """§5.6 `fallback_category`：微信账单无分类列 → 全部行归入所选分类（D8）。"""
+        """§5.6 `fallback_category`：显式改道**永远优先于** V3 的自动匹配（用户意志优先）。
+
+        v1.4.4 V2 的两处后果同时在此钉住：
+          * 微信**有**分类列了（`交易类型`）→ 「未识别到分类列」告警对真实微信消失；
+          * 备注 = `交易对方` · `商品` 拼一条（V2），且不再有 tag 列。
+        """
         cat_id = await _new_category(auth_client, "默认归入")
         raw = (
             WECHAT_HEADER + "\n"
@@ -696,7 +748,8 @@ class TestCsvBoot3Writer:
 
         data = await _preview(auth_client, raw)
         assert data["format"] == "wechat"
-        assert "未识别到分类列：需指定默认分类" in data["warnings"]
+        assert "未识别到分类列：需指定默认分类" not in data["warnings"], "V2：微信已有分类列"
+        assert data["categories_in_file"] == ["零钱支付"], "分类列改由 `交易类型` 供值"
 
         body = await _confirm(
             auth_client, data["cache_id"], "wechat",
@@ -706,11 +759,17 @@ class TestCsvBoot3Writer:
         assert body["data"]["imported_count"] == 2
         rows = await _records(auth_client)
         assert len(rows) == 2
-        assert all(r["category_id"] == cat_id for r in rows)
-        assert sorted(r["note"] for r in rows) == ["午餐", "早餐"]
+        assert all(r["category_id"] == cat_id for r in rows), "fallback 仍在自动匹配之前"
+        assert sorted(r["note"] for r in rows) == ["某便利店·早餐", "某商户·午餐"]
+        assert await _tags(auth_client) == [], "V2：交易对方不再建标签"
 
     async def test_5_6_without_fallback_category(self, auth_client: AsyncClient):
-        """§5.6 未发 `fallback_category` → 不抛异常，全部行计 `category_unresolved`。"""
+        """§5.6 未发 `fallback_category` → V3 起**不再整表 category_unresolved**。
+
+        旧断言（boot3 D8）：`imported_count == 0` + `category_unresolved == 2`。
+        新断言（V3）：分类值「零钱支付」映射落空、自动匹配也落空 → 挂「其他」，
+        两行都入库；`category_unresolved` 键仍在、值为 0。
+        """
         raw = (
             WECHAT_HEADER + "\n"
             "2024-04-01 09:15:00,零钱支付,某便利店,早餐,支出,¥12.50,零钱,支付成功,T0001,/,/\n"
@@ -720,12 +779,15 @@ class TestCsvBoot3Writer:
         data = await _preview(auth_client, raw)
         body = await _confirm(auth_client, data["cache_id"], "wechat")
         assert body["code"] == 0, body["message"]
-        assert body["data"]["imported_count"] == 0
-        assert body["data"]["skipped_count"] == 2
+        assert body["data"]["imported_count"] == 2, "V3：分类落空的行不再被丢弃"
+        assert body["data"]["skipped_count"] == 0
         reasons = body["data"]["skipped_reasons"]
-        assert reasons["category_unresolved"] == 2
         assert set(reasons) == SKIPPED_REASON_KEYS
-        assert await _records(auth_client) == []
+        assert reasons["category_unresolved"] == 0
+        other_id = await _category_id_by_name(auth_client, "其他")
+        rows = await _records(auth_client)
+        assert sorted(r["note"] for r in rows) == ["某便利店·早餐", "某商户·午餐"]
+        assert all(r["category_id"] == other_id for r in rows)
         assert "默认归入" not in await _category_names(auth_client)
 
     async def test_5_7_type_source_four_states(self, auth_client: AsyncClient):
@@ -764,7 +826,13 @@ class TestCsvBoot3Writer:
             assert body["data"]["skipped_count"] == sum(expected_skips.values()), source
 
     async def test_5_8_skipped_reasons_five_keys(self, auth_client: AsyncClient):
-        """§5.8 五键计数（D12）：各构造一条脏行，断言逐键**非串扰**。"""
+        """§5.8 五键计数（D12）：各构造一条脏行，断言逐键**非串扰**。
+
+        v1.4.4 V3 的改动：第五条脏行（分类值 `未映射分类` 且无 fallback）**不再产生
+        `category_unresolved`** —— 自动匹配落空后挂「其他」并正常入库；
+        该键仍随响应返回、恒为 0（五键结构不动）。
+        另钉 V2 的备注拼接（`交易对方` · `商品说明`）作为入库行的身份对照。
+        """
         raw = (
             ALIPAY_HEADER + "\n"
             "2024-04-10 10:00:00,餐饮美食,甲店,a***@b.com,早餐,支出,-,余额宝,交易成功,P010,MP010,/,\n"
@@ -774,8 +842,9 @@ class TestCsvBoot3Writer:
             "2024-04-14 10:00:00,未映射分类,戊店,a***@b.com,东西,支出,50.00,余额宝,交易成功,P014,MP014,/,\n"
             "2024-04-15 10:00:00,餐饮美食,己店,a***@b.com,正餐,收入,60.00,余额宝,交易成功,P015,MP015,/,"
         ).encode()
-        # 脏行依次对应五键：`-` 金额（D13 归 None）、`04/11/2024` 歧义日期（D15 不猜）、
-        # `不计收支`（D11 忽略集）、`看不懂`（列值不可判）、`未映射分类`（无 fallback）。
+        # 脏行依次对应四键：`-` 金额（D13 归 None）、`04/11/2024` 歧义日期（V1：两读皆合法
+        # → 不猜）、`不计收支`（D11 忽略集）、`看不懂`（列值不可判）；
+        # 第五行「未映射分类」自 V3 起不再是脏行（挂「其他」入库）。
 
         data = await _preview(auth_client, raw)
         assert data["format"] == "alipay"
@@ -785,20 +854,30 @@ class TestCsvBoot3Writer:
         )
         assert body["code"] == 0, body["message"]
         result = body["data"]
-        assert result["imported_count"] == 1
-        assert result["skipped_count"] == 5
+        assert result["imported_count"] == 2, "V3：原 `category_unresolved` 行改挂「其他」后入库"
+        assert result["skipped_count"] == 4
         assert result["skipped_reasons"] == {
             "invalid_amount": 1,
             "invalid_date": 1,
             "type_ignored": 1,
             "type_unresolved": 1,
-            "category_unresolved": 1,
+            "category_unresolved": 0,
         }
-        rows = await _records(auth_client)
-        assert [(r["amount"], r["type"]) for r in rows] == [(60.0, "income")]
+        rows = {r["note"]: r for r in await _records(auth_client)}
+        assert set(rows) == {"戊店·东西", "己店·正餐"}
+        assert (rows["己店·正餐"]["amount"], rows["己店·正餐"]["type"]) == (60.0, "income")
+        food_id = await _category_id_by_name(auth_client, "餐饮美食")
+        other_id = await _category_id_by_name(auth_client, "其他")
+        assert rows["己店·正餐"]["category_id"] == food_id
+        assert rows["戊店·东西"]["category_id"] == other_id
 
     async def test_5_9_same_tag_created_once(self, auth_client: AsyncClient):
-        """§5.9 标签 create 分支补查重（§0.4-6 缺陷闭环）：同名两行 → `tags` 只 1 行。"""
+        """§5.9 标签 create 分支补查重（§0.4-6 缺陷闭环）：同名两行 → `tags` 只 1 行。
+
+        v1.4.4 V2 后支付宝账单**默认不再有 tag 列**（`交易对方` 改判 note）→ 本用例改由
+        用户**手选** `columns` 把第 2 列当 tag（`int` 型载荷，顺带守住 D18 向后兼容）；
+        查重的落库纪律本身不变，故断言一字未松。
+        """
         raw = (
             ALIPAY_HEADER + "\n"
             "2024-04-20 10:00:00,餐饮美食,同名标签,a***@b.com,午餐,支出,10.00,余额宝,交易成功,P020,MP020,/,\n"
@@ -806,8 +885,15 @@ class TestCsvBoot3Writer:
         ).encode()
 
         data = await _preview(auth_client, raw)
+        assert [c["header"] for c in data["columns"]][2] == "交易对方"
+        assert data["columns"][2]["role"] == "note", "V2：默认这一列是备注，不是标签"
+
         body = await _confirm(
             auth_client, data["cache_id"], "alipay",
+            columns={
+                "consume_time": 0, "category": 1, "tag": 2,
+                "note": 4, "type": 5, "amount": 6,
+            },
             category_mapping={"餐饮美食": {"action": "create"}},
             tag_mapping={"同名标签": {"action": "create", "category_id": None}},
         )
@@ -819,11 +905,13 @@ class TestCsvBoot3Writer:
         rows = await _records(auth_client)
         assert len(rows) == 2
         assert {_tag_id(r) for r in rows} == {tags[0]["id"]}
+        assert sorted(r["note"] for r in rows) == ["午餐", "晚餐"], "手选单列 note 照常可用"
 
     async def test_5_10_alipay_bill(self, auth_client: AsyncClient):
         """§5.10 支付宝合成账单：`交易分类` 列自动映射、`不计收支` 计 `type_ignored`。
 
         表头逐字取设计 §0.4-10（**含末尾逗号 = 第 13 个空列**）；数据行全合成。
+        v1.4.4 V2：备注 = `交易对方` · `商品说明` 拼一条，`交易对方` 不再建标签。
         """
         food_id = await _new_category(auth_client, "餐饮美食")
         taxi_id = await _new_category(auth_client, "交通出行")
@@ -845,6 +933,7 @@ class TestCsvBoot3Writer:
             "文化休闲",
             "餐饮美食",
         ], "分类清单按 role 定位列取值（含 `不计收支` 行的分类，预览与入库是两件事）"
+        assert data["tags_in_file"] == [], "V2：支付宝不再有默认 tag 列"
 
         body = await _confirm(
             auth_client, data["cache_id"], "alipay",
@@ -859,20 +948,21 @@ class TestCsvBoot3Writer:
         assert body["data"]["skipped_reasons"]["type_ignored"] == 1
 
         rows = {r["note"]: r for r in await _records(auth_client)}
-        assert set(rows) == {"午餐", "打车", "红包"}
-        assert rows["打车"]["amount"] == 6.9, "裸数字 6.90 清洗为两位小数（D13）"
-        assert rows["午餐"]["amount"] == 45.9
-        assert rows["红包"]["amount"] == 1200.0
-        assert rows["红包"]["type"] == "income"
-        assert rows["午餐"]["category_id"] == food_id
-        assert rows["打车"]["category_id"] == taxi_id
+        assert set(rows) == {"某餐馆·午餐", "某出行·打车", "亲友·红包"}, "V2：两列备注拼一条"
+        assert rows["某出行·打车"]["amount"] == 6.9, "裸数字 6.90 清洗为两位小数（D13）"
+        assert rows["某餐馆·午餐"]["amount"] == 45.9
+        assert rows["亲友·红包"]["amount"] == 1200.0
+        assert rows["亲友·红包"]["type"] == "income"
+        assert rows["某餐馆·午餐"]["category_id"] == food_id
+        assert rows["某出行·打车"]["category_id"] == taxi_id
         assert all(r["tag"] is None for r in rows.values())
 
     async def test_5_10_wechat_bill(self, auth_client: AsyncClient):
-        """§5.10 微信合成账单：无分类列走 `fallback_category`；`/` 中性行计 `type_ignored`（D31）。
+        """§5.10 微信合成账单：`/` 中性行计 `type_ignored`（D31）、备注两列拼一条（V2）。
 
-        表头逐字取设计 §0.4-10 的 11 列原文；金额列带 `¥`（`商品`→note、`交易对方`→tag，
-        `交易类型` 按 D9 丢弃）。数据行全合成。
+        表头逐字取设计 §0.4-10 的 11 列原文；金额列带 `¥`。v1.4.4 V2 的口径：
+        `交易对方` 与 `商品` **同为 note**（拼一条）、`交易类型` 是分类来源（本用例里
+        由 `fallback_category` 显式改道，证明用户选择仍优先）。数据行全合成。
         """
         cat_id = await _new_category(auth_client, "账单归入")
         raw = (
@@ -886,6 +976,7 @@ class TestCsvBoot3Writer:
         data = await _preview(auth_client, raw)
         assert data["format"] == "wechat"
         assert data["row_count"] == 4
+        assert data["categories_in_file"] == ["零钱支付"], "V2：微信分类来源 = `交易类型`"
 
         body = await _confirm(
             auth_client, data["cache_id"], "wechat",
@@ -896,14 +987,19 @@ class TestCsvBoot3Writer:
         assert body["data"]["skipped_reasons"]["type_ignored"] == 1, "`/` 记 type_ignored 而非 type_unresolved"
 
         rows = {r["note"]: r for r in await _records(auth_client)}
-        assert set(rows) == {"早餐", "午餐", "退款"}
-        assert rows["午餐"]["amount"] == 28.16, "`¥28.16` 剥货币符号后两位小数入库"
-        assert rows["早餐"]["amount"] == 12.5
-        assert rows["退款"]["type"] == "income"
+        assert set(rows) == {"某便利店·早餐", "某商户·午餐", "李四·退款"}
+        assert rows["某商户·午餐"]["amount"] == 28.16, "`¥28.16` 剥货币符号后两位小数入库"
+        assert rows["某便利店·早餐"]["amount"] == 12.5
+        assert rows["李四·退款"]["type"] == "income"
         assert all(r["category_id"] == cat_id for r in rows.values())
+        assert await _tags(auth_client) == [], "V2：交易对方不再建标签"
 
     async def test_5_10b_slash_placeholder_creates_nothing(self, auth_client: AsyncClient):
-        """§5.10b `/` 不再产生分类/标签（任务 §2.6 闭环，D31 一手实测占位符）。"""
+        """§5.10b `/` 不再产生分类/标签（任务 §2.6 闭环，D31 一手实测占位符）。
+
+        v1.4.4 V2 的拼接细节：`交易对方` 为 `/` 的那一行只剩 `商品说明` 一段
+        → 备注是 `打车` 而**不是** `·打车`（空段不参与拼接）。
+        """
         cat_id = await _new_category(auth_client, "斜杠归入")
         raw = (
             ALIPAY_HEADER + "\n"
@@ -927,8 +1023,9 @@ class TestCsvBoot3Writer:
         assert "/" not in await _category_names(auth_client), "禁止建出名为 `/` 的分类"
         assert "/" not in [t["name"] for t in await _tags(auth_client)], "禁止建出名为 `/` 的标签"
         rows = {r["note"]: r for r in await _records(auth_client)}
+        assert set(rows) == {"打车", "某店·买书"}, "全空的备注段不得留下孤零零的 `·`"
         assert rows["打车"]["category_id"] == cat_id, "分类列为 `/` 的行同样走 fallback"
-        assert rows["买书"]["category_id"] != cat_id
+        assert rows["某店·买书"]["category_id"] != cat_id
 
     async def test_3_5_cashew_full_export_equivalence(self, auth_client: AsyncClient):
         """任务 §3.5：Cashew 全量导出形态经新路径解析，与旧路径**逐位一致**。
@@ -963,3 +1060,126 @@ class TestCsvBoot3Writer:
             (1200.5, "income", "2024-01-16 09:05"),
         ]
         assert _tag_id(rows[0]) is not None and _tag_id(rows[1]) is None
+
+
+# ══════════════════════════════════════════════════════════════════
+#  v1.4.4 三条用户新裁定的落库层专项（V2 载荷形状 + V3 分类兜底链）
+#
+#  表头逐字沿用上方 WECHAT_HEADER / ALIPAY_HEADER（设计 §0.4-10），数据行**全合成**。
+# ══════════════════════════════════════════════════════════════════
+
+
+class TestCsvV144Decisions:
+    """V2 的 `columns` 新形状与 V3 的分类链（自动匹配 → 「其他」）。"""
+
+    async def test_v144_synonym_and_containment_auto_match_without_mapping(
+        self, auth_client: AsyncClient
+    ):
+        """V3：映射表为空也能落位——同义词 `饮食→餐饮`、双向包含 `餐饮美食⊇餐饮`。
+
+        conftest 预置了全局预设「餐饮」（`user_id IS NULL`），故两行都应落到**它**，
+        且**不得**新建同名分类；第三行「转账」两边都对不上 → 挂「其他」。
+        """
+        preset_food = await _category_id_by_name(auth_client, "餐饮")
+        raw = (
+            WECHAT_HEADER + "\n"
+            "2024-05-01 09:00:00,饮食,甲店,午饭,支出,¥10.00,零钱,支付成功,V144A,/,/\n"
+            "2024-05-02 09:00:00,餐饮美食,乙店,晚饭,支出,¥20.00,零钱,支付成功,V144B,/,/\n"
+            "2024-05-03 09:00:00,转账,丙店,提现,支出,¥30.00,零钱,支付成功,V144C,/,/"
+        ).encode()
+
+        data = await _preview(auth_client, raw)
+        assert data["format"] == "wechat"
+        body = await _confirm(auth_client, data["cache_id"], "wechat")
+        assert body["code"] == 0, body["message"]
+        assert body["data"]["imported_count"] == 3
+        assert body["data"]["skipped_reasons"]["category_unresolved"] == 0
+
+        rows = {r["note"]: r for r in await _records(auth_client)}
+        assert rows["甲店·午饭"]["category_id"] == preset_food, "同义词：饮食 → 餐饮"
+        assert rows["乙店·晚饭"]["category_id"] == preset_food, "双向包含：餐饮美食 ⊇ 餐饮"
+        other_id = await _category_id_by_name(auth_client, "其他")
+        assert rows["丙店·提现"]["category_id"] == other_id, "两边都落空 → 挂「其他」"
+        assert [c for c in await _categories(auth_client) if c["name"] == "饮食"] == [], \
+            "自动匹配命中即复用，不得再建同义分类"
+
+    async def test_v144_fallback_wins_over_auto_match(self, auth_client: AsyncClient):
+        """V3 的顺序纪律：显式 `fallback_category` **优先于**自动同名匹配。"""
+        preset_food = await _category_id_by_name(auth_client, "餐饮")
+        chosen_id = await _new_category(auth_client, "用户改道")
+        raw = (
+            WECHAT_HEADER + "\n"
+            "2024-05-04 09:00:00,餐饮,甲店,午饭,支出,¥10.00,零钱,支付成功,V144D,/,/"
+        ).encode()
+
+        data = await _preview(auth_client, raw)
+        body = await _confirm(
+            auth_client, data["cache_id"], "wechat",
+            fallback_category={"action": "map", "target_id": chosen_id},
+        )
+        assert body["code"] == 0, body["message"]
+        rows = await _records(auth_client)
+        assert [r["category_id"] for r in rows] == [chosen_id]
+        assert rows[0]["category_id"] != preset_food, "用户改道不得被自动匹配抢走"
+
+    async def test_v144_other_fallback_is_reused_and_created_once(self, auth_client: AsyncClient):
+        """「其他」兜底：库里无预设「其他」时**只建一行**，后续行复用同一 id。"""
+        assert [c for c in await _categories(auth_client) if c["name"] == "其他"] == []
+        raw = (
+            WECHAT_HEADER + "\n"
+            "2024-05-05 09:00:00,未知类型甲,甲店,A,支出,¥1.00,零钱,成功,V144E,/,/\n"
+            "2024-05-06 09:00:00,未知类型乙,乙店,B,支出,¥2.00,零钱,成功,V144F,/,/\n"
+            "2024-05-07 09:00:00,,丙店,C,支出,¥3.00,零钱,成功,V144G,/,/"
+        ).encode()
+
+        data = await _preview(auth_client, raw)
+        body = await _confirm(auth_client, data["cache_id"], "wechat")
+        assert body["code"] == 0, body["message"]
+        assert body["data"]["imported_count"] == 3
+
+        others = [c for c in await _categories(auth_client) if c["name"] == "其他"]
+        assert len(others) == 1, "兜底分类同名只建一行（复用 _resolve_or_create_category）"
+        rows = await _records(auth_client)
+        assert {r["category_id"] for r in rows} == {others[0]["id"]}
+
+    async def test_v144_note_columns_accept_list_payload_and_reject_out_of_range(
+        self, auth_client: AsyncClient
+    ):
+        """V2 的载荷半区：`columns.note` 可发 `list[int]`，越界**逐元素**校验（中文 ValueError）。"""
+        raw = (
+            WECHAT_HEADER + "\n"
+            "2024-05-08 09:00:00,零钱支付,甲店,午饭,支出,¥10.00,零钱,成功,V144H,/,/"
+        ).encode()
+
+        data = await _preview(auth_client, raw)
+        body = await _confirm(
+            auth_client, data["cache_id"], "wechat",
+            columns={"consume_time": 0, "amount": 5, "type": 4, "category": 1, "note": [2, 3]},
+        )
+        assert body["code"] == 0, body["message"]
+        assert body["data"]["imported_count"] == 1
+        assert [r["note"] for r in await _records(auth_client)] == ["甲店·午饭"]
+
+        data = await _preview(auth_client, raw)
+        rejected = await _confirm(
+            auth_client, data["cache_id"], "wechat",
+            columns={"consume_time": 0, "amount": 5, "type": 4, "note": [2, 99]},
+        )
+        assert rejected["code"] != 0
+        assert "列索引" in rejected["message"], "list 载荷的非法元素同样转 PARAM_ERROR"
+
+    async def test_v144_int_note_payload_still_works(self, auth_client: AsyncClient):
+        """D18 回归：旧前端的 `note: int` 载荷在放宽后**行为不变**（单列备注）。"""
+        raw = (
+            WECHAT_HEADER + "\n"
+            "2024-05-09 09:00:00,零钱支付,甲店,午饭,支出,¥10.00,零钱,成功,V144I,/,/"
+        ).encode()
+
+        data = await _preview(auth_client, raw)
+        body = await _confirm(
+            auth_client, data["cache_id"], "wechat",
+            columns={"consume_time": 0, "amount": 5, "type": 4, "category": 1, "note": 3},
+        )
+        assert body["code"] == 0, body["message"]
+        rows = await _records(auth_client)
+        assert [r["note"] for r in rows] == ["午饭"], "int 载荷只取那一列，不做拼接"

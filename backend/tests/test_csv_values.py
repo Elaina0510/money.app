@@ -2,6 +2,9 @@
 
 用例编号 §4.1–§4.8 与任务文件 `doc/tasksv1.4.3boot3/m2-csv-value-normalization.md`
 的 checklist 一一对应；本文件**不接线** `import_service.py`（接线属 M3）。
+
+v1.4.4 V1 追加一组 `test_v1_4_4_*`：斜杠日（年在尾部）的**双解释判歧义**——无歧义才
+采用、真歧义与双非法照旧 `None`，并复用 §4.6 的 `consume_time` schema 交叉断言。
 """
 
 import ast
@@ -212,8 +215,8 @@ def test_4_4_no_truncation_on_dot() -> None:
 @pytest.mark.parametrize(
     "raw",
     [
-        "09" + S + "24" + S + "2026",  # 美式月/日 → 歧义序（D15）
-        "24" + S + "09" + S + "2026",  # 欧式日/月 → 歧义序（D15）
+        "05" + S + "06" + S + "2026",  # 月/日两读都合法 → 真歧义不猜（v1.4.4 V1 的边界）
+        "13" + S + "13" + S + "2026",  # 两种解释的「月」位都 >12 → 双非法
         "1727147274",  # 纯数字 Unix 时间戳（时区不可知，D15/D17）
         "46289.48678240741",  # 裸 Excel 序列号（另存 CSV 后的形态，D15）
         "2026-13-01",  # 非法月份
@@ -227,32 +230,93 @@ def test_4_4_no_truncation_on_dot() -> None:
         "2026-09-24T11:07:54+08:00",  # 带时区偏移不猜
         "9月24日",  # 无年份
         "~2026-09-24",  # 区间前段为空
+        "09" + S + "24" + S + "26",  # 两位年：世纪不可知，V1 也不认
     ],
 )
 def test_4_5_parse_time_never_guesses(raw: str | None) -> None:
-    """§4.5 粗判正则与白名单之外的形态一律 `None`，交 M3 计 `invalid_date`。"""
+    """§4.5 粗判正则与白名单之外的形态一律 `None`，交 M3 计 `invalid_date`。
+
+    v1.4.4 V1 之后本清单**只留真歧义与真非法**：`09/24/2026`（月位 24 非法 → 日序唯一）
+    这类**无歧义**斜杠日已转为支持，见下方 §V1 组。
+    """
     assert parse_time(raw) is None
 
 
 def test_4_5_coarse_prefix_regex_is_the_ambiguity_defence() -> None:
-    """§1.2 粗判前置：年份不在最前并紧跟分隔符即不进白名单（歧义序唯一防线）。"""
+    """§1.2 粗判前置：年在最前（分支一）**或**年在尾的斜杠日（分支二，V1）才进得来。
+
+    v1.4.4 V1 的两处翻转：`09/24/2026`、`24/09/2026` 现在**必须**被前置正则放行
+    （合法性由 `_parse_slash_day` 的双解释裁决）；纯数字时间戳、裸序列号、点分隔、
+    两位年等仍然一个都进不来。
+    """
     prefix = csv_values._TIME_PREFIX_RE
     assert prefix.match("2026-09-24")
     assert prefix.match("2026" + S + "9" + S + "24")
     assert prefix.match("  2026-09-24")
     assert prefix.match("2026年9月24日")
     assert prefix.match("1999-01-01")
-    for not_year_first in (
-        "09" + S + "24" + S + "2026",
-        "24" + S + "09" + S + "2026",
+    assert prefix.match("09" + S + "24" + S + "2026"), "V1：斜杠日放行（年在尾）"
+    assert prefix.match("24" + S + "09" + S + "2026"), "V1：斜杠日放行（年在尾）"
+    assert prefix.match("24" + S + "09" + S + "2026 15:30"), "V1：带时间的斜杠日同样放行"
+    for not_accepted in (
         "1727147274",
         "46289.48",
         "9月24日",
         "2026Sep24",
         "20260924",
         "2026.09.24",
+        "09" + S + "24" + S + "26",  # 两位年
+        "09" + S + "24" + S + "20261",  # 年不是四位
     ):
-        assert not prefix.match(not_year_first), not_year_first
+        assert not prefix.match(not_accepted), not_accepted
+
+
+# ── v1.4.4 V1：斜杠日（年在尾部）的双解释判歧义 ──────────────────────────────
+
+SLASH_DAY_CASES: list[tuple[str, str]] = [
+    ("09" + S + "24" + S + "2026", "2026-09-24 00:00"),  # 月位 24 非法 → (月,日) 唯一
+    ("24" + S + "09" + S + "2026 15:30", "2026-09-24 15:30"),  # 月位 24 非法 → 日序唯一
+    ("13" + S + "05" + S + "2026", "2026-05-13 00:00"),  # 月位 13 非法 → (日,月) 唯一
+    ("1" + S + "13" + S + "2026", "2026-01-13 00:00"),  # 非补零同样放行
+    ("09" + S + "24" + S + "2026 15:30:45", "2026-09-24 15:30"),  # 带秒 → 丢秒留分
+    ("09" + S + "24" + S + "2026T15:30", "2026-09-24 15:30"),  # T 分隔的时间成分
+    ("2" + S + "29" + S + "2024", "2024-02-29 00:00"),  # 闰日：只有一种解释合法
+]
+
+SLASH_DAY_REJECTED: list[str] = [
+    "05" + S + "06" + S + "2026",  # (5,6) 与 (6,5) 都合法 → 真歧义，不猜
+    "12" + S + "12" + S + "2026",  # 两读同日也照拒：判据是「合法解释的个数」
+    "02" + S + "30" + S + "2026",  # 2 月 30 日：两种月日组合都不存在 → 双非法
+    "13" + S + "13" + S + "2026",  # 月位 13 两种读法都非法
+    "2" + S + "29" + S + "2025",  # 非闰年的 2/29 → 双非法
+    "09" + S + "24" + S + "26",  # 两位年（世纪不可知）
+    "24" + S + "09" + S + "2026 25:00",  # 小时越界：datetime 直接拒
+    "24" + S + "09" + S + "2026 12:61",  # 分钟越界
+]
+
+
+@pytest.mark.parametrize(("raw", "expected"), SLASH_DAY_CASES)
+def test_v1_4_4_slash_day_is_accepted_only_when_unambiguous(
+    raw: str, expected: str
+) -> None:
+    """V1：恰一个解释合法即采用，输出仍是 16 字符 `YYYY-MM-DD HH:MM`。"""
+    result = parse_time(raw)
+    assert result == expected
+    assert len(result) == 16
+
+
+@pytest.mark.parametrize("raw", SLASH_DAY_REJECTED)
+def test_v1_4_4_slash_day_ambiguous_or_illegal_returns_none(raw: str) -> None:
+    """V1 的另一半：**真歧义**（两读皆合法）与**双非法**一律 None，交 M3 计 invalid_date。"""
+    assert parse_time(raw) is None
+
+
+@pytest.mark.parametrize(("raw", "expected"), SLASH_DAY_CASES)
+def test_v1_4_4_slash_day_output_matches_record_api(raw: str, expected: str) -> None:
+    """§4.6 同口径：斜杠日的产物也必须被 `consume_time` 的 schema 正则 fullmatch。"""
+    result = parse_time(raw)
+    assert result == expected
+    assert re.fullmatch(_schema_consume_time_pattern(), result), result
 
 
 # ── §4.6 与记录 API 契约交叉断言（import 正则，不重新抄写） ────────────────────

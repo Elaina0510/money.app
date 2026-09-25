@@ -860,8 +860,8 @@ def test_full_recognition_chain_on_xlsx_rows() -> None:
     hints = resolve_columns(raw_headers, dialect, data_rows)
     assert {hint.header: hint.role for hint in hints} == {
         "交易时间": "consume_time",
-        "交易类型": None,
-        "交易对方": "tag",
+        "交易类型": "category",
+        "交易对方": "note",
         "商品": "note",
         "收/支": "type",
         "金额(元)": "amount",
@@ -870,19 +870,27 @@ def test_full_recognition_chain_on_xlsx_rows() -> None:
         "交易单号": None,
         "商户单号": None,
         "备注": None,
-    }
-    assert "category" not in {hint.role for hint in hints}  # D8/D30：无分类列，不猜
-    assert [hint.header for hint in hints if hint.role == "note"] == ["商品"]
+    }, "v1.4.4 V2：交易类型是分类来源、交易对方并入备注"
+    assert "category" in {hint.role for hint in hints}, "V2 之后微信有分类列"
+    assert [hint.header for hint in hints if hint.role == "note"] == ["交易对方", "商品"]
+    assert not any(hint.conflict for hint in hints), "note 多列并存不判冲突（V2 的唯一例外）"
 
 
 def test_note_role_goes_to_earlier_column_on_custom_path() -> None:
-    """custom 路径下的 D3 证据：`商品` 与 `备注` 都可当 note，靠前者胜出、后者标冲突。"""
+    """custom 路径的 v1.4.4 V2 新规则：`商品` 与 `备注` **同为 note**（多列并存）。
+
+    旧口径（D3）：靠前者得角色、后者标冲突。V2 把 `note` 定为「每角色一列」的唯一例外
+    （一个文件的备注可来自多列），故 `商品` 与 `备注` 两列都拿到 `note` 且都不标冲突；
+    `交易对方`（别名表已改判 note）同样并存。其余角色的独占规则**未放宽**，取证在
+    `test_csv_dialects.py::test_8_6_note_is_the_only_multi_column_role`。
+    """
     rows, _container = import_service._to_rows(wechat_xlsx_bytes())
     header_index, _headers, data_rows = locate_header_rows(rows)
     raw_headers = [cell.strip() for cell in rows[header_index]]
     by_header = {hint.header: hint for hint in resolve_columns(raw_headers, None, data_rows)}
     assert by_header["商品"].role == "note" and not by_header["商品"].conflict
-    assert by_header["备注"].role is None and by_header["备注"].conflict
+    assert by_header["备注"].role == "note" and not by_header["备注"].conflict
+    assert by_header["交易对方"].role == "note", "别名表全局：交易对方也是备注来源"
 
 
 def test_preamble_drift_still_locates_the_header() -> None:
@@ -909,9 +917,10 @@ async def test_preview_contract_for_synthetic_xlsx() -> None:
     assert result["suggested_type_source"] == "column"
     assert len(result["sample_rows"]) == DATA_ROW_COUNT
     assert result["sample_rows"][0][0] == DATE_TEXT
-    assert result["categories_in_file"] == []  # 无分类列（D8）
+    assert result["categories_in_file"] == ["QQ红包", "中性交易", "商户消费", "微信支付"], \
+        "v1.4.4 V2：微信的分类来源是 `交易类型` 列"
     assert f"已忽略表头前的 {result['header_row_index']} 行说明文字" in result["warnings"]
-    assert "未识别到分类列：需指定默认分类" in result["warnings"]
+    assert "未识别到分类列：需指定默认分类" not in result["warnings"], "V2：微信已有分类列"
     assert set(result) == {
         "format",
         "row_count",
@@ -1001,11 +1010,16 @@ def test_slash_in_type_column_is_type_ignored_not_unresolved() -> None:
 
 
 async def test_slash_placeholder_absent_from_categories_and_tags() -> None:
-    """§3.2：`/` 在分类 / 标签 / 备注列按空串处理，不进 `categories_in_file`/`tags_in_file`。"""
+    """§3.2：`/` 在分类 / 标签 / 备注列按空串处理，不进 `categories_in_file`/`tags_in_file`。
+
+    v1.4.4 V2：镜像的 `交易对方` 已改判 note（备注来源）→ 微信形态**没有** tag 列，
+    `tags_in_file` 恒为空集；分类集合改由 `交易类型` 供值，`/` 那一行的值仍被排除在外。
+    """
     result = await import_service.preview_csv(NO_DB, wechat_xlsx_bytes())
     assert "/" not in result["categories_in_file"]
     assert "/" not in result["tags_in_file"]
-    assert result["tags_in_file"] == ["合成商户丙", "合成商户乙", "合成商户甲"]  # `/` 那行的交易对方被排除
+    assert result["tags_in_file"] == [], "V2：微信不再产生标签（交易对方→note）"
+    assert result["categories_in_file"] == ["QQ红包", "中性交易", "商户消费", "微信支付"]
     assert result["row_count"] == DATA_ROW_COUNT
 
 

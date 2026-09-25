@@ -3,6 +3,10 @@
 对应任务文件 §8.1–§8.8（用例名前缀即条目编号）与 §7 边界逐条。
 以纯函数级为主；仅 §8.1「真实 BOM 闭环」与 §8.8 预览契约走 service / HTTP 层。
 所有数据行均为**合成**值，不含任何真实账单数据（红线 11）。
+
+v1.4.4 V2 翻案（推翻 boot3 D9 的两处局部口径，其余 D 决策继续有效）：
+`交易对方` 从 `tag` 改判 `note`、`交易类型` 登记为 `category`；`note` 成为
+「每角色一列」规则的唯一例外（可多列并存，见 §8.6 新增用例）。
 """
 
 import inspect
@@ -244,9 +248,14 @@ class Test82NormalizeHeader:
             assert "" not in dialect.roles
 
     def test_8_2_alias_table_is_a_closed_set(self) -> None:
-        """别名表逐键钉死：`交易类型` 故意不登记（D9）、`金额(元)` 不重复登记（D4）。"""
-        assert len(COLUMN_ALIASES) == 21
-        assert "交易类型" not in COLUMN_ALIASES
+        """别名表逐键钉死（v1.4.4 V2 翻案后）：`交易类型` 登记为 category、`交易对方` 改判 note。
+
+        原 D9 的「`交易类型` 故意不登记」已被 V2 推翻；`金额(元)` 仍不重复登记（D4）。
+        """
+        assert len(COLUMN_ALIASES) == 22
+        assert COLUMN_ALIASES["交易类型"] == "category", "V2：微信分类来源就是这一列"
+        assert COLUMN_ALIASES["交易对方"] == "note", "V2：交易对方进备注、不再建标签"
+        assert "tag" in set(COLUMN_ALIASES.values()), "tag 角色仍有内置别名（native/cashew 的列名）"
         assert "金额(元)" not in COLUMN_ALIASES
         assert set(COLUMN_ALIASES.values()) == set(ROLES)
 
@@ -458,10 +467,13 @@ class Test86ResolveColumns:
         hints = resolve_columns(headers, WECHAT, _wechat_data())
         assert [h.index for h in hints] == list(range(11))
         assert [h.header for h in hints] == headers  # 原样（仅两端去空白，保留大小写）
+        # v1.4.4 V2：`交易类型`→category（微信分类来源）、`交易对方`→note（不再是 tag）
         assert [h.role for h in hints] == [
-            "consume_time", None, "tag", "note", "type", "amount",
+            "consume_time", "category", "note", "note", "type", "amount",
             None, None, None, None, None,
         ]
+        # note 多列并存：两列都拿到角色、都不标冲突（V2 的「每角色一列」唯一例外）
+        assert [h.conflict for h in hints] == [False] * 11
         assert hints[5].sample == "¥28.16"
         assert hints[10].sample == ""  # 备注列全为 `/` → 空占位（D31）
         assert hints[9].sample == ""   # 商户单号列同上
@@ -470,13 +482,24 @@ class Test86ResolveColumns:
         headers = _split(ALIPAY_HEADER)
         hints = resolve_columns(headers, ALIPAY, _alipay_matrix()[-1:])
         assert [h.role for h in hints] == [
-            "consume_time", "category", "tag", None, "note", "type", "amount",
+            "consume_time", "category", "note", None, "note", "type", "amount",
             None, None, None, None, None, None,
         ]
+        assert [h.conflict for h in hints] == [False] * 13, "V2：note 两列并存不判冲突"
         assert hints[11].header == "备注"
-        assert hints[11].role is None  # D9：`商品说明` 已占 note → `备注` 丢弃
+        assert hints[11].role is None  # `备注` 未登记进 ALIPAY.roles（V2 未扩这一列，仍丢弃）
+        assert not hints[11].conflict, "未登记 ≠ 冲突：它压根没参与角色竞争"
         assert hints[12].header == ""
         assert hints[12].role is None  # §7.2 空尾列天然丢弃，不计入任何集
+
+    def test_8_6_note_is_the_only_multi_column_role(self) -> None:
+        """V2 的边界：`note` 可多列命中，其余角色仍「先列独占」（D3 未被整体放宽）。"""
+        hints = resolve_columns(["交易对方", "商品", "金额", "金额"], None)
+        assert [h.role for h in hints] == ["note", "note", "amount", None]
+        assert [h.conflict for h in hints] == [False, False, False, True]
+        # 同一规则对方言路径同样成立（微信 roles 里两列都写 note）
+        wechat = resolve_columns(_split(WECHAT_HEADER), WECHAT)
+        assert [h.header for h in wechat if h.role == "note"] == ["交易对方", "商品"]
 
     def test_8_6_cashew_roles_migrated_from_dead_constant(self) -> None:
         assert [h.role for h in resolve_columns(_split(CASHEW_HEADER), CASHEW)] == [
@@ -518,14 +541,19 @@ class Test86ResolveColumns:
         ]
 
     def test_8_6_roles_are_key_by_key_pinned(self) -> None:
-        """五方言 roles 逐键钉死（D3/D9/D30），`ROLES`/`REQUIRED_ROLES` 为封闭集。"""
+        """五方言 roles 逐键钉死（D3/D30 + v1.4.4 V2），`ROLES`/`REQUIRED_ROLES` 为封闭集。"""
         assert set(NATIVE.roles) == set(NATIVE.required)
         assert set(CASHEW.roles) == {"title", "category name", "amount", "income", "note", "date"}
         assert set(CASHEW_TEMPLATE.roles) == {"date", "amount", "category", "title", "note"}
         assert set(ALIPAY.roles) == {
             "交易时间", "交易分类", "金额", "收/支", "交易对方", "商品说明",
         }
-        assert set(WECHAT.roles) == {"交易时间", "金额", "收/支", "交易对方", "商品"}
+        assert set(WECHAT.roles) == {
+            "交易时间", "交易类型", "金额", "收/支", "交易对方", "商品",
+        }, "V2：微信新增 `交易类型→category`，`交易对方` 改判 note"
+        # V2 的「两列同为 note」写在数据表里，而不是靠代码特例
+        assert [r for r in ALIPAY.roles.values() if r == "note"] == ["note", "note"]
+        assert [r for r in WECHAT.roles.values() if r == "note"] == ["note", "note"]
         assert ROLES == ("consume_time", "amount", "type", "category", "tag", "note")
         assert REQUIRED_ROLES == ("consume_time", "amount")
 
@@ -661,19 +689,22 @@ class Test88PreviewContract:
         assert result["sample_rows"][0][1] == "-50"
 
     async def test_8_8_wechat_leading_rows_preview(self) -> None:
-        """真实形态：前导 17 行微信表头进预览，`/` 不产生分类/标签（D31）。"""
+        """真实形态：前导 17 行微信表头进预览，`/` 不产生分类/标签（D31）。
+
+        v1.4.4 V2 的预览侧后果：分类列来自 `交易类型`（`categories_in_file` 不再是空集），
+        `交易对方` 改判 note → `tags_in_file` 为空（微信不再产生标签），
+        「未识别到分类列：需指定默认分类」告警对真实微信账单**消失**。
+        """
         text = "\n".join(",".join(row) for row in _wechat_matrix(17))
         result = await preview_csv(None, text.encode("utf-8"))  # type: ignore[arg-type]
         assert result["format"] == "wechat"
         assert result["header_row_index"] == 17
         assert result["row_count"] == 3
-        assert result["categories_in_file"] == []  # 微信无分类列（D8）
-        assert result["tags_in_file"] == ["张三", "某商家"]
+        assert result["categories_in_file"] == ["商户消费", "转账", "零钱提现"]
+        assert result["tags_in_file"] == [], "V2：微信无 tag 列（交易对方已并入备注）"
         assert "/" not in result["tags_in_file"]
-        assert result["warnings"] == [
-            "已忽略表头前的 17 行说明文字",
-            "未识别到分类列：需指定默认分类",
-        ]
+        assert result["warnings"] == ["已忽略表头前的 17 行说明文字"]
+        assert "未识别到分类列：需指定默认分类" not in result["warnings"]
         assert result["suggested_type_source"] == "column"
         assert result["sample_rows"][0][5] == "¥28.16"
 

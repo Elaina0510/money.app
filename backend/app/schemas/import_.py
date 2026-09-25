@@ -27,13 +27,18 @@ class ImportCsvRequest(BaseModel):
     可只发 `fallback_category`）→ 旧前端不发新字段也能跑。
     必需角色缺失、列索引越界等业务校验**不放这里**（Pydantic 抛 422 时前端拦截器读不到
     `detail`，设计 §0.4-8），一律由 service 抛中文 `ValueError` 经路由转 `PARAM_ERROR`。
+
+    v1.4.4 V2：`columns` 的值放宽为 `int | list[int]`——**只有 `note` 用得到 list**
+    （一个文件的备注可来自多列：微信 `交易对方` + `商品`）。单值 `int` 载荷**继续有效**
+    （D18 向后兼容：本轮前端未更新）。越界校验对 list **逐元素**做，中文文案口径不变。
     """
 
     cache_id: str
     format: str = Field(
         ..., pattern="^(native|cashew|cashew_template|alipay|wechat|custom)$"
     )
-    columns: dict[str, int] | None = None  # 角色 → 列索引；缺省 = 后端按方言自行推导
+    # 角色 → 列索引（`note` 可为多列，V2）；缺省 = 后端按方言自行推导
+    columns: dict[str, int | list[int]] | None = None
     type_source: str | None = Field(
         None, pattern="^(column|sign|all_expense|all_income)$"
     )
