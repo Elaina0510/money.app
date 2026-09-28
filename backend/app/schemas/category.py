@@ -39,6 +39,8 @@ class CategoryResponse(BaseModel):
     """Schema for category response.
 
     ``type`` 字段保留（列原值，供事后排查）；前端自 v1.4.3 起不再读取。
+    ``source`` 为 v1.4.4 M2（D3）新增的**出身**字段：1 = 系统预设或其 CoW 派生副本，
+    0 = 用户自建——「预设」徽章与删除按钮隐藏口径均由它承载；``is_preset`` 语义不变。
     """
 
     id: int
@@ -47,4 +49,5 @@ class CategoryResponse(BaseModel):
     icon: str
     sort_order: int
     is_preset: int
+    source: int
     created_at: str

@@ -382,7 +382,13 @@ async def _resolve_or_create_category(
         assert existing.id is not None  # 已落库行必有主键
         return existing.id
 
-    category = Category(name=name, type=LEGACY_CATEGORY_TYPE, icon="mdi-circle", user_id=user_id)
+    category = Category(
+        name=name,
+        type=LEGACY_CATEGORY_TYPE,
+        icon="mdi-circle",
+        user_id=user_id,
+        source=0,  # v1.4.4 M2（§0.4-6 造行点）：导入建行属用户自建
+    )
     db.add(category)
     await db.flush()
     assert category.id is not None  # flush 后由自增主键回填
@@ -1287,6 +1293,7 @@ async def _import_category_stmt(
         type=LEGACY_CATEGORY_TYPE,
         icon=icon,
         user_id=user_id,
+        source=0,  # v1.4.4 M2（§0.4-6 造行点）：导入建行属用户自建
     )
     db.add(category)
     await db.flush()
@@ -1632,6 +1639,7 @@ async def _import_sqlite_binary(
                         type=LEGACY_CATEGORY_TYPE,
                         icon=icon,
                         user_id=user_id,
+                        source=0,  # v1.4.4 M2（§0.4-6 造行点）：导入建行属用户自建
                     )
                     db.add(category)
                     await db.flush()

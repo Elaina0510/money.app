@@ -2,6 +2,7 @@
 
 from datetime import datetime
 
+from sqlalchemy import Column, Integer
 from sqlmodel import Field, SQLModel, UniqueConstraint
 
 # v1.4.3 M8（D2）：分类不再区分收支，`type` 列保留原值仅供事后排查，
@@ -32,6 +33,14 @@ class Category(SQLModel, table=True):
     icon: str = Field(default="mdi-cash", nullable=False)
     sort_order: int = Field(default=0, nullable=False)
     is_preset: int = Field(default=0, nullable=False)  # 0=custom, 1=preset
+    # v1.4.4 M2（D3）：出身标记。1 = 系统预设或其 CoW 派生副本；0 = 用户自建。
+    # 与 `is_preset`（「是否全局预设行」）**语义正交**：副本 is_preset=0 而 source=1，
+    # 徽章口径由此承载（设计 §3.1）；存量库该列由 backend/migrate_to_v1.4.4_source.py
+    # 以 ALTER TABLE ... ADD COLUMN source INTEGER NOT NULL DEFAULT 0 补加并回填。
+    source: int = Field(
+        default=0,
+        sa_column=Column(Integer, nullable=False, server_default="0"),
+    )
     created_at: str = Field(
         default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         nullable=False,

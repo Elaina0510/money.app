@@ -6,6 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.models.user import User
+from app.presets import PRESET_SPECS
 from app.schemas.category import CategoryCreate, CategoryReorder, CategoryResponse, CategoryUpdate
 from app.services import category_service
 from app.utils.auth import require_auth
@@ -32,6 +33,24 @@ async def list_categories(
         CategoryResponse.model_validate(c, from_attributes=True).model_dump() for c in categories
     ]
     return success_response(data=items)
+
+
+@router.get("/presets")
+async def list_preset_categories(current_user: User = Depends(require_auth)) -> JSONResponse:
+    """系统预设分类的**默认形态**（v1.4.4 M2 / 任务 6.2）。
+
+    ``data = [{"name","icon","sort_order"}]``，逐字取 ``app.presets.PRESET_SPECS``
+    （其顺序即默认排序），不查库、不受用户定制影响。唯一用途：前端「恢复默认」确认弹窗
+    按 §3.4 共享判据计算将被丢弃的定制数 M——与后端恢复返回值同判据、同输入。
+
+    声明位置：必须在 ``PUT/DELETE /{category_id}`` 之前，否则被路径参数抢先匹配。
+    """
+    del current_user  # 仅作鉴权门槛：预设定义对全体登录用户一致
+    data = [
+        {"name": name, "icon": icon, "sort_order": sort_order}
+        for name, icon, sort_order in PRESET_SPECS
+    ]
+    return success_response(data=data)
 
 
 @router.post("")
@@ -132,10 +151,19 @@ async def restore_defaults(
     db: AsyncSession = Depends(get_session),
     current_user: User = Depends(require_auth),
 ) -> JSONResponse:
-    """Restore default category settings."""
+    """Restore default category settings（v1.4.4 M2：副本合并回全局行 + 预设复位）。
+
+    ``data`` 为服务层五键（设计 §3.3）：``deleted_categories / affected_records /
+    dormant_budgets / merged_presets / discarded_customizations``。
+    message 由路由拼装：计数为 0 的段整段省略（§3.7「账单数为 0 时不提该句」）。
+    """
     result = await category_service.restore_default_categories(db, current_user)
-    return success_response(
-        data=result,
-        message=f"已恢复默认分类，删除 {result['deleted_categories']} 个自定义分类，"
-                f"{result['affected_records']} 条记录已归入「其他」",
-    )
+    segments: list[str] = []
+    if result["deleted_categories"]:
+        segments.append(f"删除 {result['deleted_categories']} 个自定义分类")
+    if result["discarded_customizations"]:
+        segments.append(f"{result['discarded_customizations']} 个预设定制已复原")
+    if result["affected_records"]:
+        segments.append(f"{result['affected_records']} 条记录归入「其他」")
+    message = "已恢复默认分类：" + "，".join(segments) if segments else "已恢复默认分类"
+    return success_response(data=result, message=message)

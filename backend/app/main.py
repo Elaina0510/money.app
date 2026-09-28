@@ -11,8 +11,9 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import CORS_ORIGINS, UPLOAD_DIR
 from app.database import create_all_tables, engine
-from app.models.category import LEGACY_CATEGORY_TYPE, Category
+from app.models.category import Category
 from app.models.operation_history import OperationHistory  # noqa: F401
+from app.presets import PRESET_CATEGORIES  # v1.4.4 M2（任务 2.2）：SSOT 迁至 app.presets
 from app.routers import (
     attachments,
     auth,
@@ -39,30 +40,6 @@ FRONTEND_DIST = Path(os.getenv("FRONTEND_DIST", str(_default_frontend)))
 
 # Ensure upload directory exists at import time for StaticFiles mount
 ensure_upload_dir()
-
-# Preset categories data
-# v1.4.3 M8（D11）：收支双套 15 条合并为**单套 14 条**——「其他支出/其他收入」
-# 合并为「其他」（固定 mdi-cash-minus、恒末位）；type 列恒写占位值（D2 列保留语义废弃）。
-PRESET_CATEGORIES = [
-    {"name": name, "type": LEGACY_CATEGORY_TYPE, "icon": icon,
-     "sort_order": sort_order, "is_preset": 1}
-    for name, icon, sort_order in (
-        ("餐饮", "mdi-food", 1),
-        ("出行", "mdi-bus", 2),
-        ("购物", "mdi-cart", 3),
-        ("娱乐", "mdi-gamepad", 4),
-        ("医疗", "mdi-hospital-box", 5),
-        ("居住", "mdi-home", 6),
-        ("通讯", "mdi-cellphone", 7),
-        ("工作", "mdi-briefcase", 8),
-        ("旅行", "mdi-bag-suitcase", 9),
-        ("账单与费用", "mdi-receipt-text", 10),
-        ("工资", "mdi-wallet", 11),
-        ("红包", "mdi-gift", 12),
-        ("理财", "mdi-finance", 13),
-        ("其他", "mdi-cash-minus", 14),
-    )
-]
 
 
 async def init_preset_data() -> None:

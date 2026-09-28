@@ -30,6 +30,8 @@ vi.mock('@/api/categories', () => ({
   reorderCategories: vi.fn().mockResolvedValue([]),
   deleteCategory: vi.fn().mockResolvedValue({}),
   restoreDefaultCategories: vi.fn().mockResolvedValue({ message: '已恢复默认分类' }),
+  // v1.4.4 M2（D6 / §8.2.4）：确认弹窗算 N/M 的 presets 源（[{name, icon, sort_order}]）
+  getPresetCategories: vi.fn().mockResolvedValue([]),
 }))
 
 vi.mock('@/api/tags', () => ({
@@ -77,6 +79,7 @@ import {
   reorderCategories,
   deleteCategory,
   restoreDefaultCategories,
+  getPresetCategories,
 } from '@/api/categories'
 import { getTags, getTagsPaged, createTag, deleteTag, batchDeleteTags, clearAllTags } from '@/api/tags'
 import Draggable from 'vuedraggable'
@@ -125,11 +128,13 @@ import categoryIconPickerSource from '@/components/common/CategoryIconPicker.vue
 import { CATEGORY_ICONS } from '@/constants/categoryIcons'
 
 // ── 测试数据 ────────────────────────────────────────────────────────
+// v1.4.4 M2（§8.2.1 既有徽章用例改写）：徽章与删除按钮的渲染源已从 is_preset 改
+// **出身列 source**（D3/D8），故夹具补 source（与 is_preset 同值；自建行为 0）。
 const CATEGORIES = [
-  { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 0, is_preset: true },
-  { id: 2, name: '出行', type: 'expense', icon: 'mdi-bus', sort_order: 1, is_preset: true },
-  { id: 3, name: '购物', type: 'expense', icon: 'mdi-cart', sort_order: 2 },
-  { id: 9, name: '工资', type: 'income', icon: 'mdi-wallet', sort_order: 0 },
+  { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 0, is_preset: true, source: 1 },
+  { id: 2, name: '出行', type: 'expense', icon: 'mdi-bus', sort_order: 1, is_preset: true, source: 1 },
+  { id: 3, name: '购物', type: 'expense', icon: 'mdi-cart', sort_order: 2, source: 0 },
+  { id: 9, name: '工资', type: 'income', icon: 'mdi-wallet', sort_order: 0, source: 0 },
 ]
 
 const TAGS = [
@@ -195,12 +200,12 @@ async function mountPage(component) {
 // type 列按 D2 保留迁移前的原值（收支共用后前端一律不读取），
 // 工资/红包 仍带 legacy 'income' 值却必须与其余行同列渲染 —— 即「忽略 type」的回归载体
 const REORDER_CATEGORIES = [
-  { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 1, is_preset: 1 },
-  { id: 2, name: '出行', type: 'expense', icon: 'mdi-bus', sort_order: 2, is_preset: 1 },
-  { id: 3, name: '购物', type: 'expense', icon: 'mdi-cart', sort_order: 3, is_preset: 0 },
-  { id: 9, name: '工资', type: 'income', icon: 'mdi-wallet', sort_order: 4, is_preset: 1 },
-  { id: 10, name: '红包', type: 'income', icon: 'mdi-cash-plus', sort_order: 5, is_preset: 1 },
-  { id: 8, name: '其他', type: 'expense', icon: 'mdi-cash-minus', sort_order: 99, is_preset: 1 },
+  { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 1, is_preset: 1, source: 1 },
+  { id: 2, name: '出行', type: 'expense', icon: 'mdi-bus', sort_order: 2, is_preset: 1, source: 1 },
+  { id: 3, name: '购物', type: 'expense', icon: 'mdi-cart', sort_order: 3, is_preset: 0, source: 0 },
+  { id: 9, name: '工资', type: 'income', icon: 'mdi-wallet', sort_order: 4, is_preset: 1, source: 1 },
+  { id: 10, name: '红包', type: 'income', icon: 'mdi-cash-plus', sort_order: 5, is_preset: 1, source: 1 },
+  { id: 8, name: '其他', type: 'expense', icon: 'mdi-cash-minus', sort_order: 99, is_preset: 1, source: 1 },
 ]
 
 const reorderCopy = () => REORDER_CATEGORIES.map((c) => ({ ...c }))
@@ -216,12 +221,12 @@ async function mountReorderPage() {
 // 这正是旧实现里 `isOtherLocked` 把整个列表锁死、后端 reorder 直接 400 的数据态。
 // M1 后：把手照常渲染、拖拽永远可用，松手时家族按名次 其他支出 < 其他收入 < 其他 置尾。
 const FAMILY_CATEGORIES = [
-  { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 1, is_preset: 1 },
-  { id: 2, name: '出行', type: 'expense', icon: 'mdi-bus', sort_order: 2, is_preset: 1 },
-  { id: 8, name: '其他', type: 'expense', icon: 'mdi-cash-minus', sort_order: 3, is_preset: 1 },
-  { id: 3, name: '购物', type: 'expense', icon: 'mdi-cart', sort_order: 4, is_preset: 0 },
-  { id: 9, name: '其他支出', type: 'expense', icon: 'mdi-dots-horizontal', sort_order: 5, is_preset: 1 },
-  { id: 10, name: '其他收入', type: 'income', icon: 'mdi-cash-plus', sort_order: 6, is_preset: 1 },
+  { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 1, is_preset: 1, source: 1 },
+  { id: 2, name: '出行', type: 'expense', icon: 'mdi-bus', sort_order: 2, is_preset: 1, source: 1 },
+  { id: 8, name: '其他', type: 'expense', icon: 'mdi-cash-minus', sort_order: 3, is_preset: 1, source: 1 },
+  { id: 3, name: '购物', type: 'expense', icon: 'mdi-cart', sort_order: 4, is_preset: 0, source: 0 },
+  { id: 9, name: '其他支出', type: 'expense', icon: 'mdi-dots-horizontal', sort_order: 5, is_preset: 1, source: 1 },
+  { id: 10, name: '其他收入', type: 'income', icon: 'mdi-cash-plus', sort_order: 6, is_preset: 1, source: 1 },
 ]
 
 const familyCopy = () => FAMILY_CATEGORIES.map((c) => ({ ...c }))
@@ -3610,5 +3615,244 @@ describe('v1.4.4 M1 标签批量治理', () => {
     expect(deleteTag).toHaveBeenCalledTimes(0)
     expect(batchDeleteTags).toHaveBeenCalledTimes(0)
     expect(clearAllTags).toHaveBeenCalledTimes(0)
+  })
+})
+
+// ── v1.4.4 M2 分类出身徽章 + 恢复默认连定制复原（REQ-003/004/005，设计 §三）────────
+// P3 共写纪律：只增本块、不触碰 M1 的 describe。既有徽章用例的改写（夹具补 source）
+// 在文件顶部三处分类夹具处完成——徽章/删除钮的渲染源已从 is_preset 换成出身列 source。
+// 手法沿本文件既定范式（总 prompt §7.8）：不装 Vuetify，行内容靠 EntrySlotHost 摊平，
+// 纯函数与状态机走 vm 直取，文案走 wrapper.text() 归一化包含匹配。
+describe('v1.4.4 M2 分类出身徽章与恢复默认预告', () => {
+  // 14 条预设默认形态：**逐字复制** backend/app/presets.py::PRESET_SPECS（顺序即默认排序，
+  // 序尾记判据按本表自上而下贪心匹配）；前端唯一数据源是 GET /categories/presets
+  const M2_PRESETS = [
+    { name: '餐饮', icon: 'mdi-food', sort_order: 1 },
+    { name: '出行', icon: 'mdi-bus', sort_order: 2 },
+    { name: '购物', icon: 'mdi-cart', sort_order: 3 },
+    { name: '娱乐', icon: 'mdi-gamepad', sort_order: 4 },
+    { name: '医疗', icon: 'mdi-hospital-box', sort_order: 5 },
+    { name: '居住', icon: 'mdi-home', sort_order: 6 },
+    { name: '通讯', icon: 'mdi-cellphone', sort_order: 7 },
+    { name: '工作', icon: 'mdi-briefcase', sort_order: 8 },
+    { name: '旅行', icon: 'mdi-bag-suitcase', sort_order: 9 },
+    { name: '账单与费用', icon: 'mdi-receipt-text', sort_order: 10 },
+    { name: '工资', icon: 'mdi-wallet', sort_order: 11 },
+    { name: '红包', icon: 'mdi-gift', sort_order: 12 },
+    { name: '理财', icon: 'mdi-finance', sort_order: 13 },
+    { name: '其他', icon: 'mdi-cash-minus', sort_order: 14 },
+  ]
+  const M2_NAMES = M2_PRESETS.map((p) => p.name)
+  const M2_DEFAULT_ICON = Object.fromEntries(M2_PRESETS.map((p) => [p.name, p.icon]))
+  const monotone = (from = 0, to = M2_NAMES.length) =>
+    M2_NAMES.slice(from, to).map((n) => [n, 'd', 1])
+
+  // §8.2.3 = §8.1.10 **同一张表**（逐字复制 backend/tests/test_category_source.py::ORDER_TAIL_CASES）。
+  // 期望值必须是具体整数（禁止「或」字多解）；两实现不一致即为缺陷，以后端返回值为准回炉。
+  // 第三元 = source；'d' = 该行预设默认图标（与后端 _rows_for 同口径占位）。
+  const ORDER_TAIL_CASES = [
+    ['空表（无任何行）', [], 0],
+    ['单调：14 条预设原序原图标', monotone(), 0],
+    ['单行改名（餐饮→美食，其余默认）', [['美食', 'mdi-food', 1], ...monotone(1)], 1],
+    ['单行换图标（餐饮→mdi-coffee）', [['餐饮', 'mdi-coffee', 1], ...monotone(1)], 1],
+    ['相邻两行互换（出行, 餐饮, 购物…）', [['出行', 'd', 1], ['餐饮', 'd', 1], ...monotone(2)], 1],
+    ['改名 + 换图标（美食 + mdi-coffee，只计一次）', [['美食', 'mdi-coffee', 1], ...monotone(1)], 1],
+    ['换图标 + 改序（出行, 餐饮(coffee), 购物…）', [['出行', 'd', 1], ['餐饮', 'mdi-coffee', 1], ...monotone(2)], 1],
+    ['三行轮转（购物, 餐饮, 出行, 娱乐…）', [['购物', 'd', 1], ['餐饮', 'd', 1], ['出行', 'd', 1], ...monotone(3)], 2],
+    ['首行移到末位（出行…理财, 餐饮, 其他）', [...monotone(1, 13), ['餐饮', 'd', 1], ['其他', 'd', 1]], 1],
+    ['整表逆序（其他…出行, 餐饮）', [...M2_NAMES].reverse().map((n) => [n, 'd', 1]), 12],
+    ['「其他」置首 + 其余默认', [['其他', 'd', 1], ...monotone(0, M2_NAMES.length - 1)], 0],
+    [
+      '家族过渡旧行混入（其他支出…其他收入, 其他）',
+      [['其他支出', 'mdi-cash-minus', 1], ...monotone(0, M2_NAMES.length - 1), ['其他收入', 'mdi-cash-plus', 1], ['其他', 'd', 1]],
+      2,
+    ],
+    ['自建行混入（source=0 不参与判据）', [['宠物', 'mdi-paw', 0], ...monotone()], 0],
+    ['改名破坏 + 乱序（美食, 购物, 出行, 娱乐…）', [['美食', 'mdi-food', 1], ['购物', 'd', 1], ['出行', 'd', 1], ...monotone(3)], 2],
+  ]
+
+  // 与后端 _rows_for 同口径：'d' → 预设默认图标（未知名退 'mdi-circle'），sort_order 按表序 1 起
+  const specToRows = (spec) =>
+    spec.map(([name, icon, source], idx) => ({
+      id: idx + 1,
+      name,
+      type: 'expense',
+      icon: icon === 'd' ? (M2_DEFAULT_ICON[name] ?? 'mdi-circle') : icon,
+      sort_order: idx + 1,
+      is_preset: 0,
+      source,
+    }))
+
+  const presetsCopy = () => M2_PRESETS.map((p) => ({ ...p }))
+  // stub 环境 v-btn/v-icon 文本含图标字面量、模板缩进进 textContent → 归一空白再包含匹配
+  const flat = (s) => s.replace(/\s+/g, ' ').trim()
+
+  let wrapper
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    getCategories.mockResolvedValue([])
+    reorderCategories.mockResolvedValue([])
+    restoreDefaultCategories.mockResolvedValue({ message: '已恢复默认分类' })
+    getPresetCategories.mockResolvedValue(presetsCopy())
+    wrapper = await mountPage(SettingsCategoriesPage)
+  })
+
+  // 任务 §8.2.1（REQ-003/004）：徽章渲染源为 **source**，与 is_preset 脱钩
+  it('用例8.2.1: 徽章渲染源为 source——CoW 副本有徽章、is_preset 脏值的自建行无徽章', async () => {
+    const rows = [
+      // CoW 用户副本：is_preset=0 而 source=1 → 改名/换图标/拖序后徽章不丢（REQ-003）
+      { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-coffee', sort_order: 1, is_preset: 0, source: 1 },
+      // 病态/历史脏行：is_preset=1 而 source=0（用户同名重建的自建行）→ 无徽章（REQ-004）
+      { id: 2, name: '宠物', type: 'expense', icon: 'mdi-paw', sort_order: 2, is_preset: 1, source: 0 },
+      // 全局预设行原样
+      { id: 3, name: '其他', type: 'expense', icon: 'mdi-cash-minus', sort_order: 99, is_preset: 1, source: 1 },
+    ]
+    getCategories.mockResolvedValue(rows.map((r) => ({ ...r })))
+    const slotWrapper = mount(SettingsCategoriesPage, {
+      global: {
+        mocks: { $router: { push: mockPush, back: mockBack } },
+        components: { 'v-list-item': EntrySlotHost },
+      },
+    })
+    await flushPromises()
+    await nextTick()
+
+    const titles = slotWrapper.findAll('.category-title')
+    expect(titles).toHaveLength(3)
+    expect(titles.map((node) => flat(node.text()))).toEqual(['餐饮 预设', '宠物', '其他 预设'])
+    // 口径锚点：源码里徽章条件不再读 is_preset（渲染源唯一）
+    expect(categoriesPageSource).toMatch(/<v-chip\s+v-if="cat\.source === 1"/)
+    expect(categoriesPageSource).not.toMatch(/v-if="cat\.is_preset"/)
+  })
+
+  // 任务 5.3 + §8.2.2（D8）：预设派生副本不可单删，编辑照旧（保存即 CoW）
+  it('用例8.2.2: source===1 行无删除按钮而编辑按钮仍在；source===0 行两钮齐全', async () => {
+    const rows = [
+      { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 1, is_preset: 0, source: 1 },
+      { id: 2, name: '宠物', type: 'expense', icon: 'mdi-paw', sort_order: 2, is_preset: 0, source: 0 },
+    ]
+    getCategories.mockResolvedValue(rows.map((r) => ({ ...r })))
+    const slotWrapper = mount(SettingsCategoriesPage, {
+      global: {
+        mocks: { $router: { push: mockPush, back: mockBack } },
+        components: { 'v-list-item': EntrySlotHost },
+      },
+    })
+    await flushPromises()
+    await nextTick()
+
+    const groups = slotWrapper.findAll('.action-btns')
+    expect(groups).toHaveLength(2)
+    // 副本行：仅编辑钮（无 mdi-delete）→ 反悔只能「恢复默认」全量丢弃（D8，后端同口径 403）
+    expect(groups[0].findAll('v-btn')).toHaveLength(1)
+    expect(groups[0].text()).toContain('mdi-pencil')
+    expect(groups[0].text()).not.toContain('mdi-delete')
+    // 自建行：编辑 + 删除齐全，且两钮各自挂 editCategory / confirmDeleteCategory
+    expect(groups[1].findAll('v-btn')).toHaveLength(2)
+    expect(groups[1].text()).toContain('mdi-pencil')
+    expect(groups[1].text()).toContain('mdi-delete')
+    // 删除钮恒在编辑钮之后（位次即 DOM 序）
+    expect(groups[1].findAll('v-btn')[1].text()).toContain('mdi-delete')
+  })
+
+  // 任务 §8.2.3（= 后端 §8.1.10 同表）：纯函数 computeRestoreCounts 逐行同期望
+  it.each(ORDER_TAIL_CASES)(
+    '用例8.2.3: computeRestoreCounts —— %s',
+    async (label, spec, expected) => {
+      expect(wrapper.vm.computeRestoreCounts(specToRows(spec), presetsCopy())).toBe(expected)
+    }
+  )
+
+  it('用例8.2.3b: 全表自建（source=0）时 M 恒 0（后端同用例同行）', async () => {
+    const spec = Array.from({ length: 6 }, (_, i) => [`随手${i + 1}`, 'mdi-x', 0])
+    expect(wrapper.vm.computeRestoreCounts(specToRows(spec), presetsCopy())).toBe(0)
+  })
+
+  // 任务 7.4 + §8.2.4（D6）：点按钮时拉 presets → 三条带数字文案逐字
+  it('用例8.2.4: 确认弹窗预告 N/M 三条文案逐字，数字来自可见列表与 presets', async () => {
+    getCategories.mockResolvedValue([
+      { id: 1, name: '餐饮', type: 'expense', icon: 'mdi-food', sort_order: 1, is_preset: 0, source: 1 },
+      // 改名副本：脱离预设名集合 → M 计 1
+      { id: 2, name: '美食', type: 'expense', icon: 'mdi-food', sort_order: 2, is_preset: 0, source: 1 },
+      { id: 3, name: '宠物', type: 'expense', icon: 'mdi-paw', sort_order: 3, is_preset: 0, source: 0 },
+      { id: 4, name: '彩票', type: 'expense', icon: 'mdi-ticket', sort_order: 4, is_preset: 0, source: 0 },
+    ])
+    const page = await mountPage(SettingsCategoriesPage)
+    expect(getPresetCategories).toHaveBeenCalledTimes(0) // 挂载不预拉：点按钮才算数字
+
+    await page.vm.openRestoreDialog()
+    await nextTick()
+    expect(getPresetCategories).toHaveBeenCalledTimes(1)
+
+    expect(page.vm.restorePreview).toEqual({ customCount: 2, discardCount: 1 })
+    expect(page.vm.showRestoreConfirm).toBe(true)
+    const text = flat(page.text())
+    expect(text).toContain('删除 2 个自定义分类（其下账单改挂「其他」）')
+    expect(text).toContain('丢弃 1 个预设分类的定制（名称/图标/排序回到系统默认）')
+    expect(text).toContain('账单总数不变，此操作不可撤销')
+    // 带数字版与退化版互斥：成功路径不得同时渲染两条无数字文案
+    expect(text).not.toContain('删除所有自定义分类')
+    expect(text).not.toContain('预设分类恢复默认，定制将被丢弃')
+  })
+
+  // 任务 7.5 + §8.2.4：presets 失败退化为无数字两行版、主流程不阻塞
+  it('用例8.2.4b: presets 接口 reject → 弹窗退化无数字版且「确认恢复」仍可执行', async () => {
+    getPresetCategories.mockRejectedValue(new Error('网络异常'))
+    const page = await mountPage(SettingsCategoriesPage)
+    await page.vm.openRestoreDialog()
+    await nextTick()
+
+    expect(page.vm.restorePreview).toBeNull()
+    expect(page.vm.showRestoreConfirm).toBe(true)
+    const text = flat(page.text())
+    expect(text).toContain('删除所有自定义分类，账单改挂「其他」')
+    expect(text).toContain('预设分类恢复默认，定制将被丢弃')
+    expect(text).not.toMatch(/丢弃 \d+ 个/)
+    expect(text).not.toContain('个自定义分类')
+    expect(text).not.toContain('此操作不可撤销')
+
+    const confirm = page.findAll('v-btn').find((b) => flat(b.text()) === '确认恢复')
+    expect(confirm).toBeTruthy()
+    expect(confirm.attributes('disabled')).toBeUndefined()
+    const fetchesBefore = getCategories.mock.calls.length
+    await confirm.trigger('click')
+    await flushPromises()
+    expect(restoreDefaultCategories).toHaveBeenCalledTimes(1)
+    // 成功后 store 内 fetchCategories 恰一次（本模块不改 store）
+    expect(getCategories).toHaveBeenCalledTimes(fetchesBefore + 1)
+    expect(page.vm.showRestoreConfirm).toBe(false)
+    expect(page.vm.restoring).toBe(false)
+  })
+
+  // 任务 7.6：成功 toast 用后端 message；拦截器只回 data 时按五键同口径本地拼装；0/0 幂等
+  it('用例7.6: 恢复成功 toast 口径——后端 message 优先，五键兜底与零计数', async () => {
+    const cases = [
+      [
+        { message: '已恢复默认分类：删除 2 个自定义分类，1 个预设定制已复原，5 条记录归入「其他」' },
+        '已恢复默认分类：删除 2 个自定义分类，1 个预设定制已复原，5 条记录归入「其他」',
+      ],
+      [
+        {
+          deleted_categories: 2,
+          affected_records: 5,
+          dormant_budgets: 0,
+          merged_presets: 1,
+          discarded_customizations: 1,
+        },
+        '已恢复默认分类：删除 2 个自定义分类，1 个预设定制已复原，5 条记录归入「其他」',
+      ],
+      [
+        { deleted_categories: 0, affected_records: 0, dormant_budgets: 0, merged_presets: 0, discarded_customizations: 0 },
+        '已恢复默认分类',
+      ],
+    ]
+    for (const [data, expected] of cases) {
+      mockShowToast.mockClear()
+      restoreDefaultCategories.mockResolvedValue(data)
+      await wrapper.vm.handleRestoreDefaults()
+      await flushPromises()
+      expect(mockShowToast).toHaveBeenCalledWith(expected)
+    }
   })
 })
