@@ -10,8 +10,8 @@
 
 | 模块 | 名称 | 需求 | 任务文件 | 状态 | 提交 |
 |------|------|------|----------|------|------|
-| M0 | 软删标签读链路收口（后端热修） | REQ-001/002 前提（D2） | `m0-soft-delete-readpath.md` | pending | — |
-| M1 | 标签批量治理 | REQ-001、REQ-002 | `m1-tag-batch-governance.md` | pending | — |
+| M0 | 软删标签读链路收口（后端热修） | REQ-001/002 前提（D2） | `m0-soft-delete-readpath.md` | done | `55f8531` |
+| M1 | 标签批量治理 | REQ-001、REQ-002 | `m1-tag-batch-governance.md` | in_progress（2026-09-28 派发） | — |
 | M2 | 分类出身徽章 + 恢复默认连定制复原 | REQ-003、REQ-004、REQ-005 | `m2-category-source.md` | pending | — |
 | M3 | 导入映射弹窗 | REQ-006、REQ-007 | `m3-import-dialog.md` | pending | — |
 | M4 | 关于页 + 版本单一真值源 | REQ-008、REQ-009 | `m4-about-page-version.md` | pending | — |
@@ -119,17 +119,28 @@
 
 | 模块 | 总任务数 | 已完成 | 进度 |
 |------|---------|--------|------|
-| M0 | 14 | 0 | 0% |
+| M0 | 17（Prompt §二 记 14，任务文件实数 17，以文件为准） | 17 | 100% |
 | M1 | 35 | 0 | 0% |
 | M2 | 51 | 0 | 0% |
 | M3 | 27 | 0 | 0% |
 | M4 | 27 | 0 | 0% |
 | M5 | 28 | 0 | 0% |
-| **合计** | **192** | 0 | 0% |
+| **合计** | **195**（192 登记值 + M0 实数差 +3） | 17 | 9% |
 
 ## 模块执行记录
 
-（主 Agent 逐模块核验后填写：提交 pathspec、复跑结果、认可的偏离、交接事实）
+### M0 软删标签读链路收口（done，`55f8531`，2026-09-28）
+
+- 提交 pathspec：record_service.py / statistics_service.py / export_service.py / tests/test_soft_deleted_tags.py（新）/ m0 任务文件，共 5 文件；无 dist、无 -A/-f，主 Agent `git show --stat` 复核通过。
+- 主 Agent 复跑：pytest **670/670**（基线 665 + 新增 5）、mypy **85 errors / 14 files**（= 开工基线零新增）、ruff All checks passed（复跑时工作区含 M2/M5 在途改动仍全绿）。子 Agent 另以 tmp 副本库做 uvicorn 冒烟 /docs 200 两次取证（HEAD 纯净副本 + 真实工作区各一）。
+- 三处收口实地 grep 复核在场：record_service.py:534 `if tag and tag.deleted_at is None:`；statistics_service.py:152 软删过滤；export_service.py:45 `(user_id = :uid OR user_id IS NULL) AND deleted_at IS NULL`（OR 两段括号钉死）；:32 分类查找 SQL 一字未动；SQL 导出零 hunk。
+- 全仓 `deleted_at` grep：**无第四处读链路命中**，未自扩面（notes 含命中全集逐条判定）。
+- 认可的偏离：`Tag.deleted_at.is_(None)` → `col(Tag.deleted_at).is_(None)`（同 tag_service.py:47 既有写法，运行时等价，为守 mypy 基线零新增；设计原串仍可 grep 命中）。
+- 防过度收口锚在场：§4.2 未删标签分组数值逐字钉死；§4.3 (归属×软删) 四格真值表含全局预设仍出名字；§4.4 软删前后 SQL 文本除 `-- Date:` 头行逐字相同。
+- manual_items：无（M0 任务文件无人工/真机条目，grep 零命中）。
+- 口径差上报：Prompt §二 记 M0 勾选数 14，任务文件实为 17 项，以文件实数登记。
+- 交接 M1（已写入派单简报）：软删口径三落点行号 + 670 基线 + `55f8531`。
+- 遗留：子 Agent 隔离冒烟临时目录 `Temp\m0smoke` 未删（rm 被权限层拦，仓外无影响）；真树启动冒烟曾两度红灯，traceback 核实均为 M2 在途中间态（`no such column: categories.source` / `NameError: Sequence`），非 M0 引入，M2 落定后复跑即绿——E3 归属登记。
 
 ## 阻塞清单
 
