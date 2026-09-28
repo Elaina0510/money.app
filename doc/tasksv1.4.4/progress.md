@@ -11,8 +11,8 @@
 | 模块 | 名称 | 需求 | 任务文件 | 状态 | 提交 |
 |------|------|------|----------|------|------|
 | M0 | 软删标签读链路收口（后端热修） | REQ-001/002 前提（D2） | `m0-soft-delete-readpath.md` | done | `55f8531` |
-| M1 | 标签批量治理 | REQ-001、REQ-002 | `m1-tag-batch-governance.md` | in_progress（2026-09-28 派发） | — |
-| M2 | 分类出身徽章 + 恢复默认连定制复原 | REQ-003、REQ-004、REQ-005 | `m2-category-source.md` | pending | — |
+| M1 | 标签批量治理 | REQ-001、REQ-002 | `m1-tag-batch-governance.md` | done | `50c67cf`（主 Agent 补 commit） |
+| M2 | 分类出身徽章 + 恢复默认连定制复原 | REQ-003、REQ-004、REQ-005 | `m2-category-source.md` | in_progress（首手 150 轮触顶，E4 收尾 Agent 接力中） | — |
 | M3 | 导入映射弹窗 | REQ-006、REQ-007 | `m3-import-dialog.md` | pending | — |
 | M4 | 关于页 + 版本单一真值源 | REQ-008、REQ-009 | `m4-about-page-version.md` | pending | — |
 | M5 | 横屏侧边栏图标列 | REQ-010、REQ-011、REQ-012 | `m5-sidebar-rail.md` | done | `a3e278f` |
@@ -120,12 +120,12 @@
 | 模块 | 总任务数 | 已完成 | 进度 |
 |------|---------|--------|------|
 | M0 | 17（Prompt §二 记 14，任务文件实数 17，以文件为准） | 17 | 100% |
-| M1 | 35 | 0 | 0% |
+| M1 | 35 | 35 | 100% |
 | M2 | 51 | 0 | 0% |
 | M3 | 27 | 0 | 0% |
 | M4 | 27 | 0 | 0% |
 | M5 | 28 | 27（§5.4 真机项留人工） | 96% |
-| **合计** | **195**（192 登记值 + M0 实数差 +3） | 44 | 23% |
+| **合计** | **195**（192 登记值 + M0 实数差 +3） | 79 | 41% |
 
 ## 模块执行记录
 
@@ -153,9 +153,20 @@
 - 真机观察线索（转人工清单②）：`global.scss:94` `.v-navigation-drawer { border-radius: 0 20px 20px 0 !important }` 会作用于 72px rail 列右边缘（该文件不在 M5 文件面未动）——人工点验时留意观感是否可接受。
 - fixed_rounds: 1（CSS 注释含被禁字面量 → 改写 + 测试侧 join('-') 构名）。
 
+### M1 标签批量治理（done，`50c67cf` 主 Agent 补 commit，2026-09-28）
+
+- **E6 实况**：子 Agent `git add` 被权限层两次拦下（判定「并发在途泳道文件」），改动留盘未暂存；主 Agent 核验通过后按九件精确 pathspec 补 add + commit（`git diff --cached --name-only` 复核恰 9 文件：tag schema/service/router/test + api/tags.js + SettingsTagsPage.vue + useCategoriesStore.js + SettingsSubPages.test.js + m1 任务文件）。
+- 主 Agent 复跑核验：`pytest tests/test_tags.py tests/test_soft_deleted_tags.py` **27 passed**；SettingsSubPages.test.js 单跑 **91/91**（提交前现况健康确认）；实地 grep：路由序 `/paged`(30)→`POST /batch-delete`(59)→`POST /clear-all`(81)→`GET /{tag_id}`(96) 红线序正确；勾选图标 `mdi-checkbox-blank-circle`/`mdi-checkbox-marked` 3 处在场、旧字面量 `mdi-checkbox-blank-circle-outline|mdi-check-circle` 标签页**零命中**（终验⑧口径）；「清空」钮 `variant="text"` 不传 color、`:disabled="total === 0"`、多选态 `v-if="!multiSelect"` 不渲染。
+- 子 Agent 报告数字（主 Agent 未重复全开，终验兜底）：pytest 全量 715/715（基线 670+6 新增，含 M2 在途工作区仍全绿）、vitest 426/426（基线 421+5）、mypy 84/14 ≤ 85、ruff clean；fixed_rounds 2（vitest 侧）。
+- 原子性/归属口径确认（notes + §7.2/7.3/7.5 用例在场）：一次查询无 N+1 → 命中数≠len(set(ids)) 整单 ValueError 零落删除 → 逐行置 deleted_at 一次 commit；批量两接口只认 `user_id == current_user.id`，全局行计入「不存在」整单 400；clear-all 0 条成功返回、message「标签已全部清空」幂等；不写回溯、不发事件、无条数上限。
+- describe 块名：`v1.4.4 M1 标签批量治理`（文件末尾追加；提交时点 M2 尚未在该文件留块，P3 共写纪律无冲突）。
+- 认可的偏离（4 条，等价实现/环境边界）：① `now(...)` 伪码 → 沿 `delete_tag` 既有 `datetime.now().strftime(...)` 手法；② `col(Tag.deleted_at).is_(None)`（与 M0 同类，mypy 零新增）；③ 任务文件记 `pages/__tests__/SettingsSubPages.test.js`，仓库实际在 `pages/`，按实际路径落笔（**文档笔误登记**）；④ 单 chip ✕ 在 v-chip 具名插槽、全 stub 环境不渲染 → §8.5 该契约改 `?raw` 源码正则承载，块头注释已标明不冒充已验证。
+- manual_items：无（该链路归 P4 实测①：清空流+多选批量删流含确认弹窗文案、账单标签标记消失）。
+- 既有测试零删除零放宽零改写。
+
 ## 阻塞清单
 
-（空）
+- **M2（触顶中断，接力处理中）**：首手子 Agent 达 150 轮上限截断于「五步事务」写作中，0/51 勾选；后端半成品已在场（models/schemas/category、category_service +250、routers/categories、main.py presets import、import_service 三处 `source=0` @@382/1293/1639、新 presets.py + 迁移脚本 + test_category_source.py）。按 E4 派收尾 Agent：审计前手 → 补全前后端 → 全绿 → 勾选 → 精确提交；M3/M4 待接力完成后派发。非失败阻塞，暂不触发 §五 第 3 条回滚。
 
 ## 待人工抽检清单（子 Agent 不勾选，执行时逐条抄录原文）
 
