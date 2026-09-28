@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import { getCategories, createCategory, updateCategory, reorderCategories as reorderCategoriesApi, deleteCategory, restoreDefaultCategories } from '@/api/categories'
-import { getTags, createTag, deleteTag } from '@/api/tags'
+import { getTags, createTag, deleteTag, batchDeleteTags, clearAllTags } from '@/api/tags'
 import { useAppStore } from './useAppStore'
 
 export const useCategoriesStore = defineStore('categories', () => {
@@ -111,6 +111,35 @@ export const useCategoriesStore = defineStore('categories', () => {
     }
   }
 
+  // v1.4.4 M1（REQ-002）：批量软删。后端单事务原子——失败即整单未落删除，
+  // 故此处不动本地列表，仅弹后端中文 message 后 rethrow（页面保留选中态可重试）
+  async function batchRemoveTags(ids) {
+    const app = useAppStore()
+    try {
+      const result = await batchDeleteTags(ids)
+      tags.value = tags.value.filter((t) => !ids.includes(t.id))
+      app.showToast(`已删除 ${result?.deleted_count ?? ids.length} 个标签`)
+      return result
+    } catch (e) {
+      app.showToast(e.message || '删除失败', 'error')
+      throw e
+    }
+  }
+
+  // v1.4.4 M1（REQ-001）：一键清空当前用户全部标签（后端不触碰全局预设行）
+  async function clearTags() {
+    const app = useAppStore()
+    try {
+      const result = await clearAllTags()
+      tags.value = []
+      app.showToast('标签已清空')
+      return result
+    } catch (e) {
+      app.showToast(e.message || '清空失败', 'error')
+      throw e
+    }
+  }
+
   async function restoreDefaults() {
     const result = await restoreDefaultCategories()
     await fetchCategories()
@@ -129,6 +158,8 @@ export const useCategoriesStore = defineStore('categories', () => {
     removeCategory,
     addTag,
     removeTag,
+    batchRemoveTags,
+    clearTags,
     restoreDefaults,
   }
 })

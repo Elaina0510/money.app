@@ -20,3 +20,14 @@ export function createTag(data) {
 export function deleteTag(id) {
   return request.delete(`/tags/${id}`)
 }
+
+// v1.4.4 M1（REQ-002）：批量软删当前用户的标签，后端单事务原子——任一 id 不属于本人/已软删
+// 即整单 400（中文 message），零行落删除；载荷 ids 为去重后的选中集
+export function batchDeleteTags(ids) {
+  return request.post('/tags/batch-delete', { ids })
+}
+
+// v1.4.4 M1（REQ-001）：一键清空当前用户全部标签（无 body）；0 条也成功返回 deleted_count:0（幂等）
+export function clearAllTags() {
+  return request.post('/tags/clear-all')
+}

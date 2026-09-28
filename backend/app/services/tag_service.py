@@ -152,3 +152,59 @@ async def delete_tag(
     tag.deleted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     await db.commit()
     return None
+
+
+async def batch_delete_tags(db: AsyncSession, ids: list[int], current_user: User) -> int:
+    """软删当前用户的一批标签；任一 id 不满足归属/存活条件则整单失败、零落删除。
+
+    v1.4.4 M1 新增（REQ-002）。控制流三步（设计 §2.1）：
+      ① 一次查询取回「归属本人 + 未软删 + 在请求 id 集内」的行（无 N+1）；
+      ② 命中数 ≠ `len(set(ids))` → 抛中文 ValueError，此时尚未写任何行 → 整单零落删除；
+      ③ 全命中 → 逐行置 `deleted_at`（沿单删的时间格式手法），一次 commit 单事务原子提交。
+
+    归属口径**严于** `delete_tag`：只认 `user_id == current_user.id`，刻意不开
+    `user_id IS NULL` 的全局预设行口子（红线 10）——跨用户 id 与全局 id 一律计入
+    步骤 ② 的「不存在」。不写数据回溯、不发事件、无条数上限。
+    """
+    requested = set(ids)
+    result = await db.exec(
+        select(Tag)
+        .where(
+            col(Tag.user_id) == current_user.id,
+            col(Tag.deleted_at).is_(None),
+            col(Tag.id).in_(requested),
+        )
+        .order_by(col(Tag.id))
+    )
+    tags = list(result.all())
+
+    if len(tags) != len(requested):
+        raise ValueError("部分标签不存在或已被删除，请刷新后重试")
+
+    deleted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for tag in tags:
+        tag.deleted_at = deleted_at
+    await db.commit()
+    return len(tags)
+
+
+async def clear_all_tags(db: AsyncSession, current_user: User) -> int:
+    """软删当前用户全部未软删标签；0 条也成功返回 0（不抛错，幂等）。
+
+    v1.4.4 M1 新增（REQ-001）。归属口径与 `batch_delete_tags` 一致：只触碰
+    `user_id == current_user.id` 的行，`user_id IS NULL` 的全局预设行不在范围内
+    （红线 10）。一次查询 + 一次 commit，不写数据回溯、不发事件。
+    """
+    result = await db.exec(
+        select(Tag).where(
+            col(Tag.user_id) == current_user.id,
+            col(Tag.deleted_at).is_(None),
+        )
+    )
+    tags = list(result.all())
+
+    deleted_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    for tag in tags:
+        tag.deleted_at = deleted_at
+    await db.commit()
+    return len(tags)

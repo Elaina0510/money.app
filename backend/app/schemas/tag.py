@@ -17,6 +17,13 @@ class TagUpdate(BaseModel):
     category_id: int | None = Field(default=None, gt=0)  # v1.1 新增
 
 
+class TagBatchDelete(BaseModel):
+    """Schema for batch tag soft-delete (v1.4.4 M1)."""
+
+    # 数量无上限（需求裁定 M 为数十至数百级）；空数组/缺失由 FastAPI 默认 422 兜底
+    ids: list[int] = Field(..., min_length=1)
+
+
 class TagResponse(BaseModel):
     """Schema for tag response."""
 

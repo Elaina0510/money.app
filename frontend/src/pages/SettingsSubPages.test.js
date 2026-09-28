@@ -39,6 +39,9 @@ vi.mock('@/api/tags', () => ({
   searchTags: vi.fn().mockResolvedValue([]),
   createTag: vi.fn().mockResolvedValue({}),
   deleteTag: vi.fn().mockResolvedValue({}),
+  // v1.4.4 M1 标签批量治理：两 POST 端点（后端返 {deleted_count}；具体数值用例内覆盖）
+  batchDeleteTags: vi.fn().mockResolvedValue({ deleted_count: 0 }),
+  clearAllTags: vi.fn().mockResolvedValue({ deleted_count: 0 }),
 }))
 
 vi.mock('@/api/records', () => ({
@@ -75,7 +78,7 @@ import {
   deleteCategory,
   restoreDefaultCategories,
 } from '@/api/categories'
-import { getTags, getTagsPaged, createTag, deleteTag } from '@/api/tags'
+import { getTags, getTagsPaged, createTag, deleteTag, batchDeleteTags, clearAllTags } from '@/api/tags'
 import Draggable from 'vuedraggable'
 import {
   getRecords,
@@ -3351,5 +3354,261 @@ describe('v1.4.3-boot3 CSV 列映射向导', () => {
     const withTags = await mountDialog(templatePreview())
     expect(flat(withTags)).toContain('标签映射')
     expect(flat(withTags)).toContain('FruitsandVegetables')
+  })
+})
+
+// ── v1.4.4 M1 标签批量治理（REQ-001 一键清空 / REQ-002 多选批量删除）─────────────
+// 任务 §8.1–§8.5 五条逐字对应本 describe；P3 共写纪律：只增本块、不触碰 M2 的 describe。
+// 手法（本文件既定范式 + 总 prompt §7.8 vitest 能力边界）：组件全 stub（未装 Vuetify），
+// 状态机/载荷/文案走 vm + props 断言；位次、清空钮不传 color、勾选图标系别、单 chip ✕ 的
+// v-if 等「stub 环境渲染不出」的契约一律以 ?raw 源码正则承载
+// （✕ 位于 v-chip 具名插槽内，jsdom 侧不渲染插槽内容 → 该条不走 DOM 断言、不冒充已验证）。
+describe('v1.4.4 M1 标签批量治理', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    setActivePinia(createPinia())
+    getCategories.mockResolvedValue(CATEGORIES.map((c) => ({ ...c })))
+    getTags.mockResolvedValue(TAGS.map((t) => ({ ...t })))
+    useSlicedPagedMock(TAGS)
+    batchDeleteTags.mockResolvedValue({ deleted_count: 2 })
+    clearAllTags.mockResolvedValue({ deleted_count: 5 })
+  })
+
+  // 页头按钮只取卡外头部容器内的 v-btn（弹窗内同名「清空/删除/取消」钮不参与位次断言）；
+  // stub 环境里 v-btn 文本含前置图标字面量（如 "mdi-plus 新增"）→ 按包含匹配
+  const headerBtns = (wrapper) => wrapper.findAll('.settings-tags-page > .d-flex.align-center v-btn')
+  const headerBtn = (wrapper, label) => headerBtns(wrapper).find((b) => b.text().includes(label))
+  // 标签 chip（class mb-1）与操作条的「已选 M 个」chip 区分开
+  const tagChips = (wrapper) => wrapper.findAll('v-chip.mb-1')
+  const dialogByTitle = (wrapper, title) =>
+    wrapper.findAllComponents(ConfirmDialog).find((d) => d.props('title') === title)
+  const clickDialogBtn = async (dialog, label) => {
+    const btn = dialog.findAll('v-btn').find((b) => b.text() === label)
+    expect(btn, `确认弹窗「${label}」按钮未渲染`).toBeTruthy()
+    await btn.trigger('click')
+    await flushPromises()
+  }
+
+  // 「服务端真相」假数据源：两批量接口按归属/存活条件改写集合，
+  // 使「确认后重查列表」的断言等价后端语义（而不是靠页面乐观更新蒙过去）
+  function useTagServer(initial) {
+    let server = initial.map((t) => ({ ...t }))
+    getTags.mockImplementation(() => Promise.resolve(server.map((t) => ({ ...t }))))
+    getTagsPaged.mockImplementation((params) =>
+      Promise.resolve(pagedOf(server, params?.page ?? 1, params?.page_size ?? 20))
+    )
+    batchDeleteTags.mockImplementation((ids) => {
+      const hit = server.filter((t) => ids.includes(t.id))
+      if (hit.length !== new Set(ids).size) {
+        return Promise.reject(new Error('部分标签不存在或已被删除，请刷新后重试'))
+      }
+      server = server.filter((t) => !ids.includes(t.id))
+      return Promise.resolve({ deleted_count: hit.length })
+    })
+    clearAllTags.mockImplementation(() => {
+      const count = server.length
+      server = []
+      return Promise.resolve({ deleted_count: count })
+    })
+  }
+
+  // 任务 §5.1（D7 位次）/ §5.7 + §8.1：空态禁用、点击零请求
+  it('用例M1-8.1: total=0 时「清空」禁用且点击零请求；「多选」不禁用、操作条不出现', async () => {
+    getTags.mockResolvedValue([])
+    getTagsPaged.mockResolvedValue({ items: [], total: 0, page: 1, page_size: 20 })
+    const wrapper = await mountPage(SettingsTagsPage)
+
+    const clearBtn = headerBtn(wrapper, '清空')
+    expect(clearBtn, '空态下「清空」按钮应仍渲染（仅禁用）').toBeTruthy()
+    expect(clearBtn.attributes('disabled')).toBe('true')
+
+    await clearBtn.trigger('click')
+    await flushPromises()
+    expect(clearAllTags).toHaveBeenCalledTimes(0)
+    expect(wrapper.vm.showClearAllDialog).toBe(false)
+
+    // 位次口径（D7）：返回钮 → 多选 → 新增 → 清空（清空恒为末位）
+    const labels = headerBtns(wrapper).map((b) => b.text())
+    const indexOfLabel = (label) => labels.findIndex((t) => t.includes(label))
+    expect([indexOfLabel('多选'), indexOfLabel('新增'), indexOfLabel('清空')]).toEqual([1, 2, 3])
+    // 弱色口径（ui-design 审查轮补）：variant="text" + **不传 color** + total===0 禁用 + 多选态 v-if
+    const clearBtnSrc = tagsPageSource.match(
+      /<v-btn[^>]*v-if="!multiSelect"[\s\S]*?>\s*清空\s*<\/v-btn>/
+    )
+    expect(clearBtnSrc, '「清空」按钮写法缺失或不符位次口径').toBeTruthy()
+    expect(clearBtnSrc[0]).toMatch(/variant="text"/)
+    expect(clearBtnSrc[0]).toMatch(/:disabled="total === 0"/)
+    expect(clearBtnSrc[0]).not.toMatch(/color=/)
+    // 「多选」入口 = tonal 小按钮 + mdi-checkbox-marked-outline（任务 5.1）
+    expect(tagsPageSource).toMatch(
+      /<v-btn[^>]*variant="tonal"[^>]*@click="toggleMultiSelect">\s*<v-icon start size="small">mdi-checkbox-marked-outline<\/v-icon>/
+    )
+
+    // 空标签库进多选：按钮不禁用（无 chip 可选 → 操作条永不出现，不造额外禁用态）
+    const multiBtn = headerBtn(wrapper, '多选')
+    expect(multiBtn.attributes('disabled')).toBeUndefined()
+    await multiBtn.trigger('click')
+    expect(wrapper.vm.multiSelect).toBe(true)
+    expect(tagChips(wrapper)).toHaveLength(0)
+    expect(wrapper.find('.batch-bar').exists()).toBe(false)
+  })
+
+  // 任务 §5.2 + §8.2 + REQ-001 Acceptance：未经确认弹窗不产生任何删除
+  it('用例M1-8.2: 清空需二次确认——文案逐字含 N，取消则 clearAllTags 零调用、列表原状', async () => {
+    // 服务端真相源：确认后 fetchTags/resetPaging 重查拿到「已空」的集合，
+    // 断言等价后端语义（不靠页面乐观更新蒙过）
+    useTagServer(TAGS)
+    const wrapper = await mountPage(SettingsTagsPage)
+    expect(wrapper.vm.total).toBe(5)
+
+    await headerBtn(wrapper, '清空').trigger('click')
+    await nextTick()
+    const dialog = dialogByTitle(wrapper, '清空全部标签')
+    expect(dialog, '清空确认弹窗未渲染').toBeTruthy()
+    // 仅开弹窗：未确认零请求、零副作用（REQ-001 Acceptance）
+    expect(clearAllTags).toHaveBeenCalledTimes(0)
+    expect(dialog.props('message')).toBe(
+      '将删除全部 5 个标签，账单上的标签标记同步移除，此操作不可撤销'
+    )
+
+    await clickDialogBtn(dialog, '取消')
+    expect(wrapper.vm.showClearAllDialog).toBe(false)
+    expect(clearAllTags).toHaveBeenCalledTimes(0)
+    expect(useCategoriesStore().tags).toHaveLength(5)
+    expect(tagChips(wrapper)).toHaveLength(5)
+
+    // 确认后才发请求：store 清空 + 页面重查回空态
+    await headerBtn(wrapper, '清空').trigger('click')
+    await clickDialogBtn(dialogByTitle(wrapper, '清空全部标签'), '清空')
+    expect(clearAllTags).toHaveBeenCalledTimes(1)
+    expect(useCategoriesStore().tags).toHaveLength(0)
+    expect(tagChips(wrapper)).toHaveLength(0)
+    expect(wrapper.text()).toContain('暂无标签')
+    expect(getTagsPaged).toHaveBeenLastCalledWith({ page: 1, page_size: 20 })
+    expect(mockShowToast).toHaveBeenCalledWith('标签已清空')
+    // 任务 6.3：清空后 total=0 → 「清空」回到禁用态（再点仍是零请求）
+    expect(headerBtn(wrapper, '清空').attributes('disabled')).toBe('true')
+    await headerBtn(wrapper, '清空').trigger('click')
+    expect(clearAllTags).toHaveBeenCalledTimes(1)
+    expect(wrapper.vm.showClearAllDialog).toBe(false)
+  })
+
+  // 任务 §5.3/§5.4/§5.6 + §8.3：勾选态、操作条「已选 M 个」、取消清空选中且零批量删
+  it('用例M1-8.3: 多选态勾选图标与选中类名在场，已选 M 项浮出「已选 M 个」操作条，取消清选中且零删除请求', async () => {
+    const wrapper = await mountPage(SettingsTagsPage)
+    await headerBtn(wrapper, '多选').trigger('click')
+    expect(wrapper.vm.multiSelect).toBe(true)
+
+    const chips = tagChips(wrapper)
+    expect(chips).toHaveLength(5)
+    // 未选 = mdi-checkbox-blank-circle（同系 filled，非 -outline），且无选中类名
+    expect(chips[0].classes()).not.toContain('tag-chip-selected')
+    expect(chips[0].text()).toContain('mdi-checkbox-blank-circle')
+    // 已选 0 → 操作条不渲染（REQ-002 Acceptance）
+    expect(wrapper.find('.batch-bar').exists()).toBe(false)
+
+    await tagChips(wrapper)[0].trigger('click')
+    await nextTick()
+    expect(wrapper.vm.selectedIds).toEqual([11])
+    const first = tagChips(wrapper)[0]
+    expect(first.classes()).toContain('tag-chip-selected')
+    expect(first.text()).toContain('mdi-checkbox-marked')
+
+    await tagChips(wrapper)[1].trigger('click')
+    await nextTick()
+    const bar = wrapper.find('.batch-bar')
+    expect(bar.exists(), '已选 2 项时操作条未浮出').toBe(true)
+    expect(bar.text()).toContain('已选 2 个')
+    // 操作条复用账单页动效范式（Transition name="batch-bar" + 同名进出类）
+    expect(tagsPageSource).toMatch(/<Transition name="batch-bar">/)
+    expect(tagsPageSource).toMatch(/\.batch-bar-enter-active,\s*\.batch-bar-leave-active/)
+
+    const cancelBtn = bar.findAll('v-btn').find((b) => b.text() === '取消')
+    await cancelBtn.trigger('click')
+    await nextTick()
+    expect(wrapper.vm.multiSelect).toBe(false)
+    expect(wrapper.vm.selectedIds).toEqual([])
+    expect(wrapper.find('.batch-bar').exists()).toBe(false)
+    expect(batchDeleteTags).toHaveBeenCalledTimes(0)
+    expect(useCategoriesStore().tags).toHaveLength(5)
+  })
+
+  // 任务 §5.5 + §8.4 + §6.1 并发幽灵：载荷逐字一致、失败保留选中态与模式可重试
+  it('用例M1-8.4: 批量删除载荷与选中集逐字一致；成功后退多选态并重查，失败保留选中态与模式', async () => {
+    useTagServer(TAGS)
+    const wrapper = await mountPage(SettingsTagsPage)
+    await headerBtn(wrapper, '多选').trigger('click')
+    await tagChips(wrapper)[0].trigger('click')
+    await tagChips(wrapper)[2].trigger('click')
+    await nextTick()
+    expect(wrapper.vm.selectedIds).toEqual([11, 13])
+
+    // stub 环境 v-btn 文本含前置图标字面量（"mdi-delete 删除"）→ 按包含匹配
+    const bar = wrapper.find('.batch-bar')
+    await bar.findAll('v-btn').find((b) => b.text().includes('删除')).trigger('click')
+    const dialog = dialogByTitle(wrapper, '批量删除标签')
+    expect(wrapper.vm.showBatchDeleteDialog).toBe(true)
+    expect(batchDeleteTags).toHaveBeenCalledTimes(0)
+    expect(dialog.props('message')).toBe(
+      '确定删除已选的 2 个标签？账单上的标签标记同步移除，此操作不可撤销'
+    )
+
+    // 失败（后端整单 400 幽灵 id）：不动本地选中态、不退多选模式，弹后端中文 message
+    batchDeleteTags.mockRejectedValueOnce(new Error('部分标签不存在或已被删除，请刷新后重试'))
+    await clickDialogBtn(dialog, '删除')
+    expect(batchDeleteTags).toHaveBeenCalledTimes(1)
+    expect(batchDeleteTags).toHaveBeenCalledWith([11, 13])
+    expect(wrapper.vm.multiSelect).toBe(true)
+    expect(wrapper.vm.selectedIds).toEqual([11, 13])
+    expect(useCategoriesStore().tags).toHaveLength(5)
+    expect(mockShowToast).toHaveBeenCalledWith('部分标签不存在或已被删除，请刷新后重试', 'error')
+
+    // 重试成功：走同一「服务端真相」实现（11/13 整批命中后自集合移除），
+    // 退出多选态 + 回第 1 页重查（未选标签及其账单关联不受影响）
+    await clickDialogBtn(dialogByTitle(wrapper, '批量删除标签'), '删除')
+    expect(batchDeleteTags).toHaveBeenLastCalledWith([11, 13])
+    expect(batchDeleteTags).toHaveBeenCalledTimes(2)
+    expect(wrapper.vm.multiSelect).toBe(false)
+    expect(wrapper.vm.selectedIds).toEqual([])
+    expect(wrapper.vm.showBatchDeleteDialog).toBe(false)
+    expect(getTags).toHaveBeenCalledTimes(2)
+    expect(getTagsPaged).toHaveBeenLastCalledWith({ page: 1, page_size: 20 })
+    expect(useCategoriesStore().tags.map((t) => t.id)).toEqual([12, 14, 15])
+    expect(tagChips(wrapper)).toHaveLength(3)
+    expect(wrapper.text()).toContain('打车')
+    expect(mockShowToast).toHaveBeenCalledWith('已删除 2 个标签')
+  })
+
+  // 任务 §5.3 + §8.5：多选态下「清空」按钮与单 chip ✕ 均不渲染（双入口消除）
+  it('用例M1-8.5: 多选态不渲染「清空」与单 chip ✕，再点「多选」退出零请求', async () => {
+    const wrapper = await mountPage(SettingsTagsPage)
+    // 普通态 DOM 断言只承载「清空」按钮（✕ 位于 v-chip 具名 append 插槽，
+    // stub 环境不渲染插槽内容 → ✕ 的显隐契约由下方 ?raw 源码正则承载，不冒充 DOM 已验）
+    expect(headerBtn(wrapper, '清空')).toBeTruthy()
+
+    await headerBtn(wrapper, '多选').trigger('click')
+    await nextTick()
+    // 多选态：「清空」整钮不渲染（与批量「删除」双入口消除）
+    expect(headerBtn(wrapper, '清空')).toBeUndefined()
+    // 模板口径同步钉住：单 chip ✕ 带 v-if="!multiSelect"（普通态渲染、多选态不渲染）
+    expect(tagsPageSource).toMatch(
+      /<template v-slot:append>\s*<v-icon\s+v-if="!multiSelect"[\s\S]*?mdi-close/
+    )
+    // 多选态下点 chip 主体走选中切换（普通态 onChipClick 直接 return，删除仍由 ✕ 承载）
+    expect(tagsPageSource).toMatch(/function onChipClick\(tag\) \{\s*\n\s*if \(!multiSelect\.value\) return/)
+    // 勾选图标系别（ui-design 审查轮补口径）：同系 filled 配对，旧 outline / check-circle 零命中
+    expect(tagsPageSource).toContain('mdi-checkbox-blank-circle')
+    expect(tagsPageSource).toContain('mdi-checkbox-marked')
+    expect(tagsPageSource).not.toMatch(/mdi-checkbox-blank-circle-outline|mdi-check-circle/)
+
+    // 再点「多选」退出（任务 5.6）：清选中回普通态、零请求
+    await headerBtn(wrapper, '多选').trigger('click')
+    await nextTick()
+    expect(wrapper.vm.multiSelect).toBe(false)
+    expect(wrapper.vm.selectedIds).toEqual([])
+    expect(headerBtn(wrapper, '清空')).toBeTruthy()
+    expect(deleteTag).toHaveBeenCalledTimes(0)
+    expect(batchDeleteTags).toHaveBeenCalledTimes(0)
+    expect(clearAllTags).toHaveBeenCalledTimes(0)
   })
 })

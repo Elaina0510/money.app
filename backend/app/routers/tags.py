@@ -6,7 +6,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.database import get_session
 from app.models.user import User
-from app.schemas.tag import TagCreate, TagResponse, TagUpdate
+from app.schemas.tag import TagBatchDelete, TagCreate, TagResponse, TagUpdate
 from app.services import tag_service
 from app.utils.auth import require_auth
 from app.utils.response import Code, error_response, success_response
@@ -54,6 +54,43 @@ async def list_tags_paged(
             "page_size": page_size,
         }
     )
+
+
+@router.post("/batch-delete")
+async def batch_delete_tags(
+    data: TagBatchDelete,
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_auth),
+) -> JSONResponse:
+    """Soft-delete a batch of the current user's tags atomically (v1.4.4 M1 / REQ-002).
+
+    命中数与 `len(set(ids))` 不符 → service 抛中文 ValueError → 400 `PARAM_ERROR`，
+    整单零落删除（原子性）。跨用户 id 与 `user_id IS NULL` 全局行同样计入「不存在」
+    （红线 10：本接口刻意不开全局行口子）。
+    ids 缺失/空数组/非整数由 FastAPI 默认 422 兜底（不做特判——前端仅在已选 ≥1 时发起）。
+    """
+    try:
+        count = await tag_service.batch_delete_tags(db, data.ids, current_user)
+        return success_response(
+            data={"deleted_count": count}, message=f"已删除 {count} 个标签"
+        )
+    except ValueError as e:
+        return error_response(Code.PARAM_ERROR, str(e))
+
+
+@router.post("/clear-all")
+async def clear_all_tags(
+    db: AsyncSession = Depends(get_session),
+    current_user: User = Depends(require_auth),
+) -> JSONResponse:
+    """Soft-delete every tag of the current user (v1.4.4 M1 / REQ-001, no request body).
+
+    0 条也是成功（幂等）：`deleted_count=0` 时 message 为「标签已全部清空」。
+    全局预设行（`user_id IS NULL`）不在触碰范围内（红线 10）；未登录沿用全局 401。
+    """
+    count = await tag_service.clear_all_tags(db, current_user)
+    message = f"已清空 {count} 个标签" if count else "标签已全部清空"
+    return success_response(data={"deleted_count": count}, message=message)
 
 
 @router.get("/{tag_id}")
