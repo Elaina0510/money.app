@@ -275,6 +275,8 @@ describe('M7 设置页三个管理区块改二级页面', () => {
     const wrapper = await mountPage(SettingsPage)
 
     // 四张摘要卡的跳转目标（v1.4.3 M5：导入导出内联卡迁出为二级页，设置页只留入口行）
+    // 【v1.4.4 M4 计数改写】账号卡后新增「关于」入口卡（任务 §2.2，同规格结构）→ 入口 4→5；
+    // 非放宽：新入口仍被本数组逐项穷尽锁定，多一个少一个都变红。
     const entries = wrapper
       .findAll('v-list-item')
       .filter((node) => node.attributes('to'))
@@ -284,6 +286,7 @@ describe('M7 设置页三个管理区块改二级页面', () => {
       '/settings/tags',
       '/settings/quick-templates',
       '/settings/import-export',
+      '/settings/about',
     ])
 
     const text = wrapper.text()
@@ -1368,18 +1371,19 @@ describe('M8 设置页/统计页入口图标统一', () => {
   // 任务 §5.1 + §5.2 + §2.1~§2.3 + §4.1
   // 【v1.4.3 M5 口径反转改写】原「7 卡头 + 导入导出 4 子条目 = 11 处」中的 4 子条目
   // 随导入导出迁出设置主页（非放宽）：主页计数改 7，迁出的 4 处同规格改锁新页源文件。
-  it('用例M8-2: 两页零内联 rgba 头像底与静态 Material 图标色，7+4+1 处同规格', () => {
+  it('用例M8-2: 两页零内联 rgba 头像底与静态 Material 图标色，8+4+1 处同规格', () => {
     for (const src of [settingsPageSource, statisticsPageSource, importExportPageSource]) {
       expect(src).not.toMatch(AVATAR_INLINE_RGBA)
       expect(src).not.toMatch(STATIC_ICON_COLOR)
     }
-    // §5.2 SettingsPage 严口径：整文件零 rgba（原 7 处 v-avatar 内联底色已全部收敛到类）
+    // §5.2 SettingsPage 严口径：整文件零 rgba（v-avatar 内联底色已全部收敛到类）
     expect(settingsPageSource).not.toContain('rgba(')
     // §5.1 正向断言：入口头像类已落地
     expect(settingsPageSource).toContain('entry-avatar')
     expect(statisticsPageSource).toContain('entry-avatar')
     // §2.3：外观/分类/标签/快速记账/导入导出（M5 入口行）/数据回溯/账号 7 处同规格
-    expect(settingsPageSource.match(ENTRY_AVATAR_TPL)).toHaveLength(7)
+    // 【v1.4.4 M4 计数改写】+「关于」入口卡（任务 §2.2 同款结构）→ 7→8；新入口一并被同规格锁定，非放宽
+    expect(settingsPageSource.match(ENTRY_AVATAR_TPL)).toHaveLength(8)
     // M5：迁入二级页的 4 个子条目（导出/导入 CSV、导出/导入 SQL）同规格不降级
     expect(importExportPageSource.match(ENTRY_AVATAR_TPL)).toHaveLength(4)
     // §4.1：统计页仅预算卡头一处（M8 范围收敛）
@@ -1414,7 +1418,7 @@ describe('M8 设置页/统计页入口图标统一', () => {
   // 【v1.4.3 M5 口径反转改写】导入导出四行（导出/导入 CSV、导出/导入 SQL）已迁出为
   // /settings/import-export 二级页 → 原「≥ 11 且含 4 子条目」改锁 7 入口 + 四行零残留，
   // 迁出后的四行渲染断言随 M5 新用例组承接（用例M5-1），非放宽。
-  it('用例M8-4: 挂载后 .entry-avatar 计数 = 7 且其内图标均为 primary 色', async () => {
+  it('用例M8-4: 挂载后 .entry-avatar 计数 = 8 且其内图标均为 primary 色', async () => {
     const wrapper = mount(SettingsPage, {
       global: {
         mocks: { $router: { push: mockPush, back: mockBack } },
@@ -1423,8 +1427,10 @@ describe('M8 设置页/统计页入口图标统一', () => {
     })
     await flushPromises()
 
+    // 【v1.4.4 M4 计数改写】账号卡后新增「关于」入口卡（任务 §2.2）→ 7→8；
+    // 图标清单逐项穷尽、非放宽：多一个少一个或顺序变动都立刻变红。
     const avatars = wrapper.findAll('.entry-avatar')
-    expect(avatars).toHaveLength(7)
+    expect(avatars).toHaveLength(8)
     avatars.forEach((node) => {
       // §2.1 容器与左偏移：36 圆底 + mr-2（卡头与子条目同规格）
       expect(node.attributes('size')).toBe('36')
@@ -1435,7 +1441,7 @@ describe('M8 设置页/统计页入口图标统一', () => {
       expect(icon.attributes('color')).toBe('primary')
       expect(icon.attributes('size')).toBe('20')
     })
-    // 7 个入口图标齐全且无游离头像（顺序即模板顺序，需求 5 条不改文案与顺序）
+    // 8 个入口图标齐全且无游离头像（顺序即模板顺序，需求 5 条不改文案与顺序）
     expect(avatars.map((node) => node.find('v-icon').text())).toEqual([
       'mdi-brightness-6',
       'mdi-shape',
@@ -1444,10 +1450,11 @@ describe('M8 设置页/统计页入口图标统一', () => {
       'mdi-swap-vertical',
       'mdi-history',
       'mdi-account',
+      'mdi-information-outline',
     ])
     // 文案与摘要功能未受影响
     const text = wrapper.text()
-    ;['外观设置', '分类管理', '标签管理', '快速记账', '导入导出', '数据回溯', '账号'].forEach(
+    ;['外观设置', '分类管理', '标签管理', '快速记账', '导入导出', '数据回溯', '账号', '关于'].forEach(
       (title) => expect(text).toContain(title)
     )
     // M5 红线：四个操作行不再在设置主页渲染（行名 + 副标题双口径零残留）
@@ -1475,19 +1482,21 @@ describe('M8 设置页/统计页入口图标统一', () => {
     expect(history).toContain('<v-card class="mb-3 settings-card" rounded="xl">')
     expect(history).toMatch(/<v-list class="bg-transparent pa-0">/)
     expect(history).toMatch(/<v-list-item-title class="text-body-1 font-weight-medium">数据回溯/)
-    // §3.3：摘要类 5 入口（分类/标签/快速记账/导入导出[M5 入口行]/数据回溯）
-    //      统一 v-card 无 pa + 默认内衬
-    expect(settingsPageSource.match(/<v-card class="mb-3 settings-card" rounded="xl">/g)).toHaveLength(5)
+    // §3.3：摘要类入口（分类/标签/快速记账/导入导出[M5 入口行]/数据回溯
+    //        +【v1.4.4 M4】关于[任务 §2.2 同款骨架]）统一 v-card 无 pa + 默认内衬 → 5→6
+    //      非放宽：新入口被同一正则穷尽锁定，骨架不一致即变红
+    expect(settingsPageSource.match(/<v-card class="mb-3 settings-card" rounded="xl">/g)).toHaveLength(6)
     // §3.3/§3.5：区块类 2 卡头（外观/账号）flex pa-4 保持原骨架
     //（M5：导入导出区块卡已迁出，其原「pa-4 卡头 + d-flex」骨架随之内联卡一并消失）
     expect(settingsPageSource.match(/<v-card class="pa-4 mb-3 settings-card" rounded="xl">/g)).toHaveLength(2)
     expect(settingsPageSource.match(/<div class="d-flex align-center mb-[23]">/g)).toHaveLength(2)
     expect(settingsPageSource).not.toMatch(/<span class="text-body-1 font-weight-medium">导入导出/)
     // §3.4：字阶统一取 text-body-1 font-weight-medium（卡头原 text-subtitle-2 已覆盖升级）
+    // 【v1.4.4 M4 计数改写】「关于」入口沿用同字阶 → 5→6（非放宽，缺字阶即变红）
     expect(settingsPageSource).not.toContain('text-subtitle-2')
     expect(
       settingsPageSource.match(/<v-list-item-title class="text-body-1 font-weight-medium">/g)
-    ).toHaveLength(5)
+    ).toHaveLength(6)
     expect(settingsPageSource).toMatch(/<span class="text-body-1 font-weight-medium">外观设置/)
     expect(settingsPageSource).toMatch(
       /<v-list-item-title class="text-body-1 font-weight-medium">导入导出/

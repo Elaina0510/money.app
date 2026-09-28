@@ -155,6 +155,22 @@
         </v-btn>
       </div>
     </v-card>
+
+    <!-- About Entry (v1.4.4 M4 / REQ-009 任务 2.2：账号卡之后的「关于」入口，结构与既有入口卡同款) -->
+    <v-card class="mb-3 settings-card" rounded="xl">
+      <v-list-item to="/settings/about" rounded="xl">
+        <template v-slot:prepend>
+          <v-avatar size="36" class="entry-avatar mr-2">
+            <v-icon color="primary" size="20">mdi-information-outline</v-icon>
+          </v-avatar>
+        </template>
+        <v-list-item-title class="text-body-1 font-weight-medium">关于</v-list-item-title>
+        <v-list-item-subtitle class="text-caption">版本与应用介绍</v-list-item-subtitle>
+        <template v-slot:append>
+          <v-icon size="20" color="grey">mdi-chevron-right</v-icon>
+        </template>
+      </v-list-item>
+    </v-card>
   </div>
 </template>
 

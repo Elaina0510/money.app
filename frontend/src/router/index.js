@@ -77,6 +77,13 @@ const routes = [
     component: () => import('@/pages/SettingsImportExportPage.vue'),
     meta: { title: '导入导出' },
   },
+  // v1.4.4 M4（REQ-009 任务 2.3）：关于页——沿用全局登录守卫，不单设 public
+  {
+    path: '/settings/about',
+    name: 'SettingsAboutPage',
+    component: () => import('@/pages/SettingsAboutPage.vue'),
+    meta: { title: '关于' },
+  },
   {
     path: '/history',
     name: 'History',

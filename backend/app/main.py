@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import CORS_ORIGINS, UPLOAD_DIR
+from app.constants import APP_VERSION  # v1.4.4 M4（任务 1.1/1.3）：版本号唯一定义点
 from app.database import create_all_tables, engine
 from app.models.category import Category
 from app.models.operation_history import OperationHistory  # noqa: F401
@@ -25,6 +26,7 @@ from app.routers import (
     records,
     statistics,
     tags,
+    version,
 )
 from app.utils.file_utils import ensure_upload_dir
 
@@ -76,7 +78,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 app = FastAPI(
     title="Money App - 个人记账程序",
     description="个人记账程序 API V1.1",
-    version="1.1.0",
+    version=APP_VERSION,  # v1.4.4 M4（任务 1.3）：由 constants 真值下发，消 main 内版本漂移
     lifespan=lifespan,
 )
 
@@ -111,6 +113,7 @@ app.include_router(budgets.router)
 app.include_router(history.router)
 app.include_router(export.router)
 app.include_router(import_.router)
+app.include_router(version.router)  # v1.4.4 M4（任务 1.2/1.3）：GET /api/version，无鉴权
 
 
 @app.exception_handler(Exception)
@@ -141,4 +144,6 @@ async def root() -> FileResponse | dict[str, str]:
             media_type="text/html",
             headers={"Cache-Control": "no-cache"},
         )
-    return {"message": "Money App API", "version": "1.0.0", "docs": "/docs"}
+    # v1.4.4 M4（任务 1.4）：原版本兜底键已删——版本唯一真值在 app.constants.APP_VERSION，
+    # 经 GET /api/version 下发；前端零消费方，删键即消歧（任务 §5.3 grep 自证据此零命中）。
+    return {"message": "Money App API", "docs": "/docs"}
