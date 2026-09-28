@@ -4,54 +4,164 @@
     <v-navigation-drawer
       v-show="isDesktop && !isLoginPage"
       v-model="drawer"
-      :permanent="!rail"
-      :temporary="rail"
-      :rail="false"
+      :permanent="isDesktop"
+      :temporary="!isDesktop"
+      :rail="isDesktop && rail"
+      :rail-width="72"
       :width="240"
       :mobile-breakpoint="0"
       class="app-sidebar"
       elevation="0"
     >
-      <!-- App Logo Area -->
-      <div class="sidebar-header px-2 py-2 d-flex align-center">
-        <v-avatar color="primary" size="28" class="mr-1 flex-shrink-0">
-          <v-icon color="white" size="16">mdi-wallet</v-icon>
-        </v-avatar>
-        <div class="sidebar-header-text" style="min-width: 0" v-show="isDesktop">
-          <div class="text-subtitle-2 font-weight-bold text-truncate" style="line-height: 1.2">
-            Money App
-          </div>
-          <div class="text-caption text-truncate page-subtitle">个人记账</div>
-        </div>
+      <!-- 收起/展开切换钮（REQ-011）：rail 态与展开态共用同一 DOM 首位，图标随 rail 切换零跳变 -->
+      <v-btn
+        icon
+        variant="text"
+        size="48"
+        class="sidebar-toggle"
+        :class="{ 'sidebar-toggle--rail': isDesktop && rail }"
+        aria-label="切换侧边栏"
+        @click="toggleNav()"
+      >
+        <v-icon>{{ rail ? 'mdi-menu' : 'mdi-backup-restore' }}</v-icon>
+        <v-tooltip activator="parent" location="end">
+          {{ rail ? '展开侧边栏' : '收起侧边栏' }}
+        </v-tooltip>
+      </v-btn>
+
+      <!-- 收起态图标列（REQ-010）：宽 = Vuetify rail-width prop（72px），禁样式覆写；
+           前景色一律显式传主题色名（未选中 on-surface-variant / 选中 primary）；不渲染任何文本 -->
+      <div v-if="isDesktop && rail" class="sidebar-rail">
+        <v-btn
+          to="/"
+          icon
+          variant="text"
+          size="48"
+          class="rail-btn nav-item rail-home-btn"
+          :class="{ 'active-nav-item': railActive === '/' }"
+          :color="railActive === '/' ? 'primary' : 'on-surface-variant'"
+          aria-label="主页"
+        >
+          <v-icon icon="mdi-view-dashboard-outline" size="24" />
+          <v-tooltip activator="parent" location="end">主页</v-tooltip>
+        </v-btn>
+
+        <v-btn
+          to="/records"
+          icon
+          variant="text"
+          size="48"
+          class="rail-btn nav-item rail-records-btn"
+          :class="{ 'active-nav-item': railActive === '/records' }"
+          :color="railActive === '/records' ? 'primary' : 'on-surface-variant'"
+          aria-label="账单"
+        >
+          <v-icon icon="mdi-format-list-bulleted" size="24" />
+          <v-tooltip activator="parent" location="end">账单</v-tooltip>
+        </v-btn>
+
+        <v-btn
+          to="/statistics"
+          icon
+          variant="text"
+          size="48"
+          class="rail-btn nav-item rail-statistics-btn"
+          :class="{ 'active-nav-item': railActive === '/statistics' }"
+          :color="railActive === '/statistics' ? 'primary' : 'on-surface-variant'"
+          aria-label="统计"
+        >
+          <v-icon icon="mdi-chart-box-outline" size="24" />
+          <v-tooltip activator="parent" location="end">统计</v-tooltip>
+        </v-btn>
+
+        <v-btn
+          to="/settings"
+          icon
+          variant="text"
+          size="48"
+          class="rail-btn nav-item rail-settings-btn"
+          :class="{ 'active-nav-item': railActive === '/settings' }"
+          :color="railActive === '/settings' ? 'primary' : 'on-surface-variant'"
+          aria-label="设置"
+        >
+          <v-icon icon="mdi-cog-outline" size="24" />
+          <v-tooltip activator="parent" location="end">设置</v-tooltip>
+        </v-btn>
+
+        <v-btn
+          icon
+          variant="text"
+          size="48"
+          class="rail-btn rail-theme-btn"
+          color="on-surface-variant"
+          :aria-label="appStore.darkMode ? '切换为浅色模式' : '切换为深色模式'"
+          @click="appStore.toggleDarkMode()"
+        >
+          <v-icon size="24">{{ appStore.darkMode ? 'mdi-weather-night' : 'mdi-weather-sunny' }}</v-icon>
+          <v-tooltip activator="parent" location="end">
+            {{ appStore.darkMode ? '浅色模式' : '深色模式' }}
+          </v-tooltip>
+        </v-btn>
+
+        <!-- 未登录整钮不渲染、无悬空占位（D9） -->
+        <v-btn
+          v-if="isLoggedIn"
+          icon
+          variant="text"
+          size="48"
+          class="rail-btn rail-logout-btn"
+          color="on-surface-variant"
+          aria-label="退出登录"
+          @click="handleLogout"
+        >
+          <v-icon icon="mdi-logout" size="24" />
+          <v-tooltip activator="parent" location="end">退出登录</v-tooltip>
+        </v-btn>
       </div>
 
-      <v-divider class="mx-2" />
+      <template v-else>
+        <!-- App Logo Area（REQ-011：介绍块下移至切换钮之下） -->
+        <div class="sidebar-header px-2 py-2 d-flex align-center">
+          <v-avatar color="primary" size="28" class="mr-1 flex-shrink-0">
+            <v-icon color="white" size="16">mdi-wallet</v-icon>
+          </v-avatar>
+          <div class="sidebar-header-text" style="min-width: 0" v-show="isDesktop">
+            <div class="text-subtitle-2 font-weight-bold text-truncate" style="line-height: 1.2">
+              Money App
+            </div>
+            <div class="text-caption text-truncate page-subtitle">个人记账</div>
+          </div>
+        </div>
 
-      <!-- Navigation Items -->
-      <v-list class="sidebar-nav pa-1" density="compact">
-        <v-list-item
-          v-for="item in navItems"
-          :key="item.to"
-          :to="item.to"
-          :active="route.path === item.to"
-          :class="{ 'active-nav-item': route.path === item.to }"
-          rounded="xl"
-          class="nav-item mb-1"
-        >
-          <template v-slot:prepend>
-            <v-icon :icon="item.icon" size="24" />
-          </template>
-          <v-list-item-title
-            class="text-body-2 font-weight-medium"
-            :class="{ 'd-none': !isDesktop }"
+        <v-divider class="mx-2" />
+
+        <!-- Navigation Items -->
+        <v-list class="sidebar-nav pa-1" density="compact">
+          <v-list-item
+            v-for="item in navItems"
+            :key="item.to"
+            :to="item.to"
+            :active="route.path === item.to"
+            :class="{ 'active-nav-item': route.path === item.to }"
+            rounded="xl"
+            class="nav-item mb-1"
           >
-            {{ item.title }}
-          </v-list-item-title>
-        </v-list-item>
-      </v-list>
+            <template v-slot:prepend>
+              <v-icon :icon="item.icon" size="24" />
+            </template>
+            <v-list-item-title
+              class="text-body-2 font-weight-medium"
+              :class="{ 'd-none': !isDesktop }"
+            >
+              {{ item.title }}
+            </v-list-item-title>
+          </v-list-item>
+        </v-list>
+      </template>
 
       <template v-slot:append>
-        <div class="pa-2">
+        <!-- 收起态不渲染展开态尾部（图标列已含设置/主题/登出，避免文字残留） -->
+        <div class="pa-2" v-if="!(isDesktop && rail)">
           <v-list-item
             to="/settings"
             :active="route.path === '/settings'"
@@ -112,16 +222,7 @@
       <!-- Top Bar - sticky, must stay outside overflow container -->
       <div class="app-top-bar pa-4 pb-0">
         <div class="d-flex align-center">
-          <!-- Hamburger button - Desktop only -->
-          <v-btn
-            v-if="isDesktop && !isLoginPage"
-            icon
-            variant="text"
-            class="mr-2"
-            @click="toggleNav()"
-          >
-            <v-icon>{{ rail ? 'mdi-menu' : 'mdi-close' }}</v-icon>
-          </v-btn>
+          <!-- M5（REQ-011）：原汉堡按钮块已删除，收起/展开切换钮恒在侧栏顶部首位；顶栏右侧深色钮保留 -->
           <div>
             <div class="text-h6 font-weight-bold">{{ currentTitle }}</div>
             <div class="text-caption d-none d-md-block page-subtitle">{{ currentSubtitle }}</div>
@@ -209,12 +310,17 @@ import ToastNotification from '../common/ToastNotification.vue'
 const router = useRouter()
 const route = useRoute()
 const appStore = useAppStore()
-const rail = ref(true) // 默认折叠
-const drawer = ref(false)
 
 // 响应式屏幕宽度检测（960px 为桌面/移动端分界线）
 const BREAKPOINT = 960
 const isDesktop = ref(window.innerWidth >= BREAKPOINT)
+
+const rail = ref(true) // 宽屏默认收起 = 常驻图标列（进页即见）
+// v-model 语义 = 抽屉「在位可见」：宽屏 permanent 恒 true（实测 Vuetify 3.12.6，
+// permanent + modelValue=false 会给抽屉根挂 inert 并 translateX(-宽) 推出屏外 →
+// 收起态图标列将既不可见也不可点，违背 REQ-010「全部可点达」）；
+// 竖屏 temporary 维持改版前的「默认关闭」。收起/展开由 rail 切换，模型与可见态不相反。
+const drawer = ref(isDesktop.value)
 
 function onResize() {
   isDesktop.value = window.innerWidth >= BREAKPOINT
@@ -286,16 +392,10 @@ onUnmounted(() => {
 // 点击菜单按钮切换侧边栏
 function toggleNav() {
   if (isDesktop.value) {
-    // 宽屏：如果当前折叠(rail=true)，切换为展开并显示；如果展开(rail=false)，切换为折叠
-    if (rail.value) {
-      // 折叠→展开：设为 permanent 显示
-      rail.value = false
-      drawer.value = true
-    } else {
-      // 展开→折叠：设为 temporary 隐藏
-      rail.value = true
-      drawer.value = false
-    }
+    // 宽屏：rail 图标列 ⇄ 240px 展开；permanent 抽屉始终在位可见 → v-model 同步为 true
+    // （收起/展开只由 rail 决定，模型不再与可见态相反）
+    rail.value = !rail.value
+    drawer.value = true
   } else {
     // 竖屏：切换临时抽屉
     drawer.value = !drawer.value
@@ -315,6 +415,14 @@ const currentRoute = computed(() => {
   if (path.startsWith('/statistics')) return '/statistics'
   if (path.startsWith('/settings')) return '/settings'
   return '/'
+})
+
+// 收起态图标列高亮判据（设计 §6.2）：复用 currentRoute 的前缀判，/add、/edit 同归账单；
+// currentRoute 本体不动 —— 竖屏底部导航高亮维持改版前现状（红线：不改底栏）。
+const railActive = computed(() => {
+  const path = route.path
+  if (path.startsWith('/add') || path.startsWith('/edit')) return '/records'
+  return currentRoute.value
 })
 
 const currentTitle = computed(() => route.meta?.title || 'Money App')
@@ -398,6 +506,33 @@ onMounted(() => {
 
 .sidebar-header {
   min-height: 64px;
+}
+
+/* --- M5 收起态图标列（REQ-010）---
+   宽度只由 Vuetify :rail-width="72" prop 决定：Vuetify 3.12.6 并未提供 rail 宽对应的
+   CSS 自定义属性（实测 lib/components/VNavigationDrawer/_variables.scss 无该变量），
+   禁止任何样式覆写路径（审查轮落定 ①）。此处只做单列排布与残留控制。 */
+.sidebar-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 8px;
+  overflow: visible;
+}
+
+.rail-btn {
+  flex-shrink: 0;
+}
+
+/* 收起/展开切换钮（REQ-011 同一 DOM 首位）：展开态靠左上，rail 态水平居中 */
+.sidebar-toggle {
+  margin: 8px 0 0 8px;
+}
+
+.sidebar-toggle--rail {
+  display: flex;
+  margin: 8px auto 0;
 }
 
 .nav-item {
