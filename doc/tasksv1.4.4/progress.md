@@ -13,8 +13,8 @@
 | M0 | 软删标签读链路收口（后端热修） | REQ-001/002 前提（D2） | `m0-soft-delete-readpath.md` | done | `55f8531` |
 | M1 | 标签批量治理 | REQ-001、REQ-002 | `m1-tag-batch-governance.md` | done | `50c67cf`（主 Agent 补 commit） |
 | M2 | 分类出身徽章 + 恢复默认连定制复原 | REQ-003、REQ-004、REQ-005 | `m2-category-source.md` | done | `87afda2`（E4 接力补全前端半区） |
-| M3 | 导入映射弹窗 | REQ-006、REQ-007 | `m3-import-dialog.md` | in_progress（2026-09-28 派发，M2 后接力） | — |
-| M4 | 关于页 + 版本单一真值源 | REQ-008、REQ-009 | `m4-about-page-version.md` | in_progress（2026-09-28 派发，M2 后接力） | — |
+| M3 | 导入映射弹窗 | REQ-006、REQ-007 | `m3-import-dialog.md` | done | `f60ddf3`（主 Agent 补 commit，E6） |
+| M4 | 关于页 + 版本单一真值源 | REQ-008、REQ-009 | `m4-about-page-version.md` | done | `2047043` |
 | M5 | 横屏侧边栏图标列 | REQ-010、REQ-011、REQ-012 | `m5-sidebar-rail.md` | done | `a3e278f` |
 
 ## 开发顺序（设计 §0.1 依赖）
@@ -66,7 +66,7 @@
 3. 批量写库**单事务原子提交**（与 reorder 同口径）；`user_id IS NULL` 全局预设/标签行不被写脏的红线维持（例外仅 M2 §3.4 步骤 4 的合法复位）。
 4. 质量门禁六命令全绿；mypy 基线零新增口径；`frontend/dist` 不随模块提交、终验统一重建单独提交。
 5. §0.6 全局 Non-Goals 即禁扩清单：不做标签映射自定义名称；多选不持久化不跨页；关于页无网址/部署方式/外链；不改竖屏抽屉与底栏、不动顶栏右侧深色钮、不改 FAB；不改 `is_preset` 既有语义；不做历史回溯补录与撤销通道；SQL 导出不加 `deleted_at` 过滤；`frontend/package.json` 的 `0.0.0` 不改；不重构 AppDialog 壳；不引入 v-stepper/新依赖。
-6. 既有测试零删除、零放宽——唯一允许的既有断言改写：M2 徽章用例改 `source` 口径、M5 AppLayout 收起/展开断言更新（设计点名）。
+6. 既有测试零删除、零放宽——唯一允许的既有断言改写：M2 徽章用例改 `source` 口径、M5 AppLayout 收起/展开断言更新（设计点名）。**执行期裁定（2026-09-28，主 Agent）**：另认可第三处=M4 对 `SettingsSubPages.test.js` 的 4 处穷尽式结构计数机械同步（设计明令新增「关于」入口卡的必然后果，纯 +1、逐项同锁、非放宽；详见 M4 执行记录）。
 7. 组件/函数不重命名（`CsvMappingDialog.vue` 等）；`CategoryMappingItem.type` 空转字段不删。
 8. 本批除 M2 外零 schema 变更；M2 迁移脚本不进启动自动执行路径（独立一次性，沿 dormant 范式）。
 9. 标签批量操作、恢复默认均**不写数据回溯**；不回补历史回溯记录。
@@ -95,7 +95,7 @@
 - [x] 开工登记：复测六命令基线并写入下方「基线」节（2026-09-28 实测：pytest 665 / vitest 411 / mypy 85 / ruff clean / eslint 0e+2w / dist gzip 538,444 B）
 - [ ] `pytest tests/ -q` 全绿、0 skipped
 - [ ] `npx vitest run` 全绿
-- [ ] mypy = 开工基线零新增；`ruff check` All checks passed
+- [ ] mypy = 开工基线零新增；`ruff check` All checks passed（口径=基线登记的 `ruff check app tests`；`ruff check .` 另命中 legacy `migrate_to_v1.4.py` 两条 E501，属 v1.4 时代已入库文件、本批零改动，不在门禁范围——2026-09-28 终验期核实登记）
 - [ ] eslint 基线零新增；`npm run build` 成功 + dist 重建单独提交（gzip 增量对比开工基准，可接受性留人工裁定）
 - [ ] `backend/money.db` SHA256 收档 = 开工登记逐字一致
 - [ ] 跨模块闭环点必查：① M0→M1 软删口径联动用例在场；② M2/M3 序尾记用例表**逐字同源** grep 比对；③ M2→M4 main.py 两笔改动共存无回退；④ M2→M3 `import_service.py` `source=0` 三处在位且 M3 未回退；⑤ `SettingsSubPages.test.js` 各模块 describe 块互不触碰；⑥ 全仓版本字面量收敛（后端只剩 constants.py）；⑦ M5 rail-width 走 prop 非 CSS 覆写（grep `--v-navigation-drawer-rail-width` 零命中）；⑧ ui-design 审查轮（2026-09-28）补口径三处在位：M3 `mapping-body tabindex="0"`、M5 rail 钮 `color` 三元式 + 主题/登出恒 `on-surface-variant`、M1 勾选图标 `mdi-checkbox-blank-circle`/`mdi-checkbox-marked`（grep 旧字面量 `mdi-checkbox-blank-circle-outline`/`mdi-check-circle` 在标签页零命中）
@@ -122,10 +122,10 @@
 | M0 | 17（Prompt §二 记 14，任务文件实数 17，以文件为准） | 17 | 100% |
 | M1 | 35 | 35 | 100% |
 | M2 | 51 | 50（§9.5 现场库迁移窗口留人工） | 98% |
-| M3 | 27 | 0 | 0% |
-| M4 | 27 | 0 | 0% |
+| M3 | 32（Prompt 登记 27，任务文件实数 32，以文件为准） | 31（§7.5 真机项留人工=清单①） | 97% |
+| M4 | 27 | 25（§5.5 归主 Agent 终验、§5.6 真机项留人工=清单③） | 93% |
 | M5 | 28 | 27（§5.4 真机项留人工） | 96% |
-| **合计** | **195**（192 登记值 + M0 实数差 +3） | 129 | 66% |
+| **合计** | **200**（195 登记值 + M3 实数差 +5） | 185 | 93% |
 
 ## 模块执行记录
 
@@ -177,17 +177,39 @@
 - manual_items（见待人工清单④ + 发布备忘）：现场库迁移窗口（备份→停服→**先于新版**执行→起新版）；REQ-003/004/005 真机观感（拖拽/改名/换图标后徽章不丢、删副本重建同名无徽章、恢复默认后定制回原状账单仍挂该分类、自建删除账单归「其他」、总数不变）；已知边界「v1.4.2 前同名删除重建历史自建行回填 `source=1`」随条目公告。
 - fixed_rounds: 1（vitest 8.2.4b 口径）；后端 :503 修复在前手会话内完成。9.5（迁移窗口说明）属主 Agent 发布备忘登记项，已勾入本处发布备忘，任务文件该项按红线留人工不代勾。
 
+### M4 关于页 + 版本单一真值源（done，`2047043`，2026-09-28）
+
+- 提交 pathspec 11 文件 +595/−13：constants.py（新）/ main.py / routers/version.py（新）/ tests/test_version.py（新）/ m4 任务文件 / api/version.js（新）/ SettingsAboutPage.test.js（新）/ SettingsAboutPage.vue（新）/ SettingsPage.vue / SettingsSubPages.test.js / router/index.js；无 dist、无 -A/-f，主 Agent `git show --stat` 复核通过。
+- 主 Agent 复跑：pytest **727/727**、mypy **83 errors/14 files**（零新增）、`ruff check app tests` All checks passed、vitest **458/458**（含 M3 在途 8 条）、eslint 0e/2w。`backend/money.db` SHA256 逐字一致。
+- 版本收敛实测：`grep '"1.1.0"|"1.0.0"' backend/app backend/tests frontend/src` **零命中**；全仓版本字面量只剩 `constants.py:13 APP_VERSION="1.4.4"`（其余 v1.4.4 命中均为注释/文档性字样）；AboutPage/AppLayout 零硬编码版本，页面经 `getAppVersion()` 消费 `/api/version`。
+- main.py 四个单行动作逐 diff 复核：① `from app.constants import APP_VERSION`(:13)；② `routers` import 块 +`version`(:29)；③ `version="1.1.0"`→`version=APP_VERSION`(:81)；④ root 兜底删 `"version": "1.0.0"` 键(:147 起，含去向注释)。**M2 的 `app.presets` import(:17) 与 `description="个人记账程序 API V1.1"` 均原样在场**（闭环③预核过）。
+- **认可的偏离（红线 6 第三处既有断言改写，主 Agent 裁定）**：M4 触碰禁触清单文件 `SettingsSubPages.test.js`，机械同步 4 处结构计数（入口 4→5、`.entry-avatar` 7→8、摘要 v-card 5→6、字阶 title 5→6）。裁定=**接受**：设计明令新增「关于」入口卡（REQ-008/§5.4）必然使穷尽式计数断言失效；逐 hunk 复核为纯计数 +1 且新入口同列钉死（逐项穷尽、非放宽），全部带【v1.4.4 M4 计数改写】注记，零删除、零放宽、未触碰 M1/M2 describe 块。设计两可处（T2 独立测试文件）已按任务审查轮 T2 落 `SettingsAboutPage.test.js`。**登记红线 6 修订见其行内注**。另两条小偏离认可：测试路径按仓库实际（`pages/` 非 `__tests__/`，沿 M1 先例文档笔误）；`getAppVersion()` 返回解包后的版本字符串（消费方直接可用，无包装对象泄漏）。
+- manual_items：§5.6 真机项不勾选、原文入待人工清单③（关于页深浅两主题截图；设置页进出返回路径通畅）。§5.5 收尾顺带项（README 版本政策一句）由主 Agent 终验承接（终验清单已含该句，M4 内未改 README 合规）。
+- fixed_rounds: 0（子 Agent 报告一轮转绿）。
+
+### M3 导入映射弹窗（done，`f60ddf3` 主 Agent 补 commit，E6，2026-09-28）
+
+- **E6 实况**：子 Agent 六文件 `git add` 首轮成功、`git commit` 两次被权限层拦（progress.md 归主 Agent 登记的口径）；任务文件后两处行号/偏离修订未暂存——主 Agent 复核后补 add，`git diff --cached --name-only` 恰 6 文件（schemas/import_.py、import_service.py、test_csv_import_export.py、m3 任务文件、CsvMappingDialog.test.js（新）、CsvMappingDialog.vue）后代提交。`.claude/skills/ui-design.md` 在途改动未并入。
+- 主 Agent 实地核验：M2 三处 `source=0` 未回退（行号漂移 +35 后现 **:390/:1331/:1677**，逐点注释在场）；`<div class="mapping-body" tabindex="0">`(CsvMappingDialog.vue:24) 在场且容器类名唯一命中；禁触清单（main.py/constants.py/version 链路/SettingsSubPages.test.js/AppLayout/tags/迁移脚本/money.db/dist）复核零改动。
+- `_touched` 出网锁死证据（子 Agent notes + 全量套件复跑）：前端断言本地态 `{action:'create', name:'外卖', _touched:false}` 而出网载荷 `toEqual({action:'create'})`；未编辑态与旧版逐字节一致由既有红线（SettingsSubPages 10.5、M4-8 SQL 路径 `Object.keys` 两字段）继续绿双向锁死；`buildCategoryMappingPayload` 内 `_touched` 经 `JSON.stringify` 断言零出网。
+- memo 口径实测：键=文件内原分类名（`list(memo)==["外卖"]`）、落库名=自定义名（「买菜」）、`categories` 只多一行；`_resolve_or_create_category` 本体零改动；`fallback_category` 调用点保持 5 参 → SQL 导入路径零 hunk（boot3 旧载荷逐字回归锚全绿）。
+- **认可的偏离（4 条，均不违红线）**：① 名称输入用原生 `<input class="create-name-input">` 而非 `v-text-field`——`SettingsSubPages.test.js` M4-9 以 `?raw` 把模板 Vuetify 标签集合封闭为七件套，引入新组件会改红既有绿灯（零放宽红线优先）；② 实时校验走 `computed` 且新建名报错折进既有 `missingRequiredCount`，保住被逐字断言的 `:disabled="unmappedCount > 0 || missingRequiredCount > 0"` 字面量；③ 缺项清单门槛 `missingRequiredCount > 0`→`missingRequired.length > 0`（否则重名报错时渲染空清单；该字面量不在任何既有断言中）；④ `.mapping-body` 加 `overflow-x: hidden`——单轴 auto 的姊妹轴按 CSS 规范计算为 auto，17 列样例行会在中段撑出设计 §4.1 明令禁止的横向滚动条。
+- 口径差上报：Prompt/E4 记 M3 勾选数 27，任务文件实数 32（31 勾 + §7.5 真机留人工），以文件为准登记（同 M0 先例）。
+- manual_items：§7.5 原文入待人工清单①（1280×720 17 列全量：确认按钮不出屏、映射行全部可滚动触达；短文件无多余留白；SQL 弹窗复用不回归）。
+- fixed_rounds: 1（仅测试写法两处，被测代码零改动转绿）。
+
 ## 阻塞清单
 
 - **（已解除）M2 触顶中断 → E4 接力成功**：首手子 Agent 达 150 轮上限截断于「五步事务」写作中，0/51 勾选；后端半成品已在场。主 Agent 按 E4 派收尾接力 Agent：审计前手（后端半区完整保留续用）→ 补全前端半区（徽章/删除钮改读 source、D6 弹窗 N/M、computeRestoreCounts 纯判据、既有徽章用例改写）→ 全门禁绿 → 50/51 勾选 → pathspec 提交 `87afda2`（13 文件 +2042/−92）。核验见下「M2 执行记录」。**未触发 §五 第 3 条回滚**（接力在 3 轮预算内完成）。M3、M4 已随之并行派发（`import_service.py` / `main.py` 此时无对向写者）。
-- 当前无活跃阻塞。M3、M4 在途。
+- **（已解除）M3 提交被拦 → E6 主 Agent 代提交 `f60ddf3`**（见 M3 执行记录）。
+- 当前无活跃阻塞。**六模块全部 done**，进入 §6.2 终验。
 
 ## 待人工抽检清单（子 Agent 不勾选，执行时逐条抄录原文）
 
 设计附录已点名四项（执行期各模块真机项再抄入此处）：
-- [ ] ① 真机 1280×720 Cashew 17 列导入弹窗观感（REQ-006，M3 §7.5）
+- [ ] ① 真机 1280×720 Cashew 17 列导入弹窗观感（REQ-006，M3 §7.5；M3 原文：确认按钮不出屏、映射行全部可滚动触达；短文件无多余留白；SQL 弹窗复用不回归）
 - [ ] ② 横屏收起/展开图标列真机点验与截图（REQ-010/011，M5 §5.4；含 rail 计算宽 72px、无文字残留/无横向滚动条、悬停提示真实出现三项）
-- [ ] ③ 关于页深浅主题目检（REQ-009，M4 §5.6）
+- [ ] ③ 关于页深浅主题目检（REQ-009，M4 §5.6；M4 原文：关于页深浅两主题截图；设置页进出返回路径通畅）
 - [ ] ④ 现场库发布窗口：`migrate_to_v1.4.4_source.py` 先备份→停服→执行→起新版（M2 迁移，沿发布备忘流程）
 
 M2 执行期补抄（子 Agent manual_items 原文）：
