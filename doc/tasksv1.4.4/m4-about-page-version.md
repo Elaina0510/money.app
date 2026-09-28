@@ -57,7 +57,8 @@
 - [x] 5.2 mypy 基线零新增；ruff clean；eslint 基线零新增
 - [x] 5.3 红线自查：`frontend/package.json` 未动；main.py 改动仅 §1.3/1.4 所列单行级；全仓 grep `"1.1.0"|"1.0.0"`（后端范围）确认版本字面量只剩 constants.py 一处真值 + 无关语义命中（notes 抄录命中清单）
 - [x] 5.4 pathspec 精确提交：§「涉及文件」全清单 + 本任务文件；不 push
-- [ ] 5.5 **收尾顺带项登记进 progress.md 终验**（不在本模块改 README）：README 版本政策处加一句「版本号唯一定义于 `backend/app/constants.py`」
+- [x] 5.5 **收尾顺带项登记进 progress.md 终验**（不在本模块改 README）：README 版本政策处加一句「版本号唯一定义于 `backend/app/constants.py`」
+  > 终验收口（2026-09-28，主 Agent）：已随 `577484e` 落地于 README「Version History」表上方一句（含 `GET /api/version` 口径），本模块未改 README 合规。
 - [ ] 5.6 真机项不勾选、抄入人工清单：关于页深浅两主题截图；设置页进出返回路径通畅
 
 **验收标准（REQ-008/009）**：「关于」页版本与后端真值逐字一致、改常量即全站生效前端零改动；正文无部署命令无外链；深浅主题渲染正常。

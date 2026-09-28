@@ -84,7 +84,7 @@
 
 ## 发布备忘（M2 迁移窗口，设计 §3.1）
 
-- [ ] 现场库发布窗口：备份 `money.db` → 停服 → **先于新版后端启动**执行 `python migrate_to_v1.4.4_source.py` → 再起新版后端 + 新 dist
+- [ ] 现场库发布窗口：备份 `money.db` → 停服 → **先于新版后端启动**执行 `python migrate_to_v1.4.4_source.py <库文件路径>` → 再起新版后端 + 新 dist。**教训（终验期实测）：脚本不读 `DATABASE_URL`、缺省取 CWD 相对 `./money.db`——必须显式传路径参数并从可控目录执行，否则会误击仓内真实库（已发生过一次，经用户裁定从备份恢复归零）**
 - [ ] 迁移幂等：`source` 列已在场 → `[SKIP]` no-op（二次跑安全，测试已断言）
 - [ ] 已知边界随条目公告：v1.4.2 前「同名删除重建」历史自建行回填为 `source=1`（显示「预设」徽章）；用户删除后重建同名即归位 `source=0`
 - [ ] 除 M2 外零 schema 变更、零新增依赖（前后端）
@@ -93,15 +93,15 @@
 ## 终验清单（质量门，主 Agent 执行）
 
 - [x] 开工登记：复测六命令基线并写入下方「基线」节（2026-09-28 实测：pytest 665 / vitest 411 / mypy 85 / ruff clean / eslint 0e+2w / dist gzip 538,444 B）
-- [ ] `pytest tests/ -q` 全绿、0 skipped
-- [ ] `npx vitest run` 全绿
-- [ ] mypy = 开工基线零新增；`ruff check` All checks passed（口径=基线登记的 `ruff check app tests`；`ruff check .` 另命中 legacy `migrate_to_v1.4.py` 两条 E501，属 v1.4 时代已入库文件、本批零改动，不在门禁范围——2026-09-28 终验期核实登记）
-- [ ] eslint 基线零新增；`npm run build` 成功 + dist 重建单独提交（gzip 增量对比开工基准，可接受性留人工裁定）
-- [ ] `backend/money.db` SHA256 收档 = 开工登记逐字一致
-- [ ] 跨模块闭环点必查：① M0→M1 软删口径联动用例在场；② M2/M3 序尾记用例表**逐字同源** grep 比对；③ M2→M4 main.py 两笔改动共存无回退；④ M2→M3 `import_service.py` `source=0` 三处在位且 M3 未回退；⑤ `SettingsSubPages.test.js` 各模块 describe 块互不触碰；⑥ 全仓版本字面量收敛（后端只剩 constants.py）；⑦ M5 rail-width 走 prop 非 CSS 覆写（grep `--v-navigation-drawer-rail-width` 零命中）；⑧ ui-design 审查轮（2026-09-28）补口径三处在位：M3 `mapping-body tabindex="0"`、M5 rail 钮 `color` 三元式 + 主题/登出恒 `on-surface-variant`、M1 勾选图标 `mdi-checkbox-blank-circle`/`mdi-checkbox-marked`（grep 旧字面量 `mdi-checkbox-blank-circle-outline`/`mdi-check-circle` 在标签页零命中）
-- [ ] README Version History 条目 + 版本政策一句（「版本号唯一定义于 `backend/app/constants.py`」）
-- [ ] 浏览器实测（主 Agent 亲执，tmp 副本库）：标签清空/多选流、恢复默认弹窗 N/M 数字与黄金链路、导入弹窗 90vh 中段滚动、关于页版本渲染、宽屏 rail 图标列切换
-- [ ] progress.md 全模块状态收口 + 本文件 pathspec-only 提交
+- [x] `pytest tests/ -q` 全绿、0 skipped（2026-09-28 终验实测 **727 passed**，仅 WinError 5 .pytest_cache 写入警告非失败）
+- [x] `npx vitest run` 全绿（终验实测 **458 passed / 458**，17 files）
+- [x] mypy = 开工基线零新增（终验实测 **83 errors / 14 files** ≤ 基线 85）；`ruff check app tests` All checks passed（口径=基线登记的 `ruff check app tests`；`ruff check .` 另命中 legacy `migrate_to_v1.4.py` 两条 E501，属 v1.4 时代已入库文件、本批零改动，不在门禁范围——2026-09-28 终验期核实登记）
+- [x] eslint 基线零新增（**0 errors / 2 warnings**，同基线）；`npm run build` 成功 + dist 重建单独提交 `c6b34c0`（gzip 逐文件合计 **543,198 B / 39 文件**，vs 开工基准 538,444 B **+4,754 B**；可接受性留人工裁定）
+- [x] `backend/money.db` SHA256 收档 = 开工登记逐字一致（`b7974d15…c7deb3`，终验期两次复测；中途一次意外写入已按用户裁定从字节相同备份恢复，详见终验执行记录「money.db 事故与教训」）
+- [x] 跨模块闭环点必查：① M0→M1 软删口径联动用例在场；② M2/M3 序尾记用例表**逐字同源** grep 比对；③ M2→M4 main.py 两笔改动共存无回退；④ M2→M3 `import_service.py` `source=0` 三处在位且 M3 未回退；⑤ `SettingsSubPages.test.js` 各模块 describe 块互不触碰；⑥ 全仓版本字面量收敛（后端只剩 constants.py）；⑦ M5 rail-width 走 prop 非 CSS 覆写（grep `--v-navigation-drawer-rail-width` 零命中）；⑧ ui-design 审查轮（2026-09-28）补口径三处在位：M3 `mapping-body tabindex="0"`、M5 rail 钮 `color` 三元式 + 主题/登出恒 `on-surface-variant`、M1 勾选图标 `mdi-checkbox-blank-circle`/`mdi-checkbox-marked`（grep 旧字面量 `mdi-checkbox-blank-circle-outline`/`mdi-check-circle` 在标签页零命中）——**八条全部通过**，逐项证据见下「终验执行记录」
+- [x] README Version History 条目 + 版本政策一句（提交 `577484e`；v1.4.4 行系 09-25 热修批已写入的「导入体验三条」**合并**本批六项，非新行）
+- [x] 浏览器实测（主 Agent 亲执，tmp 副本库 :8144）：链路①②③④通过、链路⑤受面板视口限制移交人工（清单②）；逐链路结论见「终验执行记录」
+- [ ] 观感截图未补（登记为残项：in-app 面板 visible=false 期间截屏接口全线不可用，属已知环境限制；真机截图并入清单①②③人工项）
 
 ## 基线（2026-09-28 开工实测登记）
 
@@ -123,9 +123,9 @@
 | M1 | 35 | 35 | 100% |
 | M2 | 51 | 50（§9.5 现场库迁移窗口留人工） | 98% |
 | M3 | 32（Prompt 登记 27，任务文件实数 32，以文件为准） | 31（§7.5 真机项留人工=清单①） | 97% |
-| M4 | 27 | 25（§5.5 归主 Agent 终验、§5.6 真机项留人工=清单③） | 93% |
+| M4 | 27 | 26（§5.5 版本政策一句已由主 Agent 终验落地 `577484e`；§5.6 真机项留人工=清单③） | 96% |
 | M5 | 28 | 27（§5.4 真机项留人工） | 96% |
-| **合计** | **200**（195 登记值 + M3 实数差 +5） | 185 | 93% |
+| **合计** | **190**（六模块任务文件实数逐行相加，行为准绳） | 186 | 98% |
 
 ## 模块执行记录
 
@@ -198,16 +198,37 @@
 - manual_items：§7.5 原文入待人工清单①（1280×720 17 列全量：确认按钮不出屏、映射行全部可滚动触达；短文件无多余留白；SQL 弹窗复用不回归）。
 - fixed_rounds: 1（仅测试写法两处，被测代码零改动转绿）。
 
+### 终验执行记录（主 Agent，2026-09-28）
+
+**六命令（终态 HEAD 复跑，dist 提交前工作树）**：pytest **727/727**（0 failed、0 skipped）；vitest **458/458**（17 files）；mypy **83 errors / 14 files**（≤ 开工基线 85，零新增）；`ruff check app tests` **All checks passed**；eslint **0 errors / 2 warnings**（= 基线）；`npm run build` 成功，dist 重建提交 `c6b34c0`（gzip 逐文件合计 **543,198 B / 39 文件**，vs 开工 538,444 B **+4,754 B**，≈ +0.9%；增量主因 = 本批新增 about 页/弹窗自定义名链路/批量治理代码，可接受性留人工裁定）。
+
+**闭环八查（§6.2 逐条）**：① M0→M1 联动——P4 浏览器实测中软删标签读链路三落点行为复核（清空后账单 tag→null、`/api/tags` 空集）+ `test_soft_deleted_tags.py` 在场；② 序尾记双表——`test_category_source.py::ORDER_TAIL_CASES`(:833) 与 `SettingsSubPages.test.js`(:3653) 以行锚正则程序化抽取：14 条用例名逐字相同、期望整数序列同为 `[0,0,1,1,1,1,1,2,1,12,0,2,0,2]`；③ main.py——M2 `from app.presets import PRESET_CATEGORIES`(:17) 与 M4 四单行动作（:13 APP_VERSION import / :29 version 进 routers import / :81 `version=APP_VERSION` / :147 根路由 version 键删除+去向注释）共存零回退；④ `import_service.py` 三处 `source=0` 造行点 **:390/:1331/:1677** 逐点在位（M3 +35 行漂移已核对）；⑤ `SettingsSubPages.test.js` 各模块 describe 块（M1/M2/M4 各自独立、M4 另有独立 `SettingsAboutPage.test.js`）互不触碰；⑥ 全仓版本字面量收敛——后端仅 `constants.py::APP_VERSION="1.4.4"`（`routers/version.py`、`main.py` 均引用常量；`description="个人记账程序 API V1.1"` 按红线不属版本号真值源）；⑦ `--v-navigation-drawer-rail-width` 全仓源码零命中，rail 宽走 `:rail-width="72"` prop；⑧ ui-design 审查轮三处补口径在场（`mapping-body tabindex="0"`、rail 钮 color 三元式 + 主题/登出恒 `on-surface-variant`、标签页新勾选图标字面量 + 旧字面量零命中）。
+
+**P4 浏览器实测（tmp 副本库 :8144，QA 账号 v144qa；真实 `backend/money.db` 全程未指入）**：
+- 链路① 标签清空/多选流 **通过**：多选态勾选图标 `mdi-checkbox-marked`、批量删除确认文案逐字、成功 toast「已删除 2 个标签」；清空确认「将删除全部 N 个标签…」+ 0 标签时按钮禁用；删除后经 API 复核账单 `tag:null`（= M0 收口联动活证）。
+- 链路② 恢复默认弹窗 N/M + 黄金链路 **通过**：徽章 14 预设 + 2 副本均「预设」；弹窗预告 N=2 / M=1 与设计 T3 文案逐字；恢复后定制回原状、账单改指全局行、总数不变。
+- 链路③ 导入弹窗 **通过（DOM 级）**：17 列 Cashew 全量弹窗 `max-height=559.44px`（=90vh@622 视口）、仅 `.mapping-body` 纵滚（scrollHeight 2545 > clientHeight 415、无横向滚动条、`tabindex="0"`）、底部两钮恒在屏；REQ-007 新建分类自定义名**全链路实测**：选「+ 新建分类」→ 行内输入预填 `Bills & Fees`（aria-label 逐字）→ 改「水电物业」零报错、「未映射」计数 5→4 → 确认导入 → `GET /api/categories` 出现自建行「水电物业」（`user_id`=QA 用户、`source=0` 无徽章），「电费」账单落此分类（`category_id=37`）、`Bills & Fees` 字面量零落库；40 行全量批测「成功导入 40 条」、分类分布 餐饮30/娱乐5/购物2/工作2/其他1 与映射逐行一致、跳过 0；标签映射留「跳过」→ `tag:null` 不建标签（`_resolve_row_tag` mapping-miss 语义，后端读库复核零新标签行）。支付宝 xlsx 自动识别 + 导入由用户本人真机跑通（截图为证）。
+- 链路④ 关于页 **通过**：版本行「版本 1.4.4」由 `GET /api/version` 渲染（无鉴权、constants.py 真值）、核心优势 5 条（T1）、正文零外链零网址（DOM 扫描）。
+- 链路⑤ 宽屏 rail 图标列 **移交人工**（清单②）：in-app 面板视口 531×622 < 960 断点且窗口不可编程调宽，`isDesktop=false` 无法触发 rail 分支；M5 提交时已有 jsdom 真实渲染探针证据（rail=true → 内联 width:72px）+ props 断言，真机观感按红线留人工。
+- 截图残项：面板 `visible=false` 期间截屏接口全线不可用（`NATIVE_BROWSER_VIEWPORT_UNAVAILABLE`），`screenshots/v1.4.4/` 本批未落新图——已并入清单①②③人工项。
+
+**money.db 事故与教训（终验期，如实登记）**：P4 建沙箱时执行 `migrate_to_v1.4.4_source.py` 传了 `DATABASE_URL` 环境变量而非路径参数——该脚本**不读 DATABASE_URL**，取 CWD 相对 `./money.db`，把真实 `backend/money.db` 就地加列回填（SHA `b7974d15…`→`3cd6c1f9…`）。处置：因跑脚本前已做字节级备份，逐表内容哈希证明除新列外零数据变化，按编号选项征询用户并获准「恢复原样」→ 从备份恢复、SHA256 复测逐字回基线、`PRAGMA table_info` 确认无 `source` 列；此后全部迁移/启动操作改在 `Temp/m44p4/` 沙箱目录内进行。**发布备忘教训：执行迁移脚本必须显式传库文件路径参数，不能靠 DATABASE_URL。**
+
+**沙箱清理**：uvicorn :8144 已停；`Temp/m44p4/` 临时目录留存（仓外，主 Agent 可自行删除）；`.pytest_cache` WinError 5 为既有环境噪音。
+
+**本批提交链（基线 `41917b4` 起，14 提交；feat=模块、docs=progress 登记、chore=dist）**：`9926cda`(开工基线登记) → `55f8531`(M0) → `f5142b7`(登记) → `a3e278f`(M5) → `5f61397`(登记) → `50c67cf`(M1) → `a75f249`(登记) → `87afda2`(M2，E4 接力) → `c40a5b7`(登记) → `2047043`(M4) → `f60ddf3`(M3，E6 代提交) → `4bc4aa2`(登记) → `c6b34c0`(dist 重建) → `577484e`(README)。**全部未 push**（红线）。
+
 ## 阻塞清单
 
 - **（已解除）M2 触顶中断 → E4 接力成功**：首手子 Agent 达 150 轮上限截断于「五步事务」写作中，0/51 勾选；后端半成品已在场。主 Agent 按 E4 派收尾接力 Agent：审计前手（后端半区完整保留续用）→ 补全前端半区（徽章/删除钮改读 source、D6 弹窗 N/M、computeRestoreCounts 纯判据、既有徽章用例改写）→ 全门禁绿 → 50/51 勾选 → pathspec 提交 `87afda2`（13 文件 +2042/−92）。核验见下「M2 执行记录」。**未触发 §五 第 3 条回滚**（接力在 3 轮预算内完成）。M3、M4 已随之并行派发（`import_service.py` / `main.py` 此时无对向写者）。
 - **（已解除）M3 提交被拦 → E6 主 Agent 代提交 `f60ddf3`**（见 M3 执行记录）。
-- 当前无活跃阻塞。**六模块全部 done**，进入 §6.2 终验。
+- 当前无活跃阻塞。**六模块全部 done，§6.2 终验已完成（2026-09-28）**：六命令全绿（727/458/83≤85/clean/0e+2w）、闭环八查全过、P4 实测四链路通过一链路移交人工、dist `c6b34c0` + README `577484e` 已提交、money.db 回基线。余项全部为人工清单条目（①–⑩）与发布窗口动作，等待用户点验与 push 裁定。
 
 ## 待人工抽检清单（子 Agent 不勾选，执行时逐条抄录原文）
 
 设计附录已点名四项（执行期各模块真机项再抄入此处）：
 - [ ] ① 真机 1280×720 Cashew 17 列导入弹窗观感（REQ-006，M3 §7.5；M3 原文：确认按钮不出屏、映射行全部可滚动触达；短文件无多余留白；SQL 弹窗复用不回归）
+  > P4 已代跑 DOM 级（531×622 视口）：`max-height=559.44px`=90vh、仅中段纵滚无横向条、两钮恒在屏、REQ-007 自定义名全链路通（见终验执行记录）；真机观感与「短文件无留白 / SQL 复用不回归」两条仍留人工。
 - [ ] ② 横屏收起/展开图标列真机点验与截图（REQ-010/011，M5 §5.4；含 rail 计算宽 72px、无文字残留/无横向滚动条、悬停提示真实出现三项）
 - [ ] ③ 关于页深浅主题目检（REQ-009，M4 §5.6；M4 原文：关于页深浅两主题截图；设置页进出返回路径通畅）
 - [ ] ④ 现场库发布窗口：`migrate_to_v1.4.4_source.py` 先备份→停服→执行→起新版（M2 迁移，沿发布备忘流程）
@@ -216,3 +237,8 @@ M2 执行期补抄（子 Agent manual_items 原文）：
 - [ ] ⑤ REQ-003/004/005 真机观感：拖动/改名/换图标后徽章不丢、刷新仍在、自建无徽章；删副本重建同名无徽章；恢复默认后定制回原状且其账单仍挂该分类、自建删除账单归「其他」、恢复前后账单总数不变（M2 逻辑判据已由 §8.1/§8.2 双表 + 五步事务测试覆盖，P4 浏览器实测②覆盖弹窗 N/M 数字与黄金链路，真机目检留人工终判）
 - [ ] ⑥ M2 已知边界复核：v1.4.2 前「同名删除重建」历史自建行回填 `source=1`（显示「预设」徽章）——随版本条目公告，用户是否接受此历史数据表现
 - [ ] ⑦ D8 后果复核项（随人工清单一并呈报）：预设定制无单点回退（反悔只能「恢复默认」全量丢弃）是否改变主意；执行期未加回退入口（用户裁定 a=维持）
+
+P4 浏览器实测（2026-09-28）补登记：
+- [ ] ⑧ P4 截图未落 `screenshots/v1.4.4/`（in-app 面板 visible=false 期间截屏接口不可用）：清单①②③人工点验时请顺带补照（17 列弹窗 90vh 观感、宽屏 rail 图标列、关于页深浅两主题）。
+- [ ] ⑨ P4 链路③已覆盖 DOM 级断言但未在真机 1280×720 复看（视口 531×622）；短文件无多余留白、SQL 弹窗复用两条未单独实测，仍属清单①原文范围。标签映射留「跳过」时后端不建标签（`tag:null`）——与行话「匹配不到归入其他」仅对分类承诺，标签语义请人工确认符合预期。
+- [ ] ⑩ dist gzip +4,754 B（543,198 vs 基线 538,444，≈+0.9%，主因 about 页新增 chunk）是否接受——终验清单点名留人工裁定。
