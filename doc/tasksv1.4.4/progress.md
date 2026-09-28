@@ -15,7 +15,7 @@
 | M2 | 分类出身徽章 + 恢复默认连定制复原 | REQ-003、REQ-004、REQ-005 | `m2-category-source.md` | pending | — |
 | M3 | 导入映射弹窗 | REQ-006、REQ-007 | `m3-import-dialog.md` | pending | — |
 | M4 | 关于页 + 版本单一真值源 | REQ-008、REQ-009 | `m4-about-page-version.md` | pending | — |
-| M5 | 横屏侧边栏图标列 | REQ-010、REQ-011、REQ-012 | `m5-sidebar-rail.md` | pending | — |
+| M5 | 横屏侧边栏图标列 | REQ-010、REQ-011、REQ-012 | `m5-sidebar-rail.md` | done | `a3e278f` |
 
 ## 开发顺序（设计 §0.1 依赖）
 
@@ -124,8 +124,8 @@
 | M2 | 51 | 0 | 0% |
 | M3 | 27 | 0 | 0% |
 | M4 | 27 | 0 | 0% |
-| M5 | 28 | 0 | 0% |
-| **合计** | **195**（192 登记值 + M0 实数差 +3） | 17 | 9% |
+| M5 | 28 | 27（§5.4 真机项留人工） | 96% |
+| **合计** | **195**（192 登记值 + M0 实数差 +3） | 44 | 23% |
 
 ## 模块执行记录
 
@@ -141,6 +141,17 @@
 - 口径差上报：Prompt §二 记 M0 勾选数 14，任务文件实为 17 项，以文件实数登记。
 - 交接 M1（已写入派单简报）：软删口径三落点行号 + 670 基线 + `55f8531`。
 - 遗留：子 Agent 隔离冒烟临时目录 `Temp\m0smoke` 未删（rm 被权限层拦，仓外无影响）；真树启动冒烟曾两度红灯，traceback 核实均为 M2 在途中间态（`no such column: categories.source` / `NameError: Sequence`），非 M0 引入，M2 落定后复跑即绿——E3 归属登记。
+
+### M5 横屏侧边栏图标列（done，`a3e278f`，2026-09-28）
+
+- 提交 pathspec：AppLayout.vue / AppLayout.test.js / m5 任务文件（首入库），共 3 文件；`AppLayout.wideScreenZoom.test.js` 零改动未入提交；无 dist（build 脏化后已 `git restore` 复原）、无 -A/-f，主 Agent `git show --stat` 复核通过。
+- 主 Agent 复跑：vitest **421/421**（基线 411 + 新增 10，15 files 含 wideScreenZoom 11 条零改动通过）、eslint **0 errors / 2 warnings**（基线同值）。build 子 Agent 跑成功（dist 复原），主 Agent 不重复跑、终验统一重建兜底。
+- 实地 grep 复核在场：`:rail-width="72"` prop（AppLayout.vue:10）；全仓源码 `--v-navigation-drawer-rail-width` **零命中**（红线 7）；rail 区块色绑定 4 处三元式（导航/设置）+ 2 处恒 `on-surface-variant`（主题 :96 / 登出 :113）；`mdi-menu` 全文件仅 1 处=侧栏切换钮本体（:26，两态同 DOM 位 `rail ? 'mdi-menu' : 'mdi-backup-restore'`），顶栏 `app-top-bar` 内汉堡块已删、右侧深色钮保留（:224–236 目视复核）；竖屏三处逐字正则钉死断言在场（M5-T4.8）。
+- prop 实测证据（子 Agent notes）：Vuetify 3.12.6 `VNavigationDrawer.js:46` 定义 `railWidth`（default 56）、:136 参与计算宽；jsdom 真实渲染探针输出 rail=true → 内联 `width: 72px`。测试环境全 stub 已核实，断言走 props 白名单 + attribute + `?raw` 区块切片正则，零真实类名/计算样式断言。
+- **认可的设计偏离（重要，设计 §6.1 字面不成立）**：设计/任务字面 `drawer.value = !rail.value` 实测会让 permanent 抽屉在 modelValue=false 时被写 `inert` + `translateX(-72px)`——收起态图标列不可见不可点，直接违背 REQ-010 验收。实现改为宽屏分支翻转 `rail` 后 `drawer.value = true`（「在位可见」语义），竖屏 `drawer = !drawer` 逐字未动。**属实现细节修正、不动 D9 裁定本体**，认可；`doc/detailed-designv1.4.4.md` §6.1 对应句待回改（该文档属未提交输入文档批，随人工复核处理）。
+- 其余偏离登记（均已在任务文件就地注明）：高亮判据新增 `railActive` 计算属性（`currentRoute` 本体不动，避免牵动竖屏底栏）；rail 钮 `size="48"` + `aria-label`（ui-design §0.8 触控目标/图标钮用途名）；抽屉 append 尾区加 `v-if="!(isDesktop && rail)"` 守卫满足「rail 块零 span 文本」；既有 stub 补 `v-tooltip`（纯增补）；唯一既有断言改写 = M1-T2b 顶栏钮数 2→1（红线 6 点名允许处）。
+- 真机观察线索（转人工清单②）：`global.scss:94` `.v-navigation-drawer { border-radius: 0 20px 20px 0 !important }` 会作用于 72px rail 列右边缘（该文件不在 M5 文件面未动）——人工点验时留意观感是否可接受。
+- fixed_rounds: 1（CSS 注释含被禁字面量 → 改写 + 测试侧 join('-') 构名）。
 
 ## 阻塞清单
 
