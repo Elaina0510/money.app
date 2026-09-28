@@ -12,9 +12,9 @@
 |------|------|------|----------|------|------|
 | M0 | 软删标签读链路收口（后端热修） | REQ-001/002 前提（D2） | `m0-soft-delete-readpath.md` | done | `55f8531` |
 | M1 | 标签批量治理 | REQ-001、REQ-002 | `m1-tag-batch-governance.md` | done | `50c67cf`（主 Agent 补 commit） |
-| M2 | 分类出身徽章 + 恢复默认连定制复原 | REQ-003、REQ-004、REQ-005 | `m2-category-source.md` | in_progress（首手 150 轮触顶，E4 收尾 Agent 接力中） | — |
-| M3 | 导入映射弹窗 | REQ-006、REQ-007 | `m3-import-dialog.md` | pending | — |
-| M4 | 关于页 + 版本单一真值源 | REQ-008、REQ-009 | `m4-about-page-version.md` | pending | — |
+| M2 | 分类出身徽章 + 恢复默认连定制复原 | REQ-003、REQ-004、REQ-005 | `m2-category-source.md` | done | `87afda2`（E4 接力补全前端半区） |
+| M3 | 导入映射弹窗 | REQ-006、REQ-007 | `m3-import-dialog.md` | in_progress（2026-09-28 派发，M2 后接力） | — |
+| M4 | 关于页 + 版本单一真值源 | REQ-008、REQ-009 | `m4-about-page-version.md` | in_progress（2026-09-28 派发，M2 后接力） | — |
 | M5 | 横屏侧边栏图标列 | REQ-010、REQ-011、REQ-012 | `m5-sidebar-rail.md` | done | `a3e278f` |
 
 ## 开发顺序（设计 §0.1 依赖）
@@ -121,11 +121,11 @@
 |------|---------|--------|------|
 | M0 | 17（Prompt §二 记 14，任务文件实数 17，以文件为准） | 17 | 100% |
 | M1 | 35 | 35 | 100% |
-| M2 | 51 | 0 | 0% |
+| M2 | 51 | 50（§9.5 现场库迁移窗口留人工） | 98% |
 | M3 | 27 | 0 | 0% |
 | M4 | 27 | 0 | 0% |
 | M5 | 28 | 27（§5.4 真机项留人工） | 96% |
-| **合计** | **195**（192 登记值 + M0 实数差 +3） | 79 | 41% |
+| **合计** | **195**（192 登记值 + M0 实数差 +3） | 129 | 66% |
 
 ## 模块执行记录
 
@@ -164,9 +164,23 @@
 - manual_items：无（该链路归 P4 实测①：清空流+多选批量删流含确认弹窗文案、账单标签标记消失）。
 - 既有测试零删除零放宽零改写。
 
+### M2 分类出身徽章 + 恢复默认连定制复原（done，`87afda2`，E4 接力补全，2026-09-28）
+
+- **接力性质**：首手 150 轮触顶截断于五步事务写作中（后端半区实质完成、0/51 勾选）；收尾 Agent 审计后**后端半区原样保留续用**、**补全前端半区**（前手零进度）+ 修一处潜在运行时缺陷。整模块一次 pathspec 提交 13 文件（models/schemas/category、category_service、routers/categories、main.py、import_service、presets.py 新、迁移脚本新、test_category_source.py 新 956 行、api/categories.js、SettingsCategoriesPage.vue、SettingsSubPages.test.js、m2 任务文件）。
+- 主 Agent 复跑：pytest **716/716**（其中 test_category_source 40）、mypy **83 errors/14 files**（≤ 开工基线 85 零新增；M2 唯一新增 `:503` 已由接力修掉）、ruff All checks passed、vitest **446/446**、eslint 0e/2w。`backend/money.db` SHA256 逐字一致（临时库迁移，真实库零触碰，`git diff backend/money.db` 空）。
+- 实地 grep 复核在场：`import_service.py` 三处 `source=0` 造行点 **:390/:1296/:1642**（§0.4-6，逐点注释钉死）；`delete_category` 对 `source==1` 抛 `PermissionError("预设分类不可删除")`→路由 403（D8，:389）；`@router.get("/presets")`(:38) 声明在 `/{category_id}`(:123) 之前；main.py `from app.presets import PRESET_CATEGORIES`(:16) 单行、函数级 import 指 `app.presets`（附带效应 `app.main.PRESET_CATEGORIES` 仍可解析→两个 v1.4.3 迁移测试零改动通过）。
+- **终验闭环第 2 条预核通过**：序尾记双表**逐字同源**——后端 `test_category_source.py::ORDER_TAIL_CASES`(:833) 与前端 `SettingsSubPages.test.js::ORDER_TAIL_CASES`(:3653) 十四行用例名与期望整数一一对应（空0/单调0/改名1/换图标1/相邻互换1/改名+换图标1/换图标+改序1/三行轮转2/首移末1/整表逆序12/其他置首0/家族过渡2/自建混入0/改名破坏2），期望值全为具体整数、无「或」字多解。
+- 五步单事务落地：分堆→CoW 副本按 name 合并回合法全局行（`is_preset==1 AND user_id IS NULL` 硬校验，否则转自建「宁删不错并」；账单改指、budget_categories 改指去重不休眠、tags 改指/NULL、删副本计 merged）→自建堆维持现状→预设复位（全局行唯一合法写点）→一次 commit 返五键；§8.1.6 mock 步骤 3 抛错钉住整体回滚零变更。§8.1.9 恢复默认后 `PRAGMA foreign_key_check` 零新增违规。
+- 迁移脚本幂等实测：临时库注入旧形制 RUN1（加列+回填 14 预设/1 副本、`is_noop=False`）→ RUN2（`[SKIP]` no-op、`is_noop=True`、数据零变）；`integrity_check` 只告警；14 名独立硬编码与 presets.py 一致性断言；7 条脚本证据测试。
+- 接力额外修的运行时缺陷：`_relink_budget_categories` 原 `int(row[0])` 在 SQLModel 标量返回下、恰在 UNIQUE 冲突去重分支抛 TypeError（既有用例全走「改指」分支未暴露）→ 改绑标量 + 新增 `test_restore_default_relink_dedups_already_linked_budget` 锁分支。
+- 认可的偏离（4 条，口径承载不扩权，详见提交 notes）：① 黄金链路 §8.1.3 取「换图标」形态（改名/改序与 `merged_presets==1` 互斥，序尾记覆盖改序、独立用例覆盖改名入自建）；② 恢复成功 toast 因响应拦截器只回传 `res.data`（后端 message 到不了页面）→ 前端 `restoreResultMessage` 优先 `result.message`、缺失按后端逐字口径本地拼五键（同 `importResultMessage` 范式，后端拼装仍 §8.1.3 断言）；③ import_service 首处 `Category(...)` 为容 source 注释改多行（kwargs 未动）；④ `computeRestoreCounts` 置 `<script setup>` 内经 `wrapper.vm` 断言（本仓无具名导出先例）。
+- manual_items（见待人工清单④ + 发布备忘）：现场库迁移窗口（备份→停服→**先于新版**执行→起新版）；REQ-003/004/005 真机观感（拖拽/改名/换图标后徽章不丢、删副本重建同名无徽章、恢复默认后定制回原状账单仍挂该分类、自建删除账单归「其他」、总数不变）；已知边界「v1.4.2 前同名删除重建历史自建行回填 `source=1`」随条目公告。
+- fixed_rounds: 1（vitest 8.2.4b 口径）；后端 :503 修复在前手会话内完成。9.5（迁移窗口说明）属主 Agent 发布备忘登记项，已勾入本处发布备忘，任务文件该项按红线留人工不代勾。
+
 ## 阻塞清单
 
-- **M2（触顶中断，接力处理中）**：首手子 Agent 达 150 轮上限截断于「五步事务」写作中，0/51 勾选；后端半成品已在场（models/schemas/category、category_service +250、routers/categories、main.py presets import、import_service 三处 `source=0` @@382/1293/1639、新 presets.py + 迁移脚本 + test_category_source.py）。按 E4 派收尾 Agent：审计前手 → 补全前后端 → 全绿 → 勾选 → 精确提交；M3/M4 待接力完成后派发。非失败阻塞，暂不触发 §五 第 3 条回滚。
+- **（已解除）M2 触顶中断 → E4 接力成功**：首手子 Agent 达 150 轮上限截断于「五步事务」写作中，0/51 勾选；后端半成品已在场。主 Agent 按 E4 派收尾接力 Agent：审计前手（后端半区完整保留续用）→ 补全前端半区（徽章/删除钮改读 source、D6 弹窗 N/M、computeRestoreCounts 纯判据、既有徽章用例改写）→ 全门禁绿 → 50/51 勾选 → pathspec 提交 `87afda2`（13 文件 +2042/−92）。核验见下「M2 执行记录」。**未触发 §五 第 3 条回滚**（接力在 3 轮预算内完成）。M3、M4 已随之并行派发（`import_service.py` / `main.py` 此时无对向写者）。
+- 当前无活跃阻塞。M3、M4 在途。
 
 ## 待人工抽检清单（子 Agent 不勾选，执行时逐条抄录原文）
 
@@ -175,3 +189,8 @@
 - [ ] ② 横屏收起/展开图标列真机点验与截图（REQ-010/011，M5 §5.4；含 rail 计算宽 72px、无文字残留/无横向滚动条、悬停提示真实出现三项）
 - [ ] ③ 关于页深浅主题目检（REQ-009，M4 §5.6）
 - [ ] ④ 现场库发布窗口：`migrate_to_v1.4.4_source.py` 先备份→停服→执行→起新版（M2 迁移，沿发布备忘流程）
+
+M2 执行期补抄（子 Agent manual_items 原文）：
+- [ ] ⑤ REQ-003/004/005 真机观感：拖动/改名/换图标后徽章不丢、刷新仍在、自建无徽章；删副本重建同名无徽章；恢复默认后定制回原状且其账单仍挂该分类、自建删除账单归「其他」、恢复前后账单总数不变（M2 逻辑判据已由 §8.1/§8.2 双表 + 五步事务测试覆盖，P4 浏览器实测②覆盖弹窗 N/M 数字与黄金链路，真机目检留人工终判）
+- [ ] ⑥ M2 已知边界复核：v1.4.2 前「同名删除重建」历史自建行回填 `source=1`（显示「预设」徽章）——随版本条目公告，用户是否接受此历史数据表现
+- [ ] ⑦ D8 后果复核项（随人工清单一并呈报）：预设定制无单点回退（反悔只能「恢复默认」全量丢弃）是否改变主意；执行期未加回退入口（用户裁定 a=维持）
