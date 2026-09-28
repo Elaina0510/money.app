@@ -9,6 +9,11 @@ class CategoryMappingItem(BaseModel):
     action: str = Field(..., pattern="^(map|create)$")
     target_id: int | None = None  # Required when action="map"
     type: str | None = None  # Required when action="create" (expense/income)
+    # v1.4.4 M3（D10 / REQ-007）：仅 `action="create"` 生效的自定义新建分类名。
+    # **可选**：前端只在用户真的编辑过名称输入框时才发（未编辑载荷与旧版逐字一致）；
+    # 缺席 / `None` / 全空白 → 由服务层回退行内原分类名（`import_service`）。
+    # 既有废弃字段 `type` 按红线原样保留、不删。
+    name: str | None = None
 
 
 class TagMappingItem(BaseModel):

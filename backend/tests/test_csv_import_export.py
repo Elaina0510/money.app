@@ -13,6 +13,11 @@ v1.4.4 三条用户新裁定（V2/V3）同步改写了本文件的既有口径�
   * **V3 分类**：映射落空 / 值为空或 `/` / 未选归入 → 自动同名匹配 → 挂「其他」，
     不再整行跳过（`test_import_skips_unmapped_rows`、§5.5 后半、§5.6、§5.8 的
     `category_unresolved` 期望值按此改写；五键结构与其余键的计数一字未动）。
+
+v1.4.4 M3（REQ-007 / D10，任务 §5.1–§5.5）追加 `TestCsvM3CreateName` 类：分类映射
+`create` 载荷的可选自定义名（建类落名用自定义名、memo 键仍是文件内原分类名、空回退
+原分类名、同名复用、无 `name` 的旧载荷与 boot3 终验逐字一致）。**既有本文件的用例一字
+未改**——回归锚与新契约同文件并列，任何放宽都会立刻显形。
 """
 
 from pathlib import Path
@@ -21,6 +26,8 @@ import pytest
 from httpx import AsyncClient
 
 from app.models.category import Category
+from app.schemas.import_ import CategoryMappingItem
+from app.services import import_service
 
 pytestmark = pytest.mark.asyncio
 
@@ -1295,3 +1302,199 @@ class TestCsvV144Decisions:
             "tags_in_file",
             "warnings",
         ]
+
+
+# ── v1.4.4 M3：分类映射 create 可自定义新建名（REQ-007 / D10，任务 §5.1–§5.5）──
+#
+# 表头沿用本文件既有的 native 六列口径（`amount,type,category_name,tag_name,consume_time,note`），
+# 数据行一律合成。分类值刻意取预设表里没有、也不会被 V3 双向包含误命中的名字（`外卖`/`夜宵`/`水果`/
+# `零食`），这样「落库出来的分类」只可能由本次载荷决定。
+
+NATIVE_HEADER_M3 = "amount,type,category_name,tag_name,consume_time,note"
+
+
+def _native_csv_m3(*rows: str) -> bytes:
+    """native 六列表头 + 合成数据行 → 字节（预览/确认两步都吃这份）。"""
+    return ("\n".join((NATIVE_HEADER_M3, *rows))).encode("utf-8")
+
+
+class TestCsvM3CreateName:
+    """M3 落库层：`create` 分支的自定义分类名（D10）+ 旧载荷向后兼容回归锚。"""
+
+    async def test_5_1_create_payload_custom_name_lands_verbatim(
+        self, auth_client: AsyncClient
+    ):
+        """§5.1 `{action:'create', name:'买菜'}` → 建类名**逐字**「买菜」、账单归入、列表可见。"""
+        data = await _preview(
+            auth_client,
+            _native_csv_m3("50.0,expense,外卖,,2024-01-15 12:00,午餐"),
+        )
+        body = await _confirm(
+            auth_client,
+            data["cache_id"],
+            "native",
+            category_mapping={"外卖": {"action": "create", "name": "买菜"}},
+        )
+        assert body["code"] == 0, body["message"]
+        assert body["data"]["imported_count"] == 1
+
+        rows = await _records(auth_client)
+        assert len(rows) == 1
+        names = [c["name"] for c in await _categories(auth_client)]
+        assert "买菜" in names, "GET /api/categories 可见自定义名分类"
+        assert "外卖" not in names, "类目落名用自定义名：不再另建一行原分类名"
+        created = next(c for c in await _categories(auth_client) if c["name"] == "买菜")
+        assert rows[0]["category_id"] == created["id"], "账单归入新建的「买菜」"
+        assert created["type"] == "expense", "占位 type（D2）与自定义名无冲突"
+
+    async def test_5_2_blank_name_falls_back_to_in_file_category(
+        self, auth_client: AsyncClient
+    ):
+        """§5.2 `name:"  "`（全空白）→ 回退行内原分类名建类（不报错、不跳过）。"""
+        data = await _preview(
+            auth_client,
+            _native_csv_m3("28.0,expense,夜宵,,2024-01-15 21:00,夜宵"),
+        )
+        body = await _confirm(
+            auth_client,
+            data["cache_id"],
+            "native",
+            category_mapping={"夜宵": {"action": "create", "name": "  "}},
+        )
+        assert body["code"] == 0, body["message"]
+        assert body["data"]["imported_count"] == 1, "空白名不丢行"
+
+        rows = await _records(auth_client)
+        names = [c["name"] for c in await _categories(auth_client)]
+        assert "夜宵" in names and "  " not in names, "按原分类名建类"
+        night_id = next(c["id"] for c in await _categories(auth_client) if c["name"] == "夜宵")
+        assert rows[0]["category_id"] == night_id
+
+    async def test_5_3_legacy_payload_without_name_matches_boot3_verbatim(
+        self, auth_client: AsyncClient
+    ):
+        """§5.3 回归锚：不带 `name` 的旧载荷 → 与 boot3 终验**逐字一致**。
+
+        同一份文件走两次导入（两个 cache_id）：一次发旧形状 `{action:'create'}`（无 `name`
+        键），一次显式发 `name: None`（新 schema 的缺省形态）。两次的分类落名与账单归属
+        **必须完全相同**，且都等于文件内原分类名——即「新字段缺席 = 旧行为」这条不变量。
+        """
+        raw = _native_csv_m3(
+            "50.0,expense,水果,,2024-01-15 12:00,苹果",
+            "30.0,expense,零食,,2024-01-16 12:00,薯片",
+        )
+        legacy = {"水果": {"action": "create"}, "零食": {"action": "create"}}
+        explicit_none = {
+            "水果": {"action": "create", "name": None},
+            "零食": {"action": "create", "name": None},
+        }
+
+        first = await _preview(auth_client, raw)
+        body_first = await _confirm(
+            auth_client, first["cache_id"], "native", category_mapping=legacy
+        )
+        assert body_first["code"] == 0, body_first["message"]
+        assert body_first["data"]["imported_count"] == 2
+        after_legacy = sorted(c["name"] for c in await _categories(auth_client))
+        rows_legacy = {r["note"]: r["category_id"] for r in await _records(auth_client)}
+
+        second = await _preview(auth_client, raw)
+        body_second = await _confirm(
+            auth_client, second["cache_id"], "native", category_mapping=explicit_none
+        )
+        assert body_second["code"] == 0, body_second["message"]
+        assert body_second["data"]["imported_count"] == 2
+        after_none = sorted(c["name"] for c in await _categories(auth_client))
+        rows_none = {r["note"]: r["category_id"] for r in await _records(auth_client)}
+
+        # 两次导入的落库分类集合完全相同（`name` 缺席 / 显式 null 都不改变落名）
+        assert after_legacy == after_none
+        assert {"水果", "零食"} <= set(after_legacy)
+        assert not {"None", ""} & set(after_legacy), "绝不建出空名/字面 None 的分类"
+        # 账单归属逐字一致（同名复用 → 第二次的两行并进第一次已建的同一批 id）
+        assert rows_legacy == rows_none, "无 name 载荷与 name:None 载荷结果逐字一致"
+        assert len(rows_legacy) == 2
+
+        # 契约层：`name` 是**可选**字段、缺省 None（旧前端不发也能过校验）
+        assert CategoryMappingItem(action="create").name is None
+        assert CategoryMappingItem.model_validate({"action": "create"}).name is None
+        # 服务层清洗：None → ""（空即「没改名」，由调用方回退原分类名）
+        assert import_service._clean_create_name(None) == ""
+
+    async def test_5_4_custom_name_equal_to_existing_category_reuses_it(
+        self, auth_client: AsyncClient
+    ):
+        """§5.4 `name` 与既有分类同名 → 复用既有 id，不新建、不报错（后端兜底不新增 400）。"""
+        existing_id = await _new_category(auth_client, "买菜")
+        data = await _preview(
+            auth_client,
+            _native_csv_m3("50.0,expense,外卖,,2024-01-15 12:00,午餐"),
+        )
+        body = await _confirm(
+            auth_client,
+            data["cache_id"],
+            "native",
+            category_mapping={"外卖": {"action": "create", "name": "买菜"}},
+        )
+        assert body["code"] == 0, "重名 create 不报 400（与现状同名语义一致）"
+        assert body["data"]["imported_count"] == 1
+
+        rows = await _records(auth_client)
+        assert rows[0]["category_id"] == existing_id, "同名即复用既有行"
+        assert (
+            len([c for c in await _categories(auth_client) if c["name"] == "买菜"]) == 1
+        ), "不重复建类"
+
+    async def test_5_5_same_in_file_name_twice_creates_one_custom_category(
+        self, auth_client: AsyncClient
+    ):
+        """§5.5 同批两行原分类名相同 + 自定义名「买菜」→ 仅建一个「买菜」（memo 键口径）。"""
+        data = await _preview(
+            auth_client,
+            _native_csv_m3(
+                "20.0,expense,外卖,,2024-01-15 12:00,早餐",
+                "30.0,expense,外卖,,2024-01-16 13:00,午餐",
+            ),
+        )
+        body = await _confirm(
+            auth_client,
+            data["cache_id"],
+            "native",
+            category_mapping={"外卖": {"action": "create", "name": "买菜"}},
+        )
+        assert body["code"] == 0, body["message"]
+        assert body["data"]["imported_count"] == 2
+
+        cats = await _categories(auth_client)
+        created = [c for c in cats if c["name"] == "买菜"]
+        assert len(created) == 1, "同批两行仍只建一个自定义分类"
+        assert not [c for c in cats if c["name"] == "外卖"], "原分类名不另建行"
+        rows = await _records(auth_client)
+        assert {r["category_id"] for r in rows} == {created[0]["id"]}, "两行同指「买菜」"
+
+    async def test_5_5b_memo_keyed_by_in_file_name_while_category_lands_custom_name(
+        self, auth_client: AsyncClient, db_session, auth_user
+    ):
+        """§5.5 服务层直证：**memo 键 = 文件内原分类名、memo 值/类目落名 = 自定义名**。
+
+        HTTP 用例只能看到结果，这条按任务口径把 `_resolve_row_category` 的 `memo` 摊开断言——
+        键写成自定义名会让同批的匹配键错位（行值 `外卖` 第二次进来查不到 memo → 重复走链）。
+        """
+        memo: dict[str, int] = {}
+        mapping = {"外卖": {"action": "create", "name": "买菜"}}
+        first = await import_service._resolve_row_category(
+            db_session, auth_user.id, "外卖", mapping, None, memo
+        )
+        second = await import_service._resolve_row_category(
+            db_session, auth_user.id, "外卖", mapping, None, memo
+        )
+        await db_session.commit()
+
+        assert first == second, "同值二次解析复用 memo"
+        assert list(memo) == ["外卖"], "memo 键是文件内原分类名，不是自定义名"
+        assert memo["外卖"] == first
+
+        cats = await _categories(auth_client)
+        names = [c["name"] for c in cats]
+        assert names.count("买菜") == 1 and "外卖" not in names
+        assert {c["id"] for c in cats if c["name"] == "买菜"} == {first}, "落名用自定义名"

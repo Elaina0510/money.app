@@ -515,12 +515,38 @@ def _authoritative_role_index(
     return resolved
 
 
+def _clean_create_name(raw: str | None) -> str:
+    """v1.4.4 M3（D10 / REQ-007）：`create` 载荷里自定义分类名的清洗。
+
+    口径只有两条：``None`` → ``""``、去首尾空白。**不做**归一化（NFKC / 折空白 / 大小写
+    是 V3 自动匹配 `_normalize_category_name` 的事，建类落名要保留用户逐字输入），
+    也**不**判空报错——空串的含义是「没改名」，由调用方回退行内原分类名。
+    """
+    if raw is None:
+        return ""
+    return raw.strip()
+
+
 async def _apply_category_action(
-    db: AsyncSession, user_id: int | None, name: str, action: Any, target_id: Any
+    db: AsyncSession,
+    user_id: int | None,
+    name: str,
+    action: Any,
+    target_id: Any,
+    create_name: str | None = None,
 ) -> int | None:
-    """把一个 `CategoryMappingItem` 形状的载荷落成 category_id；落不了 → ``None``。"""
+    """把一个 `CategoryMappingItem` 形状的载荷落成 category_id；落不了 → ``None``。
+
+    `create_name`（v1.4.4 M3 / D10）= 载荷里用户自定义的新建分类名，**仅 `create` 分支用**：
+    清洗后非空即拿它建类，为空（缺席 / `None` / 全空白）即回退行内原分类名 `name`——
+    回退口径不报错、不跳过（REQ-007「空按预填值」）。回退后仍为空（原分类名本身空或
+    `/`，D31）才返回 ``None``，由调用方继续走 V3 兜底链（自动匹配 → 「其他」）。
+    """
     if action == "create":
-        if not name:
+        # v1.4.4 M3：类目落名 = 自定义名 or 行内原分类名；**批内 memo 键仍是行内原分类名**
+        # （见 `_resolve_row_category`），故同批多行原分类名相同时仍复用同一个新建分类。
+        created = _clean_create_name(create_name) or name
+        if not created:
             # fallback_category 只能沿用行内的分类名；空名（含 `/`，D31）不猜、
             # 不建出名为 `/` 的分类。落空后由调用方继续走 V3 链（自动匹配 → 「其他」），
             # 不再整行跳过。
@@ -528,7 +554,8 @@ async def _apply_category_action(
         # v1.4.3 M8：type 恒写占位值（分类收支共用，映射载荷不再携带 type）；
         # 同名即复用（见 _resolve_or_create_category）。现状登记：此处不设
         # sort_order（默认 0）、未经 _next_sort_order——本期不扩范围。
-        return await _resolve_or_create_category(db, user_id, name)
+        # v1.4.4 M3 后端兜底：绕过前端直发重名 create 也走同名复用，**不新增 400**。
+        return await _resolve_or_create_category(db, user_id, created)
     return _as_int(target_id)
 
 
@@ -685,7 +712,15 @@ async def _resolve_row_category(
         mapped = category_mapping.get(cat_name)
         if mapped:
             category_id = await _apply_category_action(
-                db, user_id, cat_name, mapped.get("action"), mapped.get("target_id")
+                db,
+                user_id,
+                cat_name,
+                mapped.get("action"),
+                mapped.get("target_id"),
+                # v1.4.4 M3（D10）：自定义新建分类名，仅 `create` 分支生效；**memo 的键仍是
+                # 文件内原分类名 `cat_name`**（下方 `memo[cat_name]`），类目落名才用自定义名。
+                # `fallback_category` 分支不传（前端从不为「账单归入」发 name）→ 与旧版逐字一致。
+                mapped.get("name"),
             )
     if category_id is None and fallback_category:
         category_id = await _apply_category_action(
