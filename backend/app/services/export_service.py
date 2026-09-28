@@ -36,8 +36,14 @@ async def export_csv(
     categories = {row[0]: row[1] for row in cat_result.fetchall()}
 
     # Fetch all tags for lookup（同上：tags 也存在全局行）
+    # v1.4.4 M0（D2）：软删标签对用户「不存在」→ 追加 `AND deleted_at IS NULL`，
+    # 其账单行的 tag_name 自然落 ""。OR 两段**必须括号包住**：否则 AND 优先级会把
+    # `user_id IS NULL` 分支与 deleted_at 条件错配，全局预设标签行会丢名字。
     tag_result = await db.execute(
-        text("SELECT id, name FROM tags WHERE user_id = :uid OR user_id IS NULL"),
+        text(
+            "SELECT id, name FROM tags "
+            "WHERE (user_id = :uid OR user_id IS NULL) AND deleted_at IS NULL"
+        ),
         {"uid": user_id},
     )
     tags = {row[0]: row[1] for row in tag_result.fetchall()}

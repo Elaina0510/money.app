@@ -526,10 +526,12 @@ async def _enrich_record(db: AsyncSession, record: Record) -> dict[str, Any]:
         category_icon = category.icon
 
     # Get single tag (v1.1: one-to-one)
+    # v1.4.4 M0（D2）：软删标签对用户「不存在」——一处收口，账单列表/详情/编辑回填
+    # /创建返回均经本函数，软删行保持 tag_info=None（响应里该行 tag 落 null）。
     tag_info = None
     if record.tag_id:
         tag = await db.get(Tag, record.tag_id)
-        if tag:
+        if tag and tag.deleted_at is None:
             tag_info = {
                 "id": tag.id,
                 "name": tag.name,

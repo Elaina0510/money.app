@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlmodel import case, func, select, text
+from sqlmodel import case, col, func, select, text
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.category import Category
@@ -147,6 +147,9 @@ async def get_tag_stats(
             Record.consume_time >= start_date,
             Record.consume_time <= end_filter,
             Record.tag_id.isnot(None),
+            # v1.4.4 M0（D2）：软删标签对用户「不存在」——不成组；响应结构零变化。
+            # col(...) 同 tag_service 既有写法，与 `Tag.deleted_at.is_(None)` 等价（mypy 零新增）。
+            col(Tag.deleted_at).is_(None),
         )
         .group_by(Tag.name)
         .order_by(func.sum(Record.amount).desc())
