@@ -115,6 +115,11 @@ python migrate_to_v1.4.3.py     # v1.4.3 分类收支共用重构 + 预算命名
 #   UPDATE records SET tag_id=NULL WHERE tag_id IS NOT NULL AND tag_id NOT IN (SELECT id FROM tags);
 python migrate_to_v1.4.3boot2_dormant.py    # v1.4.3-boot2 budgets.dormant 列 —— 必须先于新版后端启动
 python migrate_to_v1.4.3boot2_categories.py # v1.4.3-boot2「其他支出/收入」归并为单一「其他」（与上者顺序可换）
+python migrate_to_v1.4.4_source.py /完整路径/money.db  # v1.4.4 categories.source 出身列 —— 必须先于新版后端启动
+# ↑ 该脚本**不读 `DATABASE_URL`**，缺省只认当前目录下的 `./money.db`：请在 backend 目录内执行，
+#   或像上面一样显式传库文件路径，否则可能改到意料之外的库。已跑过的库再跑是 `[SKIP]` no-op。
+#   已知边界：v1.4.2 之前「删除预设后同名重建」的历史自建行会被回填为预设出身（显示「预设」徽章）；
+#   再删除并以同名重建一次即归位自建（无徽章）。新产生的数据不受此影响。
 ```
 
 ## Project Structure
